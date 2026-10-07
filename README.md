@@ -12,14 +12,15 @@ The performance runs in three movements:
 
 1. **Listening.** Dance and drums in near darkness. The projection shows the profiling machinery warming up: the questionnaire answers arriving, the five personality scores (the OCEAN or Big Five model) being computed, the audience sorted into clusters.
 2. **Pleasing.** The duo steers the piece toward what the profiles say this room wants: tempo, density, color, imagery. The projection follows the opted-in preferences. The aim is to be liked, extremely.
-3. **Overreach.** The machine starts to share. Cluster labels, predictions, the kind of ad each group "would respond to", all aimed at the room as a whole. It says more than anyone is comfortable with. The method is on the wall, and so is its creepiness.
+3. **Overreach.** The machine starts to share. Cluster labels, predictions, the kind of ad each group "would respond to", all aimed at the room as a whole. It says more than anyone is comfortable with. The method is on the wall, and so is its creepiness. It also shows how the room said yes, for example "most of you ticked the box in under 4 seconds".
 
 ## Consent model
 
 This is a hard rule of the piece, not a detail.
 
-- **Consent at the threshold.** The RSVP and a sign-in at the door say plainly: this show reads and profiles its audience. Attending with a profile is the opt-in.
-- **Declining is easy.** Anyone can skip the questionnaire and still watch. They are simply not in the data.
+- **A checkbox in the RSVP.** Like terms and conditions, but short and plain: two or three sentences right next to the box, saying the show will profile the people who tick it. The box starts unticked. Ticking it is the opt-in.
+- **Reminder at the door.** A sign at the entrance repeats the same sentences.
+- **Declining is easy.** Anyone can leave the box unticked or skip the questionnaire and still watch. They are simply not in the data.
 - **Only volunteered data.** Nothing is taken from phones, Wi-Fi, Bluetooth or the room's signals. No one is looked up online. The only input is what each person types into the questionnaire themselves.
 - **No names on the wall.** Results are shown as clusters and room-level numbers, never as a named or recognisable person.
 - **Deleted after the show.** Answers are kept only for the night and wiped at the end. The audience is told this too.
@@ -36,7 +37,7 @@ The provocation lands harder this way: they agreed, and it still felt like too m
 ## Technical sketch
 
 ```
-RSVP / door sign-in (consent text)
+RSVP with an unticked consent checkbox (plain text next to it)
         |
         v
 Short questionnaire on the guest's own phone (opt-in, about 10 questions)
@@ -57,7 +58,7 @@ Projection (Isadora)   Cue sheet for dancer and drummer
 Wipe all answers after the show
 ```
 
-- **Questionnaire:** a simple web form on a local network or a short link, using a public short Big Five inventory (for example the 10-item TIPI). Each submission gets a random id, no name.
+- **Questionnaire:** a simple web form on a local network or a short link, using a public short Big Five inventory (for example the 10-item TIPI). Each submission gets a random id, no name. The RSVP also logs how long each person took to tick the box, with no name attached, only for the room-level number in the overreach scene. It is deleted with everything else.
 - **Scoring and clustering:** a small script on the laptop turns answers into five scores and groups the room into a few clusters.
 - **Language model (optional):** writes the dashboard text and the "overreach" lines from the room-level numbers only.
 - **Projection:** Isadora reads the room profile (for example over OSC) and shifts color, tempo of the imagery and footage choice.
