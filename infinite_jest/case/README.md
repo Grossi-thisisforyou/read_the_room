@@ -20,13 +20,13 @@ with no supports.
 | `print/cage_case.scad` | OpenSCAD source; every size is a variable at the top | |
 
 Look: the walls are vertical bars (Bacon's curtain streaks), the lid has a
-space-frame box in raised ribs, Basquiat's crown, and INFINITE JEST lettered
+space-frame box in raised ribs, J R A in scrawled caps, and INFINITE JEST lettered
 upside down (Baselitz). DARK DATA / CUSTOM MADE INTIMACY / IN ART WE TRUST
 are pressed into the underside.
 
 Print settings: **PETG or ASA, matte black** (not PLA, which softens around
 55 C next to a warm Pi), 0.2 mm layers, 3 walls, 20 % infill, no supports.
-Base floor-down, lid flat with the crown facing up.
+Base floor-down, lid flat with the letters facing up.
 
 Hardware: official Pi 5 Active Cooler and 27 W supply, 4x M2.5 x 6 mm
 self-tapping screws (Pi to standoffs), 4x M3 x 12 mm self-tapping screws (lid

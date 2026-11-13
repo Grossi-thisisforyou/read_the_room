@@ -1,11 +1,11 @@
 // INFINITE JEST · Raspberry Pi 5 cage case
 // ------------------------------------------------------------
 // A printed cage for the Pi, after Bacon's space frames and curtain
-// streaks, Basquiat's crown and Baselitz's upside-down lettering.
+// streaks, Basquiat's scrawled caps and Baselitz's upside-down lettering.
 //
 // Two parts, both print flat with no supports:
 //   part = "base";  // tray with cage walls, cable tie bars, screw ears
-//   part = "lid";   // flat lid: curtain bars, space-frame ribs, crown, text
+//   part = "lid";   // flat lid: curtain bars, space-frame ribs, J R A, text
 //
 // Export from the command line:
 //   openscad -D 'part="base"' -o cage_base.stl cage_case.scad
@@ -204,9 +204,9 @@ module lid() {
         rib(back[i],  back[(i + 1) % 4]);
         rib(front[i], back[i]);
     }
-    // crown, raised, sitting on the frame's top edge
-    translate([fx0 + 6, fy1 + dy + 1.5, 0]) linear_extrude(lid_t + rib_h + 1)
-        difference() { crown2d(26, 9); offset(-1.6) crown2d(26, 9); }
+    // J R A, raised and scrawled, sitting on the frame's top edge
+    translate([fx0 + 10, fy1 + dy + 0.5, 0]) linear_extrude(lid_t + rib_h + 1)
+        scrawl_text("J R A", 8);
     // lettering on the wide band, upside down after Baselitz
     translate([outer_x / 2 + 30, text_band / 2 + 2.5, lid_t - 0.01]) rotate(180)
         linear_extrude(1.2) scrawl_text("INFINITE JEST", 6.2);
