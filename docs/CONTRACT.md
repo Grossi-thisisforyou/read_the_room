@@ -1,6 +1,6 @@
 # Infinite Jest: interface contract
 
-Version 1.1 (2026-11-13). Owner: the master-plan thread. Any change to this file
+Version 1.2 (2026-11-13). Owner: the master-plan thread. Any change to this file
 goes through a PR, and every module thread is told when it changes.
 
 This is the one place that says how the parts of *Infinite Jest* talk to each
@@ -54,7 +54,8 @@ Use the IP `192.168.1.10` in the phone app. mDNS on the N900 is unreliable.
 | 8765 | HTTP POST | `/api/frame` | fallback for frames: body is one `frame` envelope |
 | 8765 | HTTP GET | `/phone/` | static files from `infinite_jest/phone/` |
 | 8765 | HTTP GET | `/status` | JSON health: clients connected, phase, fps, last sensor ts |
-| 8766 | UDP | n/a | optional fast lane for the N900: one JSON envelope per datagram, `type` must be `sensor` |
+| 8766 | UDP | n/a | N900 sensor lane (recommended: Python 2.5 has no WebSocket client): one JSON envelope per datagram, `type` `sensor`, add `data.seq` |
+| 8767 | TCP | n/a | N900 camera lane: a `gst-launch-0.10 ... jpegenc ! tcpclientsink` stream of back-to-back JPEGs; the engine splits on SOI/EOI markers and treats each as a `frame` with `fmt: jpeg` |
 
 One aiohttp server serves 8765. The engine thread owns it.
 
