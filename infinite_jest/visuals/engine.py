@@ -2,14 +2,15 @@
 
 Layers, back to front (all drawn at a low internal resolution, then scaled):
   1. ground   flat saturated field + floor band + dais (Bacon), or white wall
-              with colour patches (Basquiat), or near-black pulse (void)
+              with painted-over patches (scrawl), or near-black pulse (void)
   2. paint    a persistent canvas of raw strokes sampled from the visitor's
               colours: the longer someone stays, the more of them is painted
   3. figure   the visitor from the N900 camera, smeared along a flow field,
               twisted at the face, mapped to flesh colours; upside-down for
               the Baselitz hook, mirrored and huge for the mirror hook
   4. cage     a rotating space-frame box around the figure
-  5. scrawl   hand-drawn words, crowns, (c) marks, crossings-out, ribs, skulls
+  5. scrawl   hand-drawn words, crossings-out, reticles, barcodes, tallies,
+              redaction bars, face-detection brackets
   6. finish   scan line while profiling, flicker and slice glitches with
               neuroticism, grain
 
@@ -32,11 +33,11 @@ HOOKS = ("flesh", "scrawl", "inverted", "mirror", "void")
 
 # Words for when the profiler sends none. Dark data and custom-made intimacy.
 LEX_TENDER = ["MADE FOR YOU", "STAY", "ONLY YOU", "WE SAW YOU", "YOURS", "TAILORED",
-              "SKIN", "CLOSER", "YOU ARE SEEN", "INTIMACY ©", "FOR YOU ONLY", "HOLD STILL",
+              "SKIN", "CLOSER", "YOU ARE SEEN", "INTIMACY", "FOR YOU ONLY", "HOLD STILL",
               "KEEP LOOKING", "WE LIKE THIS ONE", "SOFT TARGET"]
 LEX_COLD = ["DATA", "PROFILE", "SUBJECT", "HARVEST", "SCORE", "PREDICTED", "CONSENT",
             "SAMPLE", "OPTED IN", "TARGET", "RETAINED", "LEAKED", "SEGMENT", "HOOKED",
-            "MEAT ©", "PROPERTY OF", "MONETIZE", "NO NAME", "BEHAVIOUR"]
+            "MEAT", "PROPERTY OF", "MONETIZE", "NO NAME", "BEHAVIOUR"]
 LEX_JEST = ["INFINITE", "JEST", "ENTERTAINMENT", "LOOP", "MORE", "AGAIN", "ONE MORE",
             "THE ENTERTAINMENT", "DONT LOOK AWAY", "PLEASURE"]
 LEX_IDLE = ["NOBODY", "WAITING", "EMPTY ROOM", "NEXT", "COME IN", "WE ARE READY"]
@@ -84,7 +85,14 @@ class Visuals:
         self.ground_key = None
         self.lut = None
         self.lut_key = None
-        self.bank = self._load_bank(config.get("bank_dir"))
+        self.bank_dir = config.get("bank_dir")
+        self.bank_max = int(config.get("bank_max_per_hook", 40))
+        self.bank = self._load_bank(self.bank_dir)
+        self.bank_loaded = time.monotonic()
+        # while a visitor is present, keep this file fresh so the overnight image
+        # generator (bank_gen) pauses and leaves the CPU to picture and sound
+        self.busy_file = config.get("busy_file", "/tmp/infinite_jest_busy")
+        self.busy_touched = 0.0
         # gliding look parameters
         self.p = dict(fig_alpha=0.0, smear=6.0, twist=0.0, swipe=0.0, cage=0.7, cage_jit=0.2,
                       stroke_rate=0.0, flicker=0.0, glitch=0.0, flip=0.0, scale=1.0,
@@ -107,6 +115,22 @@ class Visuals:
             self.on_wipe()
         self.state = state
         self._read_tilt(state)
+        self._busy(state.get("phase", "idle") not in ("idle", None))
+
+    def _busy(self, busy):
+        if not self.busy_file:
+            return
+        now = time.monotonic()
+        try:
+            if busy and now - self.busy_touched > 5:
+                with open(self.busy_file, "a"):
+                    os.utime(self.busy_file, None)
+                self.busy_touched = now
+            elif not busy and self.busy_touched:
+                os.remove(self.busy_file)
+                self.busy_touched = 0.0
+        except OSError:
+            pass
 
     def on_sensor(self, data):
         """Optional: raw phone sensor dict (contract kind "phone")."""
@@ -151,6 +175,9 @@ class Visuals:
         self.fig.wipe()
         self.extra_words = []
         self.wipe_t = self.t
+        if time.monotonic() - self.bank_loaded > 600:  # pick up new overnight images
+            self.bank = self._load_bank(self.bank_dir)
+            self.bank_loaded = time.monotonic()
 
     def render(self, surface, dt):
         t0 = time.perf_counter()
@@ -338,11 +365,18 @@ class Visuals:
         else:
             self.low.blit(fs, r.topleft)
         if self.hook == "scrawl":
-            # Basquiat body: bones drawn over the figure
+            # the machine's reading of the body, scratched on by hand
             ink = self.pal[0]
             rng = random.Random(int(self.t * 3))
-            scrawl.draw_skull(self.low, r.centerx, r.top + r.h * 0.22, r.w * 0.2, ink, rng, 2)
-            scrawl.draw_ribs(self.low, r.centerx, r.top + r.h * 0.62, r.w * 0.45, ink, rng, 2)
+            fx, fy = self.fig.face
+            fx = r.left + fx / self.fig.w * r.w
+            if self.p["flip"] > 0.5:
+                fy = self.fig.h - fy
+            fy = r.top + fy / self.fig.h * r.h
+            fw = r.w * 0.42
+            scrawl.draw_face_box(self.low, (fx - fw / 2, fy - fw * 0.6, fw, fw * 1.2), ink, rng, 2,
+                                 "%.2f" % (0.5 + 0.45 * self.inten), 9)
+            pygame.draw.line(self.low, ink, (r.left + r.w * 0.1, r.top + r.h * 0.7), (r.right - r.w * 0.1, r.top + r.h * 0.7), 1)
 
     def _draw_paint(self, dt):
         # fade the stroke canvas; slower while the visitor is held by the hook
@@ -482,9 +516,9 @@ class Visuals:
     def _ink(self):
         p = self.pal
         if self.hook == "scrawl":
-            return random.choice([p[0], p[0], p[0], p[3], (210, 40, 30), (245, 205, 60)])
+            return random.choice([p[0], p[0], p[0], p[0], p[1], p[3]])
         light = sum(p[2]) / 3 > 140
-        return random.choice([p[0], p[0], p[1]] if light else [p[4], p[4], (245, 205, 60), p[3]])
+        return random.choice([p[0], p[0], p[1]] if light else [p[4], p[4], p[4], p[3]])
 
     def _add_mark(self):
         W, H = self.TW, self.TH
@@ -495,11 +529,19 @@ class Visuals:
         fr = self._fig_rect()
         r = pygame.Rect(int(fr.x * k), int(fr.y * k), int(fr.w * k), int(fr.h * k))
         roll = rng.random()
-        if roll < 0.08 + 0.1 * oc["E"]:
+        if roll < 0.06 + 0.08 * oc["E"]:
             x = rng.uniform(40 * k, W - 40 * k); y = rng.uniform(40 * k, H * 0.45)
             cw = rng.uniform(28, 60) * k
-            scrawl.draw_crown(self.text, x, y, cw, ink, rng, self._lw(3))
-            self._dirty = pygame.Rect(int(x - cw), int(y - cw * 1.2), int(cw * 2), int(cw * 1.6))
+            kind = rng.choice(["reticle", "barcode", "tally", "redact"])
+            if kind == "reticle":
+                scrawl.draw_reticle(self.text, x, y, cw * 0.5, ink, rng, self._lw(2))
+            elif kind == "barcode":
+                scrawl.draw_barcode(self.text, x - cw, y - cw * 0.3, cw * 2, cw * 0.6, ink, rng)
+            elif kind == "tally":
+                scrawl.draw_tally(self.text, x - cw, y - cw * 0.4, cw * 0.8, rng.randint(3, 17), ink, rng, self._lw(2))
+            else:
+                scrawl.draw_redaction(self.text, x - cw, y - cw * 0.2, cw * 2.4, cw * 0.4, ink, rng)
+            self._dirty = pygame.Rect(int(x - cw * 2), int(y - cw * 1.2), int(cw * 5), int(cw * 2.4))
             return
         if roll < 0.13 and oc["O"] > 0.5:
             x0, y0 = rng.uniform(0, W), rng.uniform(0, H)
@@ -519,7 +561,7 @@ class Visuals:
             if self.hook == "scrawl" or not r.inflate(-r.w * 0.3, -r.h * 0.2).colliderect((x, y, tw, size)):
                 break
         if self.hook == "mirror" and self.phase == "hook":
-            word = rng.choice(["YOU", "YOU ©", "STAY", "CLOSER", word])
+            word = rng.choice(["YOU", "ONLY YOU", "STAY", "CLOSER", word])
         bbox = scrawl.draw_text(self.text, word, x, y, size, ink, rng, self.p["jitter"],
                                 self._lw(3 if size > 24 * k else 2),
                                 slant=rng.uniform(-0.15, 0.15) - 0.25 * self.tilt[0])
@@ -527,8 +569,10 @@ class Visuals:
         crossed = rng.random() < 0.08 + 0.3 * oc["N"] + (0.35 if self.phase == "release" else 0)
         if crossed:
             scrawl.cross_out(self.text, bbox, ink, rng, self._lw(3))
-        elif rng.random() < 0.25:
-            scrawl.draw_copyright(self.text, bbox.right + size * 0.5, bbox.top + size * 0.5, size * 0.4, ink, rng, self._lw(2))
+        elif rng.random() < 0.2:
+            # a hand-written record number after the word, like a file tag
+            scrawl.draw_text(self.text, "#%04d" % rng.randrange(10000), bbox.right + size * 0.4, bbox.top + size * 0.35,
+                             size * 0.5, ink, rng, 0.2, self._lw(1))
 
     # ---- wipe and finish --------------------------------------------------
     def _draw_wipe(self):
@@ -586,8 +630,13 @@ class Visuals:
             if not os.path.isdir(d):
                 continue
             imgs = []
-            for fn in sorted(os.listdir(d))[:200]:
-                if fn.lower().endswith((".png", ".jpg", ".jpeg")):
+            files = sorted(f for f in os.listdir(d) if f.lower().endswith((".png", ".jpg", ".jpeg")))
+            # newest half plus a random sample of the rest, bounded for RAM and start-up time
+            half = self.bank_max // 2
+            newest, older = files[-half:] if half else [], files[:-half] if half else files
+            files = newest + random.sample(older, min(len(older), self.bank_max - len(newest)))
+            for fn in files:
+                if True:
                     try:
                         im = pygame.image.load(os.path.join(d, fn))
                         imgs.append(pygame.transform.smoothscale(im, (self.W, self.H)))

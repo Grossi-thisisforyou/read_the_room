@@ -5,7 +5,7 @@
   python3 -m infinite_jest.visuals.demo --image me.jpg  # use a photo as the "camera"
   python3 -m infinite_jest.visuals.demo --webcam        # laptop webcam (needs opencv-python)
   python3 -m infinite_jest.visuals.demo --stills out/   # save PNG stills of every hook, no window
-  python3 -m infinite_jest.visuals.demo --capture a.mp4 --seconds 60 [--audio techno.wav]
+  python3 -m infinite_jest.visuals.demo --capture a.mp4 --seconds 70 --with-audio   # picture + sound in sync
 
 Keys: 1-5 hooks (flesh scrawl inverted mirror void), P cycle phase, W wipe,
 O C E A N raise a trait (shift lowers), V new visitor, F fullscreen, Esc quit.
@@ -219,7 +219,16 @@ def capture(args):
     if args.audio:
         cmd += ["-i", args.audio, "-shortest", "-c:a", "aac", "-b:a", "192k"]
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "23", args.capture]
-    ff = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    synth = None
+    if args.with_audio:  # drive the real techno engine from the same fake show, in sync
+        import wave
+        from ..audio.synth import TechnoSynth, SR
+        synth = TechnoSynth(seed=0)
+        pcm, done = [], 0
+        wav_path = args.capture + ".wav"
+    else:
+        ff = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    frames = []
     dt = 1.0 / fps
     t = 0.0
     for i in range(int(args.seconds * fps)):
@@ -234,8 +243,24 @@ def capture(args):
             if fr is not None:
                 vis.on_frame(fr)
         vis.render(target, dt)
-        ff.stdin.write(pygame.image.tostring(target, "RGB"))
+        if synth is not None:
+            synth.set_state(st)
+            while done < (i + 1) * SR / fps:
+                pcm.append(synth.render_block()); done += synth.B
+            frames.append(pygame.image.tostring(target, "RGB"))
+        else:
+            ff.stdin.write(pygame.image.tostring(target, "RGB"))
         t += dt
+    if synth is not None:
+        import numpy as np
+        with wave.open(wav_path, "wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
+            w.writeframes(np.concatenate(pcm).tobytes())
+        cmd = cmd[:cmd.index("-i") + 2] + ["-i", wav_path, "-shortest", "-c:a", "aac", "-b:a", "192k",
+                                         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "23", args.capture]
+        ff = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        for fr in frames:
+            ff.stdin.write(fr)
     ff.stdin.close()
     ff.wait()
     print("wrote", args.capture)
@@ -250,6 +275,7 @@ def main():
     ap.add_argument("--stills", metavar="DIR")
     ap.add_argument("--capture", metavar="OUT.mp4", help="record a video of the fake show, no window")
     ap.add_argument("--audio", metavar="WAV", help="with --capture: mux this audio in")
+    ap.add_argument("--with-audio", action="store_true", help="with --capture: render the techno engine in sync")
     ap.add_argument("--seconds", type=float, default=60)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--clean", action="store_true", help="hide the info line")

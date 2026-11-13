@@ -22,13 +22,13 @@ NAMED = {
     "triptych": ["#120806", "#5a1e0e", "#d4622a", "#e3a08a", "#f3e7d3"],  # burnt orange
     "papal":    ["#07040a", "#2a1238", "#6b2f86", "#c98b8b", "#efe2d0"],  # violet
     "acid":     ["#050805", "#203014", "#6f8f2a", "#d9a48e", "#f0ead8"],  # sick green
-    "subway":   ["#040404", "#1b1b1b", "#f2f2ee", "#d23a2a", "#f5d33f"],  # Basquiat white wall
+    "concrete": ["#040404", "#1b1b1b", "#e4e2dc", "#b3261e", "#8f8f88"],  # grey-white wall, one red
 }
 
 # Which ground each hook prefers when the engine does not send a palette.
 HOOK_DEFAULT = {
     "flesh": "triptych",
-    "scrawl": "subway",
+    "scrawl": "concrete",
     "inverted": "acid",
     "mirror": "bruise",
     "void": "ash",
@@ -58,7 +58,7 @@ def pick_for(ocean, hook):
     O = ocean.get("O", 0.5); A = ocean.get("A", 0.5); N = ocean.get("N", 0.5)
     E = ocean.get("E", 0.5); C = ocean.get("C", 0.5)
     if hook in ("scrawl",):
-        return "subway" if E > 0.4 else "crown"
+        return "concrete" if E > 0.4 else "ash"
     if hook == "void":
         return "ash"
     if O > 0.66:

@@ -8,14 +8,15 @@ Raspberry Pi 5 from the N900 camera image, the phone's tilt and the visitor's pr
 Every frame is built from six layers:
 
 1. **Ground.** A flat saturated field with a floor band and a dais (Bacon), a patchy white
-   wall (Basquiat), or near-black with a slow pulse (void).
+   wall that has been painted over, or near-black with a slow pulse (void).
 2. **Paint.** Raw strokes picked up from the visitor's own colours. The longer someone
    stays, the more of them gets painted.
 3. **Figure.** The visitor, cut out from the room, smeared along a flowing field, twisted at
    the face, and coloured as flesh: bruise shadows, raw reds, bone highlights. It is turned
    upside down for the Baselitz hook and mirrored, huge, for the mirror hook.
 4. **Cage.** A rotating space-frame box around the figure.
-5. **Scrawl.** Hand-drawn words, crowns, © marks, crossings-out, skulls and rib cages. They
+5. **Scrawl.** Hand-drawn words, record numbers, crossings-out, targeting reticles,
+   barcodes, tally marks and redaction bars. They
    are drawn at full 1920x1080 so they stay sharp, and every letter wobbles differently.
    The words come from the local language model (`state.words`), or from a built-in
    vocabulary of dark data and intimacy when it sends none.
@@ -27,7 +28,7 @@ Every frame is built from six layers:
 | Hook | Look |
 |---|---|
 | `flesh` | Bacon: isolated smeared figure in a cage on a flat orange, violet or red ground |
-| `scrawl` | Basquiat: white wall with colour patches, skull and ribs drawn over the body, lots of words |
+| `scrawl` | grey-white wall with painted-over patches, a face-detection box and score scratched over the body, lots of crossed-out words |
 | `inverted` | Baselitz: upside-down figure, thick raw strokes, sick green ground |
 | `mirror` | the visitor's own double, mirrored and life-size in a column of light; words say YOU, STAY, CLOSER |
 | `void` | near black, a faint figure, one line of text every 7 seconds |
@@ -40,7 +41,7 @@ An unknown hook name falls back to one of the first four, so the wall is never b
 |---|---|---|
 | Openness | stranger palettes (acid green, violet), more smear, arrows | familiar grounds |
 | Conscientiousness | steady cage, words on a grid, clean letters | shaky doubled cage lines, scattered, wobbly words |
-| Extraversion | brighter, bigger figure, bigger words, more crowns | darker, smaller |
+| Extraversion | brighter, bigger figure, bigger words, more marks | darker, smaller |
 | Agreeableness | tender words (MADE FOR YOU, STAY), warm flesh | cold words (HARVEST, TARGET), grey flesh |
 | Neuroticism | twisted face, raw red, flicker, glitches, crossed-out words | calm |
 

@@ -1,5 +1,6 @@
-"""Hand-scrawled marks in the spirit of Basquiat: a jittered stroke alphabet,
-crowns, copyright marks, crossings-out, arrows and rib-cage diagrams.
+"""Hand-scrawled marks: a jittered stroke alphabet, surveillance marks
+(reticles, face-detection brackets, barcodes, tallies, redaction bars),
+crossings-out and arrows.
 
 Everything is drawn as polylines with pygame.draw, so it needs no font files
 and looks hand-made: every letter is wobbled slightly differently each time.
@@ -124,24 +125,68 @@ def draw_copyright(surf, cx, cy, r, color, rng, width=2):
     draw_text(surf, "C", cx - r * 0.45, cy - r * 0.55, r * 1.1, color, rng, 0.3, max(1, width - 1))
 
 
-def draw_crown(surf, cx, cy, w, color, rng=None, width=2):
-    """Three-pointed crown, the famous mark. cx, cy = centre of the base."""
+def draw_reticle(surf, cx, cy, r, color, rng=None, width=2):
+    """A hand-drawn targeting reticle: wobbly circle plus crosshair ticks."""
     rng = rng or random
-    h = w * 0.62
-    j = w * 0.06
-    base_l = (cx - w / 2 + rng.uniform(-j, j), cy + rng.uniform(-j, j))
-    base_r = (cx + w / 2 + rng.uniform(-j, j), cy + rng.uniform(-j, j))
-    pts = [base_l,
-           (cx - w / 2 + rng.uniform(-j, j), cy - h + rng.uniform(-j, j)),
-           (cx - w / 4 + rng.uniform(-j, j), cy - h * 0.45 + rng.uniform(-j, j)),
-           (cx + rng.uniform(-j, j), cy - h * 1.08 + rng.uniform(-j, j)),
-           (cx + w / 4 + rng.uniform(-j, j), cy - h * 0.45 + rng.uniform(-j, j)),
-           (cx + w / 2 + rng.uniform(-j, j), cy - h + rng.uniform(-j, j)),
-           base_r, base_l]
+    pts = []
+    for i in range(20):
+        a = i / 18 * 2 * math.pi + rng.uniform(-0.08, 0.08)
+        rr = r * (1 + rng.uniform(-0.08, 0.08))
+        pts.append((cx + math.cos(a) * rr, cy + math.sin(a) * rr))
     _polyline(surf, color, pts, width)
-    # little balls on the points
-    for p in (pts[1], pts[3], pts[5]):
-        pygame.draw.circle(surf, color, (int(p[0]), int(p[1] - w * 0.06)), max(1, int(w * 0.05)), max(1, width - 1))
+    for a in (0, math.pi / 2, math.pi, 3 * math.pi / 2):
+        x0 = cx + math.cos(a) * r * 0.55; y0 = cy + math.sin(a) * r * 0.55
+        x1 = cx + math.cos(a) * r * 1.35; y1 = cy + math.sin(a) * r * 1.35
+        pygame.draw.line(surf, color, (x0 + rng.uniform(-1, 1), y0), (x1, y1 + rng.uniform(-1, 1)), width)
+
+
+def draw_barcode(surf, x, y, w, h, color, rng=None):
+    """Crude barcode of uneven bars."""
+    rng = rng or random
+    cx = x
+    while cx < x + w:
+        bw = rng.choice([1, 1, 2, 3])
+        if rng.random() < 0.6:
+            pygame.draw.rect(surf, color, (int(cx), int(y + rng.uniform(-1, 1)), bw, int(h)))
+        cx += bw + rng.choice([1, 2, 2, 3])
+
+
+def draw_tally(surf, x, y, h, n, color, rng=None, width=2):
+    """Prison-wall tally marks, groups of five."""
+    rng = rng or random
+    step = h * 0.28
+    for i in range(n):
+        g, k = divmod(i, 5)
+        gx = x + g * step * 6
+        if k < 4:
+            xx = gx + k * step
+            pygame.draw.line(surf, color, (xx + rng.uniform(-1, 1), y), (xx + rng.uniform(-2, 2), y + h), width)
+        else:
+            pygame.draw.line(surf, color, (gx - step * 0.4, y + h * 0.8), (gx + step * 3.4, y + h * 0.2), width)
+
+
+def draw_redaction(surf, x, y, w, h, color, rng=None):
+    """A rough black redaction bar."""
+    rng = rng or random
+    pts = [(x + rng.uniform(-2, 2), y + rng.uniform(-1, 1)), (x + w + rng.uniform(-3, 3), y + rng.uniform(-2, 2)),
+           (x + w + rng.uniform(-3, 3), y + h + rng.uniform(-2, 2)), (x + rng.uniform(-2, 2), y + h + rng.uniform(-1, 1))]
+    pygame.draw.polygon(surf, color, pts)
+
+
+def draw_face_box(surf, rect, color, rng=None, width=2, label=None, size=12):
+    """Face-detection corner brackets with landmark dots and a score label."""
+    rng = rng or random
+    x, y, w, h = rect
+    L = min(w, h) * 0.25
+    for (cx, cy, dx, dy) in ((x, y, 1, 1), (x + w, y, -1, 1), (x, y + h, 1, -1), (x + w, y + h, -1, -1)):
+        j = rng.uniform(-1.5, 1.5)
+        pygame.draw.line(surf, color, (cx, cy + j), (cx + dx * L, cy + j), width)
+        pygame.draw.line(surf, color, (cx + j, cy), (cx + j, cy + dy * L), width)
+    for fx, fy in ((0.33, 0.4), (0.67, 0.4), (0.5, 0.58), (0.38, 0.74), (0.62, 0.74)):
+        px = x + w * fx + rng.uniform(-2, 2); py = y + h * fy + rng.uniform(-2, 2)
+        pygame.draw.circle(surf, color, (int(px), int(py)), max(1, width))
+    if label:
+        draw_text(surf, label, x, y - size * 1.5, size, color, rng, 0.15, max(1, width - 1))
 
 
 def cross_out(surf, rect, color, rng=None, width=3, mode=None):
@@ -174,38 +219,3 @@ def draw_arrow(surf, x0, y0, x1, y1, color, rng=None, width=2):
     for s in (-1, 1):
         aa = a + math.pi + s * 0.5
         pygame.draw.line(surf, color, (x1, y1), (x1 + math.cos(aa) * L, y1 + math.sin(aa) * L), width)
-
-
-def draw_ribs(surf, cx, cy, w, color, rng=None, width=2):
-    """An anatomical rib-cage diagram: spine plus curved ribs."""
-    rng = rng or random
-    h = w * 1.1
-    pygame.draw.line(surf, color, (cx, cy - h / 2), (cx + rng.uniform(-3, 3), cy + h / 2), width)
-    for i in range(6):
-        yy = cy - h / 2 + (i + 0.6) * h / 7
-        rw = w / 2 * (0.65 + 0.35 * math.sin((i + 1) / 7 * math.pi))
-        for s in (-1, 1):
-            pts = []
-            for k in range(7):
-                t = k / 6
-                pts.append((cx + s * rw * math.sin(t * math.pi * 0.55) + rng.uniform(-1, 1),
-                            yy + rw * 0.35 * (1 - math.cos(t * math.pi * 0.8)) + rng.uniform(-1, 1)))
-            _polyline(surf, color, pts, width)
-
-
-def draw_skull(surf, cx, cy, r, color, rng=None, width=2):
-    """Crude frontal skull: oval, eye sockets, teeth grid."""
-    rng = rng or random
-    pts = []
-    for i in range(19):
-        a = math.pi + i / 18 * math.pi * 2
-        rx = r * (1.0 if math.sin(a) < 0.2 else 0.72)
-        pts.append((cx + math.cos(a) * rx + rng.uniform(-1.5, 1.5), cy + math.sin(a) * r * 1.1 + rng.uniform(-1.5, 1.5)))
-    _polyline(surf, color, pts, width)
-    for s in (-1, 1):
-        pygame.draw.circle(surf, color, (int(cx + s * r * 0.38), int(cy - r * 0.05)), max(2, int(r * 0.22)), width)
-    ty = cy + r * 0.55
-    pygame.draw.line(surf, color, (cx - r * 0.45, ty), (cx + r * 0.45, ty), width)
-    for k in range(6):
-        tx = cx - r * 0.45 + k * r * 0.18
-        pygame.draw.line(surf, color, (tx, ty - r * 0.15), (tx, ty + r * 0.18), max(1, width - 1))

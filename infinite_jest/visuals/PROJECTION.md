@@ -8,7 +8,7 @@ One projector, one image, one visitor at a time. This page covers where the imag
 
 The image we want is Bacon's: one figure, alone, on a flat saturated field, with thin cage lines around it. The visitor should meet their distorted double at roughly their own size.
 
-**Size rule:** the Pi outputs 16:9. To show a standing figure about 1.8 m tall, the image needs to be at least about 1.7 m high, which means **about 3.0 m wide**. At 3.5 m wide the image is 1.97 m high and the figure can be fully life-size with room for a crown above the head.
+**Size rule:** the Pi outputs 16:9. To show a standing figure about 1.8 m tall, the image needs to be at least about 1.7 m high, which means **about 3.0 m wide**. At 3.5 m wide the image is 1.97 m high and the figure can be fully life-size with headroom above.
 
 | Option | Good for this piece | Problems |
 |---|---|---|
