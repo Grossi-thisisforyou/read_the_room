@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Infinite Jest control</title>
+<style>
+:root{--bg:#0a0a0a;--fg:#e0e0e0;--dim:#6b6b6b;--red:#c0392b;--gold:#e8c547}
+body{background:var(--bg);color:var(--fg);font:15px/1.4 ui-monospace,Menlo,monospace;margin:0;padding:16px}
+h1{font-size:18px;letter-spacing:.2em;margin:0 0 12px;color:var(--red)}
+.big{font-size:42px;letter-spacing:.05em;margin:4px 0}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+button{background:#1a1a1a;color:var(--fg);border:1px solid #333;padding:10px 14px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--gold)}
+#bar{height:10px;background:#1a1a1a}#bar i{display:block;height:100%;background:var(--red);width:0}
+pre{color:var(--dim);white-space:pre-wrap;font-size:12px}
+.sw{display:inline-block;width:22px;height:22px;margin-right:3px;vertical-align:middle}
+</style></head><body>
+<h1>INFINITE JEST · ENGINE</h1>
+<div id="conn">connecting…</div>
+<div class="big" id="phase">–</div>
+<div><span id="scene"></span> · <span id="tempo"></span> bpm · hook <span id="hook">–</span></div>
+<div id="pal" style="margin:8px 0"></div>
+<div id="bar"><i></i></div>
+<div class="row">
+<button data-cmd="next">next phase</button><button data-cmd="wipe">wipe now</button>
+<button data-cmd="blackout">blackout on/off</button>
+<button data-cmd="hook" data-arg="flesh">flesh</button><button data-cmd="hook" data-arg="scrawl">scrawl</button>
+<button data-cmd="hook" data-arg="inverted">inverted</button><button data-cmd="hook" data-arg="mirror">mirror</button>
+<button data-cmd="hook" data-arg="void">void</button>
+</div>
+<pre id="raw"></pre>
+<script>
+let ws;
+function connect(){
+  ws=new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen=()=>{conn.textContent='connected';ws.send(JSON.stringify({type:'hello',ts:Date.now()/1000,data:{role:'control',name:'control page'}}))};
+  ws.onclose=()=>{conn.textContent='disconnected, retrying…';setTimeout(connect,1500)};
+  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type!=='state')return;const s=m.data;
+    phase.textContent=s.phase.toUpperCase()+'  '+s.phase_t.toFixed(0)+'s';scene.textContent=s.scene;tempo.textContent=s.tempo;hook.textContent=s.hook||'–';
+    document.querySelector('#bar i').style.width=(s.intensity*100)+'%';
+    pal.innerHTML=(s.palette.colors||[]).map(c=>`<span class="sw" style="background:${c}"></span>`).join('')+' '+s.palette.name;
+    raw.textContent=JSON.stringify({ocean:s.ocean,confidence:s.confidence,source:s.profile_source,words:s.words,sensor:s.sensor,blackout:s.blackout},null,1)};
+}
+document.querySelectorAll('button').forEach(b=>b.onclick=()=>ws&&ws.send(JSON.stringify({type:'control',ts:Date.now()/1000,data:{cmd:b.dataset.cmd,arg:b.dataset.arg||null}})));
+connect();
+</script></body></html>
