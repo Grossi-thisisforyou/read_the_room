@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#070605">
+<title>INFINITE JEST</title>
+<!--
+  INFINITE JEST - browser fallback phone input.
+  Served by the Pi at /phone/, talks to ws(s)://<host>/ws.
+  Fully offline: no fonts, no CDN, no external requests.
+-->
+<style>
+  :root{
+    --ink:#0a0807; --bone:#ece4d6; --dim:#8a8073; --blood:#b3121b; --flesh:#d9917a;
+    --font:"Arial Narrow","Helvetica Neue Condensed","Roboto Condensed","Liberation Sans Narrow",Impact,"Haettenschweiler",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:var(--ink);color:var(--bone);font-family:var(--font);overflow:hidden;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+  #bg{position:fixed;inset:0;width:100%;height:100%;display:block}
+  /* scanlines + flicker over everything */
+  #scan{position:fixed;inset:0;pointer-events:none;z-index:50;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.38) 0 1px,transparent 1px 3px);
+    mix-blend-mode:multiply;animation:flick 3.7s steps(1) infinite}
+  #scan::after{content:"";position:absolute;left:0;right:0;height:18%;top:-20%;
+    background:linear-gradient(transparent,rgba(236,228,214,.05),transparent);animation:roll 6s linear infinite}
+  @keyframes flick{0%,100%{opacity:.85}7%{opacity:.6}8%{opacity:.95}53%{opacity:.75}54%{opacity:.9}81%{opacity:.55}82%{opacity:.85}}
+  @keyframes roll{to{top:120%}}
+  .screen{position:fixed;inset:0;z-index:10;display:none;
+    padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+  .screen.on{display:flex}
+  /* consent */
+  #consent{flex-direction:column;justify-content:space-between}
+  .title{font-size:min(19vw,96px);line-height:.82;letter-spacing:-.02em;text-transform:uppercase;font-weight:700;
+    font-stretch:condensed;transform:rotate(-1.2deg)}
+  .title .x{position:relative;color:var(--dim)}
+  .title .x::after{content:"";position:absolute;left:-4%;right:-4%;top:46%;height:.09em;background:var(--blood);transform:rotate(-4deg)}
+  .flip{display:inline-block;transform:rotate(180deg);color:var(--flesh)}
+  .upside{font-size:13px;letter-spacing:.3em;text-transform:uppercase;color:var(--dim);transform:rotate(180deg);text-align:right}
+  .copy{font-size:min(6.4vw,30px);line-height:1.12;max-width:34ch;font-stretch:condensed}
+  .copy s{text-decoration:none;position:relative;color:var(--dim)}
+  .copy s::after{content:"";position:absolute;left:-2px;right:-2px;top:52%;height:2px;background:var(--bone);transform:rotate(2deg)}
+  .copy b{color:var(--flesh);font-weight:700}
+  #enter{appearance:none;border:0;background:var(--bone);color:var(--ink);font-family:var(--font);font-weight:700;
+    font-size:min(14vw,64px);text-transform:uppercase;letter-spacing:.04em;padding:.12em .4em .08em;align-self:flex-start;
+    transform:rotate(-2deg);box-shadow:8px 8px 0 var(--blood);cursor:pointer}
+  #enter:active{transform:rotate(-2deg) translate(4px,4px);box-shadow:4px 4px 0 var(--blood)}
+  .fine{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-top:14px}
+  /* running */
+  #run{flex-direction:column;justify-content:center;align-items:center;text-align:center}
+  #hook{position:absolute;left:16px;right:16px;bottom:22%;font-size:min(9vw,44px);line-height:1;text-transform:uppercase;
+    color:var(--bone);opacity:.16;transform:rotate(180deg);font-weight:700;pointer-events:none;word-break:break-word}
+  #msg{position:relative;font-size:min(12vw,64px);line-height:.95;text-transform:uppercase;font-weight:700;
+    max-width:100%;word-break:break-word;text-shadow:3px 3px 0 rgba(179,18,27,.7);transition:opacity .4s}
+  #status{position:absolute;left:16px;right:16px;top:max(12px,env(safe-area-inset-top));display:flex;justify-content:space-between;
+    font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);pointer-events:none}
+  #status .live{color:var(--blood)}
+  #https{position:absolute;left:16px;bottom:max(12px,env(safe-area-inset-bottom));font-size:12px;letter-spacing:.15em;
+    text-transform:uppercase;color:var(--flesh);display:none}
+  /* choice halves */
+  #choice{position:fixed;inset:0;z-index:20;display:none;flex-direction:column}
+  #choice.on{display:flex}
+  .half{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;font-size:min(13vw,68px);line-height:.9;
+    font-weight:700;text-transform:uppercase;text-align:center;word-break:break-word;cursor:pointer}
+  .half.a{background:rgba(236,228,214,.92);color:var(--ink)}
+  .half.b{background:rgba(10,8,7,.55);color:var(--bone);border-top:6px solid var(--blood)}
+  .half.pick{animation:pick .5s steps(2) 2}
+  @keyframes pick{50%{filter:invert(1)}}
+  #ask{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%) rotate(-1.5deg);z-index:21;background:var(--blood);
+    color:var(--bone);font-size:min(6vw,28px);text-transform:uppercase;padding:6px 16px;text-align:center;pointer-events:none;
+    font-weight:700;display:none}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<section id="consent" class="screen on" aria-label="Consent">
+  <div>
+    <div class="upside">read the room &nbsp;/&nbsp; dark data</div>
+    <h1 class="title">Infinite<br><span class="x">Jest</span> <span class="flip">Jest</span></h1>
+  </div>
+  <div>
+    <p class="copy"><b>This room is recording you.</b> The camera, microphone and motion of this phone feed a performance made only for you. Nothing leaves this room. Everything is erased when you leave.</p>
+    <p class="fine" id="netline">connecting...</p>
+  </div>
+  <div>
+    <button id="enter" type="button">Enter</button>
+    <p class="fine">Leave the room to stop. Close this page to stop.</p>
+  </div>
+</section>
+
+<section id="run" class="screen" aria-label="Performance">
+  <div id="status"><span id="st-net">offline</span><span id="st-sens"></span></div>
+  <div id="hook"></div>
+  <div id="msg"></div>
+  <div id="https">sensors need https</div>
+</section>
+
+<div id="choice"><div class="half a" data-i="0"></div><div class="half b" data-i="1"></div></div>
+<div id="ask"></div>
+<div id="scan"></div>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id)};
+var clamp=function(v){return v<0?0:v>1?1:v};
+var now=function(){return Date.now()/1000};
+
+/* ---------------- state ---------------- */
+var DEFAULT_PALETTE=["#0a0807","#3a0d0f","#b3121b","#d9917a","#ece4d6"];
+var S={running:false, palette:DEFAULT_PALETTE.slice(), tempo:132, intensity:.25, hook:"", phase:"", scene:"",
+  prompt:null, promptAt:0};
+var sensors={video:null, stream:null, ac:null, an:null, motionOk:false, timer:0, frameTimer:0};
+var R={motion:0, presence:0, loudness:0, voiced:0, light:null, tilt:null, accel:null, held:0, shake:0};
+var secure=!!window.isSecureContext;
+
+/* ---------------- websocket ---------------- */
+var ws=null, backoff=1000, reTimer=0;
+function wsUrl(){return (location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"/ws"}
+function send(type,data){
+  if(!ws||ws.readyState!==1)return false;
+  try{ws.send(JSON.stringify({type:type,ts:now(),data:data||{}}));return true}catch(e){return false}
+}
+function setNet(t,live){$("st-net").textContent=t;$("st-net").className=live?"live":"";$("netline").textContent=t+(secure?"":" / sensors need https")}
+function connect(){
+  clearTimeout(reTimer);
+  try{ws=new WebSocket(wsUrl())}catch(e){return retry()}
+  setNet("connecting...");
+  ws.onopen=function(){backoff=1000;setNet("live ●",true);send("hello",{role:"phone",device:"web"})};
+  ws.onmessage=function(ev){var m;try{m=JSON.parse(ev.data)}catch(e){return}if(m&&m.type)handle(m)};
+  ws.onclose=function(){setNet("lost — retrying");retry()};
+  ws.onerror=function(){try{ws.close()}catch(e){}};
+}
+function retry(){
+  clearTimeout(reTimer);
+  reTimer=setTimeout(connect,backoff);
+  backoff=Math.min(10000,backoff*2);
+}
+
+function handle(m){
+  var d=m.data||{};
+  if(m.type==="state"){
+    if(Array.isArray(d.palette)&&d.palette.length)S.palette=d.palette.slice(0,8);
+    if(typeof d.tempo==="number"&&d.tempo>20&&d.tempo<300)S.tempo=d.tempo;
+    if(typeof d.intensity==="number")S.intensity=clamp(d.intensity);
+    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=d.hook}
+    S.phase=d.phase||S.phase;S.scene=d.scene||S.scene;
+    $("st-sens").textContent=(S.scene||S.phase||"").toString().slice(0,24);
+  }else if(m.type==="phone"){
+    if(typeof d.text==="string")$("msg").textContent=d.text;
+    if(d.ask&&Array.isArray(d.options)&&d.options.length>=2)showChoice(d);
+    else if(d.ask===false||d.options===null)hideChoice();
+  }else if(m.type==="wipe"){
+    wipe();
+  }
+}
+
+/* ---------------- choice ---------------- */
+function showChoice(d){
+  S.prompt={id:d.prompt_id!=null?d.prompt_id:null, options:d.options.slice(0,2)};
+  S.promptAt=performance.now();
+  var h=document.querySelectorAll(".half");
+  h[0].textContent=String(d.options[0]);h[1].textContent=String(d.options[1]);
+  h[0].className="half a";h[1].className="half b";
+  $("ask").textContent=typeof d.ask==="string"?d.ask:(d.text||"");
+  $("ask").style.display=$("ask").textContent?"block":"none";
+  $("choice").className="on";
+}
+function hideChoice(){S.prompt=null;$("choice").className="";$("ask").style.display="none"}
+function choose(i,el){
+  if(!S.prompt)return;
+  var p=S.prompt;S.prompt=null;
+  send("sensor",{kind:"choice",prompt_id:p.id,option:p.options[i],index:i,latency_ms:Math.round(performance.now()-S.promptAt)});
+  el.className+=" pick";
+  setTimeout(hideChoice,520);
+}
+
+/* ---------------- touch ---------------- */
+var T=null;
+function nx(e){return clamp(e.clientX/innerWidth)}
+function ny(e){return clamp(e.clientY/innerHeight)}
+document.addEventListener("pointerdown",function(e){
+  if(!S.running)return;
+  T={t:performance.now(),x:nx(e),y:ny(e),target:e.target};
+},{passive:true});
+document.addEventListener("pointerup",function(e){
+  if(!S.running||!T)return;
+  var dur=Math.round(performance.now()-T.t), x=nx(e), y=ny(e);
+  var moved=Math.hypot(x-T.x,y-T.y)>0.08;
+  var g=moved?"swipe":dur>600?"hold":"tap";
+  var data={kind:"touch",gesture:g,duration_ms:dur,x:+T.x.toFixed(3),y:+T.y.toFixed(3)};
+  if(moved){data.dx=+(x-T.x).toFixed(3);data.dy=+(y-T.y).toFixed(3)}
+  send("sensor",data);
+  var half=T.target&&T.target.closest&&T.target.closest(".half");
+  if(half&&g!=="swipe")choose(+half.getAttribute("data-i"),half);
+  T=null;
+},{passive:true});
+document.addEventListener("pointercancel",function(){T=null});
+document.addEventListener("contextmenu",function(e){e.preventDefault()});
+
+/* ---------------- wake lock ---------------- */
+var wakeLock=null;
+function wake(){
+  if(!("wakeLock" in navigator)||document.visibilityState!=="visible")return;
+  navigator.wakeLock.request("screen").then(function(l){wakeLock=l;l.addEventListener("release",function(){wakeLock=null})}).catch(function(){});
+}
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"&&!wakeLock)wake()});
+
+/* ---------------- sensors ---------------- */
+var mcv=document.createElement("canvas");mcv.width=40;mcv.height=30;
+var mctx=mcv.getContext("2d",{willReadFrequently:true});
+var fcv=document.createElement("canvas");fcv.width=160;fcv.height=120;
+var fctx=fcv.getContext("2d",{willReadFrequently:true});
+var prevGray=null, tdBuf=null, fBuf=null;
+var accHist=[];
+
+function startSensors(){
+  // Must run synchronously inside the click handler: iOS only grants these from a user gesture.
+  var jobs=[];
+  if(!secure){$("https").style.display="block";return}
+  var DME=window.DeviceMotionEvent, DOE=window.DeviceOrientationEvent;
+  if(DME&&typeof DME.requestPermission==="function")jobs.push(DME.requestPermission().then(function(r){if(r==="granted")bindMotion()}).catch(function(){}));
+  else bindMotion();
+  if(DOE&&typeof DOE.requestPermission==="function")jobs.push(DOE.requestPermission().catch(function(){}));
+  var AC=window.AudioContext||window.webkitAudioContext;
+  if(AC){try{sensors.ac=new AC();sensors.ac.resume&&sensors.ac.resume()}catch(e){sensors.ac=null}}
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){
+    jobs.push(navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:320},height:{ideal:240}},audio:true})
+      .then(attachStream)
+      .catch(function(){ // maybe no camera: try mic only, then camera only
+        return navigator.mediaDevices.getUserMedia({audio:true}).then(attachStream).catch(function(){
+          return navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}}).then(attachStream).catch(function(){});
+        });
+      }));
+  }
+  Promise.all(jobs).then(sensorLabel);
+}
+function sensorLabel(){
+  var s=[];if(sensors.video)s.push("cam");if(sensors.an)s.push("mic");if(sensors.motionOk)s.push("motion");
+  $("st-sens").textContent=s.join(" + ")||"touch only";
+}
+function attachStream(stream){
+  sensors.stream=stream;
+  if(stream.getVideoTracks().length){
+    var v=document.createElement("video");
+    v.setAttribute("playsinline","");v.muted=true;v.autoplay=true;v.srcObject=stream;
+    v.play&&v.play().catch(function(){});
+    sensors.video=v;
+  }
+  if(stream.getAudioTracks().length&&sensors.ac){
+    try{
+      var src=sensors.ac.createMediaStreamSource(stream), an=sensors.ac.createAnalyser();
+      an.fftSize=1024;an.smoothingTimeConstant=.5;src.connect(an);
+      sensors.an=an;tdBuf=new Uint8Array(an.fftSize);fBuf=new Uint8Array(an.frequencyBinCount);
+    }catch(e){}
+  }
+}
+function bindMotion(){
+  window.addEventListener("devicemotion",function(e){
+    var a=e.accelerationIncludingGravity||e.acceleration;if(!a||a.x==null)return;
+    sensors.motionOk=true;
+    var g={x:a.x/9.81,y:a.y/9.81,z:a.z/9.81};
+    R.accel={x:+g.x.toFixed(3),y:+g.y.toFixed(3),z:+g.z.toFixed(3)};
+    accHist.push(Math.sqrt(g.x*g.x+g.y*g.y+g.z*g.z));if(accHist.length>30)accHist.shift();
+  });
+  window.addEventListener("deviceorientation",function(e){
+    if(e.alpha==null&&e.beta==null)return;
+    R.tilt={alpha:Math.round(e.alpha||0),beta:Math.round(e.beta||0),gamma:Math.round(e.gamma||0)};
+  });
+}
+function stopSensors(){
+  if(sensors.stream)sensors.stream.getTracks().forEach(function(t){t.stop()});
+  if(sensors.ac&&sensors.ac.close)sensors.ac.close().catch(function(){});
+  sensors.video=sensors.stream=sensors.ac=sensors.an=null;prevGray=null;accHist=[];
+  R={motion:0,presence:0,loudness:0,voiced:0,light:null,tilt:null,accel:null,held:0,shake:0};
+}
+function videoReady(){var v=sensors.video;return v&&v.readyState>=2&&v.videoWidth>0}
+
+function sampleVideo(){
+  if(!videoReady())return;
+  mctx.drawImage(sensors.video,0,0,40,30);
+  var px=mctx.getImageData(0,0,40,30).data, n=1200, g=new Uint8Array(n), diff=0, sum=0;
+  for(var i=0;i<n;i++){var y=(px[i*4]*77+px[i*4+1]*150+px[i*4+2]*29)>>8;g[i]=y;sum+=y;if(prevGray)diff+=Math.abs(y-prevGray[i])}
+  if(prevGray)R.motion=R.motion*.5+.5*clamp(diff/n/24);
+  prevGray=g;R.light=+(sum/n/255).toFixed(3);
+}
+function sampleAudio(){
+  var an=sensors.an;if(!an)return;
+  an.getByteTimeDomainData(tdBuf);
+  var s=0;for(var i=0;i<tdBuf.length;i++){var v=(tdBuf[i]-128)/128;s+=v*v}
+  var rms=Math.sqrt(s/tdBuf.length), lvl=clamp(rms*5);
+  R.loudness=R.loudness*.4+.6*lvl;
+  an.getByteFrequencyData(fBuf);
+  var hz=sensors.ac.sampleRate/an.fftSize, lo=Math.floor(300/hz), hi=Math.ceil(3000/hz), band=0, tot=0;
+  for(var k=1;k<fBuf.length;k++){var e=fBuf[k]*fBuf[k];tot+=e;if(k>=lo&&k<=hi)band+=e}
+  var ratio=tot?band/tot:0, gate=clamp((R.loudness-.04)/.08);
+  R.voiced=R.voiced*.7+.3*(clamp((ratio-.45)/.4)*gate);
+}
+function sampleMotion(){
+  if(accHist.length<8)return;
+  var m=0,i;for(i=0;i<accHist.length;i++)m+=accHist[i];m/=accHist.length;
+  var v=0;for(i=0;i<accHist.length;i++)v+=(accHist[i]-m)*(accHist[i]-m);
+  var sd=Math.sqrt(v/accHist.length);
+  R.held=R.held*.8+.2*clamp((sd-.004)/.02);   // micro-tremor of a hand vs a still table
+  R.shake=R.shake*.6+.4*clamp((sd-.25)/.8);
+}
+function tick(){
+  sampleVideo();sampleAudio();sampleMotion();
+  var target=Math.max(R.motion,R.loudness,R.held);
+  R.presence=target>R.presence?R.presence*.6+target*.4:R.presence*.97+target*.03;
+  var d={kind:"phone"};
+  if(sensors.video){d.motion=+R.motion.toFixed(3);if(R.light!=null)d.light=R.light}
+  if(sensors.an){d.loudness=+R.loudness.toFixed(3);d.audio={level:+R.loudness.toFixed(3),voiced:+R.voiced.toFixed(3)}}
+  if(R.tilt)d.tilt=R.tilt;
+  if(R.accel){d.accel=R.accel;d.held=+R.held.toFixed(3);d.shake=+R.shake.toFixed(3)}
+  d.proximity={near:false};
+  d.presence=+R.presence.toFixed(3);
+  send("sensor",d);
+}
+function sendFrame(){
+  if(!videoReady())return;
+  fctx.drawImage(sensors.video,0,0,160,120);
+  var px=fctx.getImageData(0,0,160,120).data, n=19200, s="", chunk=[];
+  for(var i=0;i<n;i++){
+    chunk.push((px[i*4]*77+px[i*4+1]*150+px[i*4+2]*29)>>8);
+    if(chunk.length===4096||i===n-1){s+=String.fromCharCode.apply(null,chunk);chunk=[]}
+  }
+  send("frame",{w:160,h:120,fmt:"gray8",b64:btoa(s)});
+}
+
+/* ---------------- flow ---------------- */
+function enter(){
+  startSensors();          // first, synchronously, inside the gesture
+  wake();
+  S.running=true;
+  $("consent").className="screen";$("run").className="screen on";
+  $("msg").textContent="";
+  clearInterval(sensors.timer);clearInterval(sensors.frameTimer);
+  if(secure){sensors.timer=setInterval(tick,100);sensors.frameTimer=setInterval(sendFrame,250)}
+  try{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(function(){})}catch(e){}
+}
+function wipe(){
+  clearInterval(sensors.timer);clearInterval(sensors.frameTimer);
+  stopSensors();hideChoice();
+  S.running=false;S.hook="";S.palette=DEFAULT_PALETTE.slice();S.intensity=.25;S.tempo=132;S.scene=S.phase="";
+  $("msg").textContent="";$("hook").textContent="";$("st-sens").textContent="";
+  $("run").className="screen";$("consent").className="screen on";
+  if(wakeLock){wakeLock.release().catch(function(){});wakeLock=null}
+}
+$("enter").addEventListener("click",enter);
+
+/* ---------------- background: smear, crown, pulse ---------------- */
+var cv=$("bg"), cx=cv.getContext("2d"), W=0, H=0, DPR=1, seed=7;
+function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647}
+function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cx.setTransform(DPR,0,0,DPR,0,0)}
+addEventListener("resize",resize);resize();
+
+function crown(x,y,s,col,j){
+  cx.strokeStyle=col;cx.lineWidth=Math.max(2,s*.05);cx.lineCap="round";cx.lineJoin="round";
+  cx.beginPath();
+  var pts=[[0,1],[0,.25],[.25,.65],[.5,0],[.75,.65],[1,.25],[1,1],[0,1]];
+  for(var i=0;i<pts.length;i++){var px=x+pts[i][0]*s+(rnd()-.5)*j, py=y+pts[i][1]*s*.7+(rnd()-.5)*j;i?cx.lineTo(px,py):cx.moveTo(px,py)}
+  cx.stroke();
+  for(i=0;i<3;i++){cx.beginPath();cx.arc(x+[0,.5,1][i]*s+(rnd()-.5)*j,y+[.25,0,.25][i]*s*.7-s*.1,s*.05,0,6.3);cx.stroke()}
+}
+function scribble(x,y,w,h,col,n){
+  cx.strokeStyle=col;cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x,y);
+  for(var i=0;i<n;i++)cx.lineTo(x+rnd()*w,y+rnd()*h);cx.stroke();
+}
+function smear(x,y,len,th,col,a){
+  cx.save();cx.globalAlpha=a;cx.translate(x,y);cx.rotate(-.35+rnd()*.2);
+  var g=cx.createLinearGradient(0,0,len,0);g.addColorStop(0,"rgba(0,0,0,0)");g.addColorStop(.15,col);g.addColorStop(.7,col);g.addColorStop(1,"rgba(0,0,0,0)");
+  cx.fillStyle=g;
+  for(var i=0;i<6;i++){cx.fillRect(0,i*th/6+(rnd()-.5)*4,len*(.6+rnd()*.4),th/7)}
+  cx.restore();
+}
+function draw(t){
+  seed=7+Math.floor(t/180);                    // jitter re-seeds a few times per second: hand-drawn boil
+  var pal=S.palette, beat=((t/1000)*S.tempo/60)%1, pulse=Math.exp(-beat*5)*(.3+.7*S.intensity);
+  cx.fillStyle="#070605";cx.fillRect(0,0,W,H);
+  var base=pal[0]||"#0a0807";
+  cx.globalAlpha=S.running?.55+.25*S.intensity:.25;cx.fillStyle=base;cx.fillRect(0,0,W,H);cx.globalAlpha=1;
+  // Bacon-ish smears from the palette
+  var k=S.running?3+Math.round(S.intensity*3):2;
+  for(var i=0;i<k;i++){
+    var c=pal[(i+1)%pal.length]||"#b3121b";
+    smear(W*(.05+((i*.37+t/40000)%1)*.6),H*(.15+i*.18),W*(.6+rnd()*.5),18+rnd()*50,c,(S.running?.18+.35*pulse:.16));
+  }
+  // beat flash: whole-frame tint in the hottest palette colour
+  if(S.running){cx.globalAlpha=pulse*.22;cx.fillStyle=pal[2%pal.length]||"#b3121b";cx.fillRect(0,0,W,H);cx.globalAlpha=1}
+  // Basquiat crown + scribbles
+  var cs=Math.min(W,H)*(S.running?.22:.3);
+  crown(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
+  scribble(W*.55,H*(S.running?.08:.3),W*.4,H*.07,"rgba(179,18,27,.5)",9);
+  // grain
+  cx.fillStyle="rgba(236,228,214,.05)";
+  for(i=0;i<140;i++)cx.fillRect(rnd()*W,rnd()*H,1,1+rnd()*2);
+  // occasional horizontal tear
+  if(rnd()<.08+.2*pulse*S.intensity){var ty=rnd()*H,th=4+rnd()*20;cx.drawImage(cv,0,ty*DPR,W*DPR,th*DPR,(rnd()-.5)*30,ty,W,th)}
+  // message text breathes with tempo
+  $("msg").style.transform=S.running?"scale("+(1+pulse*.04*S.intensity)+") rotate("+((rnd()-.5)*.8)+"deg)":"";
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+if(!secure)$("https").style.display="block";
+connect();
+})();
+</script>
+</body>
+</html>
