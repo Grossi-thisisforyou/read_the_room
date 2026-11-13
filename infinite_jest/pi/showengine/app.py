@@ -85,7 +85,8 @@ class Runner:
             pygame.display.init()       # not pygame.init(): leave the sound card to the audio module
             pygame.font.init()
             if d.get("fullscreen", True):
-                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                # exactly the configured mode (1920x1080 by default), not whatever the projector reports
+                self.screen = pygame.display.set_mode((int(d["width"]), int(d["height"])), pygame.FULLSCREEN)
             else:
                 self.screen = pygame.display.set_mode((int(d["width"]), int(d["height"])))
             pygame.display.set_caption("Infinite Jest")

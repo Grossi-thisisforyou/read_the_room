@@ -24,7 +24,7 @@ def test_hub_end_to_end():
 
 async def _scenario():
     port, udp, tcp = free_port(), free_port(socket.SOCK_DGRAM), free_port()
-    cfg = config.load(None, {"network": {"host": "127.0.0.1", "port": port, "udp_port": udp, "tcp_port": tcp},
+    cfg = config.load(None, {"mode": "fixed", "network": {"host": "127.0.0.1", "port": port, "udp_port": udp, "tcp_port": tcp},
                              "presence": {"on_hold": 0.1}, "visit": {"approach_time": 0.3}})
     eng = Engine(cfg)
     hub = Hub(eng, cfg)

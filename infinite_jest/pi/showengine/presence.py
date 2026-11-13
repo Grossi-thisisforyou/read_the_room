@@ -21,6 +21,7 @@ class PresenceConfig:
     off_hold: float = 8.0
     smoothing: float = 0.6      # seconds; time constant of the score's low-pass
     stale_after: float = 3.0    # no sensor data for this long counts as score 0
+    handheld: bool = False      # set from the contract mode; "handheld": picking the phone up starts a visit
 
 
 @dataclass
@@ -32,6 +33,19 @@ class Presence:
     _last_t: float | None = None
     _last_data_t: float | None = None
     _raw: float = 0.0
+
+    def score_of(self, d: dict) -> float:
+        s = self.raw_score(d)
+        if self.cfg.handheld and "presence" not in d:
+            # handheld: the camera and the mic alone only half-count; holding the phone counts
+            cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0)
+            hand = Presence.raw_score({k: d[k] for k in ("held", "shake", "kind", "proximity") if k in d})
+            s = max(hand, min(cam, 0.4))
+        return s
+
+    @staticmethod
+    def _num_motion(d: dict) -> float:
+        return num(d.get("motion"))
 
     @staticmethod
     def raw_score(d: dict) -> float:
@@ -55,7 +69,7 @@ class Presence:
         return min(1.0, max(cues))
 
     def feed(self, data: dict, now: float) -> None:
-        self._raw = self.raw_score(data)
+        self._raw = self.score_of(data)
         self._last_data_t = now
         self.tick(now)
 

@@ -21,9 +21,10 @@ HELLO = "hello"        # any client, first message: data["role"]
 STATE = "state"        # engine -> everyone
 VISIT = "visit"        # engine -> profiler: a visit began/changed phase
 WIPE = "wipe"          # engine -> everyone: drop all visitor data now
+ORACLE = "oracle"      # oracle (local Qwen) -> engine: {visitor_id, words, phone_text, dossier}
 PHONE = "phone"        # engine/profiler/control -> phone: {text?, ask?, mood?} shown on the phone
 
-ROLES = {"phone", "profiler", "visuals", "audio", "control"}
+ROLES = {"phone", "profiler", "visuals", "audio", "control", "oracle"}
 
 MAX_MESSAGE_BYTES = 512 * 1024  # a 320x240 JPEG in base64 is ~30 KB
 

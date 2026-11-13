@@ -15,6 +15,7 @@ from . import director, plugins, protocol as P
 from .fallback_profile import FallbackProfiler
 from .frames import FrameAnalyzer
 from .presence import Presence, PresenceConfig
+from .tilt import Tilt
 from .visit import VisitConfig, VisitMachine
 
 log = logging.getLogger("showengine")
@@ -34,16 +35,20 @@ class Engine:
         self.emit: Emit = emit or (lambda msg, roles: None)
         self.clock = clock
         now = clock()
-        self.presence = Presence(PresenceConfig(**_dataclass_kwargs(PresenceConfig, cfg.get("presence", {}))))
+        self.mode = cfg.get("mode", "handheld")
+        pcfg = PresenceConfig(**_dataclass_kwargs(PresenceConfig, cfg.get("presence", {})))
+        pcfg.handheld = self.mode == "handheld"
+        self.presence = Presence(pcfg)
         self.machine = VisitMachine(VisitConfig(**_dataclass_kwargs(VisitConfig, cfg.get("visit", {}))), now)
         self.fallback = FallbackProfiler()
         self.frames = FrameAnalyzer()
+        self.tilt = Tilt()
         self.visuals, self.audio, self.profiler = visuals, audio, profiler
         self.sensor: dict[str, Any] = {}       # latest periodic reading (merged)
         self.blackout = False
         self.override_scene: str | None = None
         self.state: dict = director.build_state(self.machine, now)
-        self.stats = {"sensor": 0, "frame": 0, "profile": 0, "bad": 0, "visits": 0}
+        self.stats = {"sensor": 0, "frame": 0, "profile": 0, "oracle": 0, "bad": 0, "visits": 0}
         self.last_sensor_ts: float | None = None
         self._state_period = 1.0 / max(1.0, float(cfg.get("state_hz", 10)))
         self._last_state_emit = -1e9
@@ -61,6 +66,13 @@ class Engine:
         elif t == P.PROFILE:
             self.stats["profile"] += 1
             self.machine.on_profile(d, now)
+            self.emit(self._fwd(msg), {"oracle"})
+        elif t == P.ORACLE:
+            if role in ("oracle", "profiler") and self.machine.on_oracle(d):
+                self.stats["oracle"] += 1
+                text = d.get("phone_text")
+                if isinstance(text, str) and text.strip():
+                    self.emit(P.make(P.PHONE, {"text": text.strip()[:120]}), {"phone"})
         elif t == P.REVEAL:
             self.machine.on_reveal(d)
         elif t == P.ANSWER:
@@ -97,6 +109,9 @@ class Engine:
         kind = d.get("kind", "phone")
         if kind == "phone":
             self.sensor.update({k: v for k, v in d.items() if k != "kind"})
+            self.tilt.feed(d, now)
+            plugins.call(self.visuals, "on_sensor", d)
+            plugins.call(self.audio, "on_sensor", d)
         elif kind == "touch":
             self.sensor["touch"] = {"x": d.get("x"), "y": d.get("y")}
         elif kind == "keys":
@@ -120,6 +135,7 @@ class Engine:
         else:
             self.stats["profile"] += 1
             self.machine.on_profile(result, now)
+            self.emit(P.make(P.PROFILE, {k: v for k, v in result.items() if k != "type"}), {"oracle"})
 
     def _on_frame_msg(self, msg: dict, now: float) -> None:
         if self.blackout:
@@ -164,6 +180,7 @@ class Engine:
             self.blackout = (not self.blackout) if arg is None else bool(arg)
             if self.blackout:
                 self.presence.reset()
+                self.tilt.reset()
                 self.sensor.clear()
                 self.frames.reset()
         elif cmd == "scene":
@@ -185,8 +202,12 @@ class Engine:
         changes = self.machine.drain_changes()
         for old, new in changes:
             self._on_phase(old, new, now)
+        self.tilt.tick(now)
         self.state = director.build_state(self.machine, now, self.sensor,
-                                          self.override_scene, self.blackout)
+                                          self.override_scene, self.blackout,
+                                          self.tilt.state(), round(self.tilt.shake, 3))
+        self.state["steer"] = self.tilt.steer()
+        self.state["mode"] = self.mode
         plugins.call(self.visuals, "on_state", self.state)
         plugins.call(self.audio, "on_state", self.state)
         if changes or now - self._last_state_emit >= self._state_period:

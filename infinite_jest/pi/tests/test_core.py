@@ -19,10 +19,10 @@ class Clock:
         return self.t
 
 
-def make_engine(**kw):
+def make_engine(mode="fixed", **kw):
     clock = Clock()
     sent = []
-    eng = Engine(config.load(None), emit=lambda m, roles: sent.append((m, roles)), clock=clock, **kw)
+    eng = Engine(config.load(None, {"mode": mode}), emit=lambda m, roles: sent.append((m, roles)), clock=clock, **kw)
     return eng, clock, sent
 
 
@@ -266,3 +266,43 @@ def test_opt_out_goes_quiet():
     assert eng.state["scene"] == "void" and eng.state["ocean"] is None
     eng.handle(P.make(P.PROFILE, {"visitor_id": vid, "confidence": .9, "hook": "flesh"}), "profiler")
     assert eng.state["scene"] == "void"
+
+
+# ---------------------------------------------------------------- handheld + tilt + oracle
+def test_handheld_pickup_starts_and_putdown_ends():
+    eng, clock, _ = make_engine(mode="handheld")
+    run(eng, clock, 10, {"kind": "phone", "motion": 0.8, "held": False})   # camera alone isn't enough
+    assert eng.machine.phase == "idle"
+    run(eng, clock, 6, {"kind": "phone", "held": True, "tilt": {"beta": 10, "gamma": -20}})
+    assert eng.machine.phase in ("approach", "profiling")
+    run(eng, clock, 20, {"kind": "phone", "held": False})                  # put down
+    assert eng.machine.phase in ("release", "wipe", "idle")
+
+
+def test_tilt_steers_and_flips():
+    eng, clock, _ = make_engine(mode="handheld")
+    run(eng, clock, 2, {"kind": "phone", "held": True, "tilt": {"alpha": 0, "beta": 0, "gamma": 45}})
+    st = eng.state["steer"]
+    assert st["x"] > 0.9 and abs(st["y"]) < 0.05 and not st["flip"] and eng.state["mode"] == "handheld"
+    run(eng, clock, 1, {"kind": "phone", "held": True, "tilt": {"beta": 170, "gamma": 0}})
+    assert eng.state["steer"]["flip"] and eng.state["tilt"]["energy"] > 0
+    run(eng, clock, 8, {"kind": "phone", "held": True, "tilt": {"beta": 170, "gamma": 0}})
+    assert eng.state["steer"]["still_s"] > 3          # holding still is a gesture too
+
+
+def test_oracle_words_win_and_phone_text_forwarded():
+    eng, clock, sent = make_engine()
+    run(eng, clock, 25, BUSY)
+    vid = eng.state["visitor_id"]
+    eng.handle(P.make(P.PROFILE, {"visitor_id": vid, "evidence": ["canned line"]}), "profiler")
+    assert eng.state["words"] == ["canned line"]
+    eng.handle(P.make(P.ORACLE, {"visitor_id": vid, "words": ["SUBJECT LINGERS"], "phone_text": "turn me over",
+                                 "dossier": ["approached fast"]}), "oracle")
+    assert eng.state["words"] == ["SUBJECT LINGERS"] and eng.state["dossier"] == ["approached fast"]
+    assert any(m["type"] == P.PHONE and m["data"].get("text") == "turn me over" for m, r in sent if r == {"phone"})
+    eng.handle(P.make(P.ORACLE, {"visitor_id": "v-0000", "words": ["someone else"]}), "oracle")
+    eng.handle(P.make(P.ORACLE, {"visitor_id": vid, "words": ["from a phone"]}), "phone")
+    assert eng.state["words"] == ["SUBJECT LINGERS"]
+    assert any(r == {"oracle"} and m["type"] == P.PROFILE for m, r in sent)
+    eng.handle(P.make(P.CONTROL, {"cmd": "wipe"}), "control")
+    assert eng.state["words"] == [] and eng.state["dossier"] == []

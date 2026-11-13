@@ -48,6 +48,7 @@ DEFAULTS: dict[str, Any] = {
     "visuals": {},
     "audio": {"audio_device": "default", "volume": 0.8},
     "profiler": {},
+    "mode": "handheld",        # "handheld": picking the N900 up starts a visit; "fixed": camera/room cues do
     "state_hz": 10,            # how often "state" goes out
     "log_level": "INFO",
 }

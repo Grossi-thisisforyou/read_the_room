@@ -52,6 +52,8 @@ class Visit:
     reveal: dict[str, Any] | None = None
     answers: list[str] = field(default_factory=list)
     opted_out: bool = False
+    oracle_words: list[str] = field(default_factory=list)
+    dossier: list[str] = field(default_factory=list)
 
 
 def clean_ocean(raw: Any) -> dict[str, float] | None:
@@ -126,6 +128,21 @@ class VisitMachine:
             "lines": clean_words(data.get("lines"), 12),
             "label": str(data.get("label", ""))[:80],
         }
+        return True
+
+    def on_oracle(self, data: dict) -> bool:
+        """Text from the local language model. Wins over the profiler's canned lines."""
+        vid = data.get("visitor_id")
+        if self.phase not in ("approach", "profiling", "hook", "release") or self.visit.opted_out:
+            return False
+        if vid is not None and vid != self.visit.visitor_id:
+            return False
+        w = clean_words(data.get("words"))
+        if w:
+            self.visit.oracle_words = w
+        d = clean_words(data.get("dossier"))
+        if d:
+            self.visit.dossier = d
         return True
 
     def on_answer(self, text: str) -> None:
@@ -216,7 +233,7 @@ class VisitMachine:
         """Forget the visitor. Overwrite lists in place first, then drop the object."""
         v = self.visit
         self.last_wiped_id = v.visitor_id
-        for lst in (v.words, v.answers):
+        for lst in (v.words, v.answers, v.oracle_words, v.dossier):
             for i in range(len(lst)):
                 lst[i] = ""
             lst.clear()

@@ -23,9 +23,32 @@ that hold them best, shows them what it guessed, and then deletes them.
 | `release` | the reveal: what the machine thinks it learned | 6 s |
 | `wipe` | a visible erase; every module drops everything about the visitor | 4 s |
 
-A visitor who stands still isn't dropped: "gone" means 8 s of nothing. A
-visitor who covers the phone's proximity sensor opts out; the room goes quiet.
-All of this is in [`config/default.toml`](config/default.toml).
+In the default `handheld` mode, picking up the N900 starts a visit and putting
+it down for 8 s ends it (`mode = "fixed"` lets the camera and mic start visits
+instead). A visitor who covers the phone's proximity sensor opts out; the room
+goes quiet. All of this is in [`config/default.toml`](config/default.toml).
+
+## Tilt
+
+The phone's tilt is the main interaction. Every `state` carries:
+
+- `steer`: `{x, y}` from -1 to 1 (roll and pitch, 0,0 = flat), `flip` (phone upside
+  down, the Baselitz flip), `shake` 0..1 and `still_s` (seconds held still).
+- `tilt`: the raw angles plus the smoothed `x`, `y` and `energy` (how much it's moving now).
+
+It's smoothed every frame, so the picture moves at 30 fps although readings
+arrive at 10 Hz. Moving the phone also lifts the intensity. Visuals and audio
+also get the raw phone reading through an optional `on_sensor(data)`.
+
+## The local language model
+
+`bash install.sh --with-llm` builds llama.cpp and downloads Qwen2.5-1.5B-Instruct
+(4-bit, about 1 GB), then runs it as the `llama-server` service on
+`127.0.0.1:8080`. It uses 2 threads on CPU cores 2-3 at low priority, so the
+picture and sound keep the rest. The oracle module (`infinite_jest/oracle/`)
+asks it for words; the engine shows `oracle` messages as `state.words` and the
+phone text on the N900. If the model is slow or off, the profiler's own lines
+are used instead. A bigger model: `MODEL_URL=<gguf url> bash llm_install.sh`.
 
 ## Try it on a laptop (no Pi, no phone)
 
@@ -62,7 +85,7 @@ by default. For a USB sound card set `audio_device` in
 The message format and ports are in [`docs/CONTRACT.md`](../../docs/CONTRACT.md).
 In short, port 8765 on the Pi:
 
-- `ws://…:8765/ws`: everyone. First message `{"type":"hello","data":{"role":"phone|profiler|visuals|audio|control"}}`.
+- `ws://…:8765/ws`: everyone. First message `{"type":"hello","data":{"role":"phone|profiler|oracle|visuals|audio|control"}}`.
 - `POST /api/sensor`, `POST /api/frame`: HTTP fallback for the N900.
 - `GET /status`: health JSON. `GET /`: control page. `GET /phone/`: files from `infinite_jest/phone/`.
 - UDP 8766: one `sensor` envelope per datagram. TCP 8767: raw JPEG stream from the N900 camera.
@@ -108,14 +131,16 @@ showengine/
   hub.py             aiohttp server, UDP, TCP JPEG stream, control page
   engine.py          message handling, phase changes, wipe
   visit.py           the per-visitor state machine (pure logic)
-  presence.py        is someone there? (hysteresis)
+  presence.py        is someone there? (hysteresis; handheld or fixed)
+  tilt.py            phone tilt -> smooth steering, flip, shake, stillness
   director.py        phase + profile -> scene, intensity, palette, tempo
   fallback_profile.py crude OCEAN guess when no profiler runs
   frames.py          N900 camera frames -> motion, light, faces
   sim.py             fake visitors
   outputs/           built-in fallback visuals and audio
 config/default.toml  every setting, commented
-systemd/             the boot service
+systemd/             the boot services (engine, llama-server)
 install.sh           one-time Pi setup
+llm_install.sh       llama.cpp + Qwen (via install.sh --with-llm)
 tests/
 ```

@@ -55,7 +55,8 @@ def _ramp(a: float, b: float, t: float, dur: float) -> float:
 
 
 def build_state(m: VisitMachine, now: float, sensor: dict[str, Any] | None = None,
-                override_scene: str | None = None, blackout: bool = False) -> dict:
+                override_scene: str | None = None, blackout: bool = False,
+                tilt: dict[str, Any] | None = None, shake: float = 0.0) -> dict:
     v = m.visit
     t = m.phase_t(now)
     tempo, i0, i1, dur = PHASE_SHAPE[m.phase]
@@ -76,7 +77,9 @@ def build_state(m: VisitMachine, now: float, sensor: dict[str, Any] | None = Non
     s = sensor or {}
     if m.phase in ("approach", "profiling", "hook"):
         # the room pushes back: movement and noise lift the intensity a little
-        intensity = min(1.0, intensity + 0.15 * num(s.get("motion")) + 0.1 * num(s.get("loudness")))
+        moved = num((tilt or {}).get("energy"))
+        intensity = min(1.0, intensity + 0.15 * num(s.get("motion")) + 0.1 * num(s.get("loudness"))
+                         + 0.2 * max(moved, shake))
 
     if override_scene:
         scene = override_scene
@@ -85,8 +88,9 @@ def build_state(m: VisitMachine, now: float, sensor: dict[str, Any] | None = Non
         scene = "void"
 
     palette_name = SCENE_PALETTE.get(scene, "ash")
-    words = list(v.words)
-    if v.reveal and v.reveal.get("lines"):
+    # oracle (local Qwen) first, then the profiler's reveal / evidence lines as the fallback
+    words = list(v.oracle_words) or list(v.words)
+    if m.phase == "release" and not v.oracle_words and v.reveal and v.reveal.get("lines"):
         words = list(v.reveal["lines"])
 
     return {
@@ -103,6 +107,9 @@ def build_state(m: VisitMachine, now: float, sensor: dict[str, Any] | None = Non
         "profile_source": v.profile_source,
         "words": words,
         "reveal": dict(v.reveal) if v.reveal else None,
+        "dossier": list(v.dossier),
         "blackout": blackout,
-        "sensor": {k: s[k] for k in ("motion", "loudness", "faces", "light", "tilt", "touch") if k in s},
+        "tilt": tilt or {"alpha": 0.0, "beta": 0.0, "gamma": 0.0, "x": 0.0, "y": 0.0, "energy": 0.0},
+        "shake": round(shake, 3),
+        "sensor": {k: s[k] for k in ("motion", "loudness", "faces", "light", "touch", "held", "proximity") if k in s},
     }

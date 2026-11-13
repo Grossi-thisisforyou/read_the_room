@@ -5,6 +5,7 @@
 
 log_level = "INFO"
 state_hz = 10                 # how often the engine tells everyone the current state
+mode = "handheld"             # handheld: picking up the N900 starts a visit, putting it down 8 s ends it. "fixed": the room itself counts
 
 [network]
 host = "0.0.0.0"
@@ -14,8 +15,8 @@ tcp_port = 8767               # N900 camera JPEG stream (0 = off)
 
 [display]
 enabled = true
-fullscreen = true             # the projector, via HDMI 0
-width = 1920                  # only used when not fullscreen
+fullscreen = true             # the projector, via HDMI 0, at exactly width x height
+width = 1920                  # Full HD
 height = 1080
 fps = 30
 show_debug = false            # D on a keyboard toggles it

@@ -5,6 +5,7 @@
 #
 #     bash install.sh                 # install, and start the show at every boot
 #     bash install.sh --with-opencv   # ... plus OpenCV, so the Pi can count faces
+#     bash install.sh --with-llm      # ... plus the local Qwen language model (llama.cpp, ~1 GB)
 #     bash install.sh --no-autostart  # install only; start by hand with: python3 -m showengine
 #
 # After this the room needs no internet at all. Everything comes from
@@ -16,11 +17,13 @@ WHO="$(id -un)"
 HOME_DIR="$(getent passwd "$WHO" | cut -d: -f6)"
 AUTOSTART=1
 OPENCV=0
+LLM=0
 for arg in "$@"; do
   case "$arg" in
     --no-autostart) AUTOSTART=0 ;;
     --with-opencv) OPENCV=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --with-llm) LLM=1 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg"; exit 1 ;;
   esac
 done
@@ -30,6 +33,10 @@ sudo apt-get update
 sudo apt-get install -y python3-aiohttp python3-pygame python3-numpy alsa-utils
 if [[ $OPENCV == 1 ]]; then
   sudo apt-get install -y python3-opencv opencv-data
+fi
+
+if [[ $LLM == 1 ]]; then
+  bash ./llm_install.sh
 fi
 
 echo "== 2/5 Letting $WHO use the screen, sound and keyboard without a desktop"
