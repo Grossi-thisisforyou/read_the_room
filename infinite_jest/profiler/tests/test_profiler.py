@@ -87,6 +87,9 @@ class TestLifecycleAndPrivacy(unittest.TestCase):
         lines = reveal["data"]["lines"]
         self.assertTrue(any("deleted" in l for l in lines))
         self.assertTrue(any("r = .2" in l for l in lines))
+        text = " ".join(lines).lower()
+        for hidden in ("bacon", "basquiat", "baselitz", "crown", "scrawl", "flesh", "inverted"):
+            self.assertNotIn(hidden, text)
         # after the sim's wipe message nothing is left
         self.assertIsNone(p.visitor_id)
         self.assertEqual(p.features.summary(), {})

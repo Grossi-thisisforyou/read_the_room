@@ -31,6 +31,11 @@ DESCRIBE = {
 }
 
 
+# What visitors read for each scene. Internal hook names stay in code only.
+SCENE_NAMES = {"flesh": "the meat", "scrawl": "the writing", "inverted": "the fall",
+               "mirror": "the mirror", "void": "the dark"}
+
+
 def _describe(feat, raw):
     if feat.startswith("choice:"):
         return 'you chose "{}"'.format(raw)
@@ -57,7 +62,7 @@ def build(ocean, conf, overall, evidence, bandit_history, ranking, seconds):
         best = ranking[0]
         held = [h for h in bandit_history if h[0] == best]
         lines.append("we tried {} scenes on you. {} held you best.".format(
-            len(set(h[0] for h in bandit_history)), best))
+            len(set(h[0] for h in bandit_history)), SCENE_NAMES.get(best, "one")))
         if held:
             lines.append("we chose it because it worked, not because it was true.")
     lines.append("the machine's confidence: {:.0%}.".format(overall))

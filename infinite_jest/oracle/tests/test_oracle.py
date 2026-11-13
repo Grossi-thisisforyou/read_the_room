@@ -24,6 +24,14 @@ class TestVoice(unittest.TestCase):
         self.assertIsNone(voice.clean_dossier("you seemed sad"))
         self.assertIsNone(voice.clean_words(""))
 
+    def test_inspiration_stays_hidden(self):
+        prof = sim_profiles()[-1]["data"]
+        blob = json.dumps(voice.words_messages(prof) + voice.dossier_messages(prof)).lower()
+        for name in ("bacon", "basquiat", "baselitz", "crown"):
+            self.assertNotIn(name, blob)
+        self.assertIsNone(voice.clean_words("look at the crown\nSUBJECT LINGERS"))
+        self.assertIsNone(voice.clean_dossier("this felt like basquiat"))
+
     def test_guard_accepts_good_output(self):
         phone, words = voice.clean_words("1. stay, the screen is warmer now.\n2. subject lingers\n3. HOLDS DEVICE CLOSE\n4. wants to be seen")
         self.assertEqual(phone, "stay, the screen is warmer now")

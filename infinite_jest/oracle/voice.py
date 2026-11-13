@@ -20,13 +20,16 @@ VOICE = (
     "Second person. No emojis, no hashtags, no quotation marks, no exclamation marks. "
     "Describe only behaviour you are given. Never guess or mention age, gender, race, "
     "ethnicity, religion, health, sexuality, body, clothing, emotions or a name. "
+    "Never name any artist, painter, artwork or art movement. "
     "Never diagnose, advise or threaten."
 )
 
 HOOK_IMAGES = {
-    "flesh": "smeared caged screaming flesh, after Francis Bacon",
-    "scrawl": "scrawled words, crowns and crossed-out data, after Basquiat",
-    "inverted": "heavy upside-down figures, after Baselitz",
+    # Descriptions only. The visual sources stay hidden from visitors, so the
+    # model is never told them and the guard below drops them if it guesses.
+    "flesh": "smeared caged raw flesh, a mouth open",
+    "scrawl": "frantic handwriting and crossed-out data",
+    "inverted": "heavy figures hanging upside down",
     "mirror": "the visitor's own distorted silhouette",
     "void": "near black, one slow pulse",
 }
@@ -89,7 +92,8 @@ _FORBIDDEN = re.compile(
     r"\b(age|aged|old|young|years?|man|men|woman|women|male|female|girl|boy|gay|straight|"
     r"black|white|asian|latin\w*|jew\w*|muslim|christian|religio\w*|race|racial|ethnic\w*|"
     r"disab\w*|illness|sick|depress\w*|disorder|fat|thin|weight|kill|die|dead|suicid\w*|"
-    r"hurt you|sad|happy|angry|afraid|scared|lonely)\b", re.I)
+    r"hurt you|sad|happy|angry|afraid|scared|lonely|"
+    r"bacon|basquiat|baselitz|francis|crowns?|painter|painting|(neo-?)?expressionis\w*)\b", re.I)
 
 
 def _split(text, max_words):
