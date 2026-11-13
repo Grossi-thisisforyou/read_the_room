@@ -8,7 +8,46 @@ crown, scrawled caps and crossed-out words. Deep, dark, industrial.
 Concept drawings, materials and the recommended build are on the case page:
 https://claude.ai/artifact/K8ieND4PyYRjzZzYYN21oY (private to Baby). This folder holds the files for the Pi.
 
-## Recommended case: the junction box
+## Recommended case: the printed cage (print/)
+
+Baby's school can 3D print, so the case is two printed parts. Both print flat
+with no supports.
+
+| File | Size | Time (approx.) |
+| --- | --- | --- |
+| `print/cage_base.stl` | 126 x 82 x 33 mm | 3.5 h |
+| `print/cage_lid.stl` | 100 x 72 x 6 mm | 1.5 h |
+| `print/cage_case.scad` | OpenSCAD source; every size is a variable at the top | |
+
+Look: the walls are vertical bars (Bacon's curtain streaks), the lid has a
+space-frame box in raised ribs, Basquiat's crown, and INFINITE JEST lettered
+upside down (Baselitz). DARK DATA / CUSTOM MADE INTIMACY / IN ART WE TRUST
+are pressed into the underside.
+
+Print settings: **PETG or ASA, matte black** (not PLA, which softens around
+55 C next to a warm Pi), 0.2 mm layers, 3 walls, 20 % infill, no supports.
+Base floor-down, lid flat with the crown facing up.
+
+Hardware: official Pi 5 Active Cooler and 27 W supply, 4x M2.5 x 6 mm
+self-tapping screws (Pi to standoffs), 4x M3 x 12 mm self-tapping screws (lid
+to corner posts), 2 screws through the ears into the desk, zip ties through
+the floor slots, a steel security cable through the slot at the microSD end.
+
+Ports: USB x4 and Ethernet through the open end, USB-C and both micro-HDMI
+through the side window, microSD through a slot under the board. The router
+stays outside next to it.
+
+To change a size, edit the variable in `cage_case.scad` and export again:
+
+```bash
+openscad -D 'part="base"' -o cage_base.stl cage_case.scad
+openscad -D 'part="lid"'  -o cage_lid.stl  cage_case.scad
+```
+
+Not yet test-printed: print the lid first (cheap, quick) and check the screw
+holes line up before printing the base.
+
+## Backup case: the junction box
 
 A steel electrical pull box, 12 x 12 x 4 in, painted matte black and scrawled
 with oil stick, lettered upside down. The Pi sits inside on standoffs, the
@@ -16,7 +55,7 @@ Linksys router is strapped on top with its antennas up (Wi-Fi does not get out
 of a steel box, so the router must stay outside). Only low-voltage cables go
 in: nothing inside is above 12 V, so it is safe to touch.
 
-Why this one for Nov 23: everything comes from one hardware store trip, it
+If the printers are booked: everything comes from one hardware store trip, it
 builds in two evenings without a laser cutter, it locks, and it can be
 cabled to the desk so nobody walks off with it.
 
