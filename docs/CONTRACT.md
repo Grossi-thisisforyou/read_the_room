@@ -1,6 +1,6 @@
 # Infinite Jest: interface contract
 
-Version 1.2 (2026-11-13). Owner: the master-plan thread. Any change to this file
+Version 1.3 (2026-11-13). Owner: the master-plan thread. Any change to this file
 goes through a PR, and every module thread is told when it changes.
 
 This is the one place that says how the parts of *Infinite Jest* talk to each
@@ -14,7 +14,8 @@ Repo `Grossi-thisisforyou/read_the_room`, folder `infinite_jest/`:
 |---|---|---|
 | `infinite_jest/pi/` | show engine, WebSocket hub, state machine | Pi 5 |
 | `infinite_jest/profiler/` | camera and sensor analysis, OCEAN guess, hook choice | Pi 5 |
-| `infinite_jest/visuals/` | projector renderer + pre-generated image library | Pi 5 (HDMI 0) |
+| `infinite_jest/visuals/` | projector renderer + image library, generated on the Pi itself | Pi 5 (HDMI 0) |
+| `infinite_jest/oracle/` | local language model (small Qwen via llama.cpp) that writes the dossier words and phone prompts | Pi 5 |
 | `infinite_jest/audio/` | generative industrial techno | Pi 5 |
 | `infinite_jest/phone/` | N900 sensor app | Nokia N900 |
 | `infinite_jest/case/` | Pi shell (CAD, print files) | n/a |
@@ -31,7 +32,26 @@ From Baby's photos, 2026-11-13:
   so the phone runs a native Python 2.5-compatible agent, not a web page. Rear 5 MP camera, front VGA camera, accelerometer, proximity,
   ambient light, mic, resistive touch screen.
 - **Linksys WRT150N v1.1** router. Offline LAN, no internet at show time.
-- One projector and one speaker (models not known yet).
+- One projector and one speaker (models not known). Baby's spec: **Full HD out
+  (1920x1080 on HDMI 0) and good-quality sound** (48 kHz stereo through a
+  USB audio DAC, not HDMI audio).
+
+## Decisions from Baby (2026-11-13)
+
+1. **Output:** 1920x1080. Visuals output 1080p; heavy shader passes may render
+   at a lower internal size and scale up, but the final frame is 1080p.
+2. **The phone moves.** Default mode is `handheld`: visitors pick up the N900
+   (tethered to a plinth by its charging cable and a strap). **Tilt is the main
+   interaction**: it steers the image and the sound. Picking it up (`held`)
+   starts a visit; putting it down for 8 s ends it. The front camera faces
+   whoever holds it, so frames are close-ups of the holder.
+3. **AI runs locally on the Pi, no Mac, no cloud.** A small Qwen language model
+   (1.5B to 4B, 4-bit GGUF) runs under llama.cpp on the Pi and writes the text.
+   Images are generated on the Pi too (SD-Turbo class model via sd.cpp or
+   OnnxStream, 512 px, roughly minutes per image), as a background job that
+   grows the library when no visitor is in, mostly overnight. Live adaptation
+   comes from choosing, layering and distorting library images, not from
+   generating one per visitor.
 
 ## Network
 
@@ -53,6 +73,7 @@ Use the IP `192.168.1.10` in the phone app. mDNS on the N900 is unreliable.
 | 8765 | HTTP POST | `/api/sensor` | fallback for the N900 if its WebSocket client misbehaves: one envelope or a JSON array of envelopes per request |
 | 8765 | HTTP POST | `/api/frame` | fallback for frames: body is one `frame` envelope |
 | 8765 | HTTP GET | `/phone/` | static files from `infinite_jest/phone/` |
+| 8080 | HTTP (localhost only) | llama.cpp `llama-server`, OpenAI-style `/v1/chat/completions` | oracle only |
 | 8765 | HTTP GET | `/status` | JSON health: clients connected, phase, fps, last sensor ts |
 | 8766 | UDP | n/a | N900 sensor lane (recommended: Python 2.5 has no WebSocket client): one JSON envelope per datagram, `type` `sensor`, add `data.seq` |
 | 8767 | TCP | n/a | N900 camera lane: a `gst-launch-0.10 ... jpegenc ! tcpclientsink` stream of back-to-back JPEGs; the engine splits on SOI/EOI markers and treats each as a `frame` with `fmt: jpeg` |
@@ -158,7 +179,35 @@ Broadcast at 10 Hz and on every change.
 | `intensity` | 0..1 | overall drive for picture and sound |
 | `palette` | `{name, colors: ["#hex", ...]}` | colors for visuals |
 | `tempo` | bpm | 120..145 |
-| `words` | list of strings | short "dark data" text fragments the visuals may scrawl (no names, no personal data) |
+| `words` | list of strings | short "dark data" text fragments the visuals may scrawl (no names, no personal data), from the oracle |
+| `steer` | `{x, y}` -1..1, `flip` bool, `shake` 0..1 | tilt-derived steering for visuals and audio |
+| `mode` | string | `handheld` (default) or `fixed` |
+
+### Tilt mapping (handheld mode)
+
+Engine turns `tilt` into `state.steer`. Suggested meaning, visuals and audio own the details:
+
+| Gesture | Picture | Sound |
+|---|---|---|
+| tilt left/right (`gamma`) | smear and pan direction | stereo pan, filter sweep |
+| tilt forward/back (`beta`) | zoom into / away from the figure | intensity, kick density |
+| phone upside down (abs `beta` > 150) | Baselitz flip of the whole image | reverse / drop |
+| `shake` | glitch burst, cut to next image | noise hit |
+| hold still 5 s | image settles, words appear | strip to sub-bass |
+
+### `oracle` (oracle to engine)
+
+The oracle connects with hello role `oracle`, reads `state` and `profile`, and
+asks its local model for short text. It sends:
+
+```json
+{"type": "oracle", "ts": 0, "data": {"visitor_id": "v-7f3a", "words": ["SUBJECT LINGERS", "WANTS TO BE SEEN"], "phone_text": "turn me over", "dossier": ["approached fast: E 0.71", "..."]}}
+```
+
+The engine copies `words` into `state.words` and `phone_text` into a `phone`
+message. Text describes behaviour only (no looks, no age, gender, race or
+emotion). The model gets no frames, only numbers and hook names. If the oracle
+is slow or down, the engine uses canned lines from `profiler/prompts.json`.
 
 ### `control` (control client to engine)
 
@@ -174,8 +223,8 @@ visitor: frames, features, scores, words.
 ## Phases
 
 ```
-idle --presence--> approach --3 s--> profiling --confidence>=0.5 or 20 s--> hook
-hook --presence lost 8 s or 180 s max--> release --6 s--> wipe --> idle
+idle --held or presence--> approach --3 s--> profiling --confidence>=0.5 or 20 s--> hook
+hook --put down / presence lost 8 s, or 180 s max--> release --6 s--> wipe --> idle
 ```
 
 Timings are defaults in `infinite_jest/pi/config.toml`; the engine thread owns them.
