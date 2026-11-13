@@ -63,10 +63,15 @@ def clean_ocean(raw: Any) -> dict[str, float] | None:
     return out
 
 
+# Baby keeps the visual sources hidden from visitors: these never reach the wall or the phone.
+HIDDEN = ("bacon", "baselitz", "basquiat", "crown")
+
+
 def clean_words(raw: Any, limit: int = 24) -> list[str]:
     if not isinstance(raw, list):
         return []
-    return [str(w)[:80] for w in raw if isinstance(w, (str, int, float))][:limit]
+    out = [str(w)[:80] for w in raw if isinstance(w, (str, int, float))]
+    return [w for w in out if not any(h in w.lower() for h in HIDDEN)][:limit]
 
 
 class VisitMachine:

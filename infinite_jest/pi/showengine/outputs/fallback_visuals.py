@@ -10,7 +10,7 @@ Scenes (picked from state["scene"], or from the phase when the scene is unknown)
   surveil     approach: grid, scanning bar, crosshair, flickering subject tags
   dossier     profiling: OCEAN bars being "computed", scrolling pseudo-data
   flesh       smeared meat-red blobs pulsing inside a drawn cage, with trails
-  scrawl      crowns, crossed-out words, skulls, jittering black/yellow/red strokes
+  scrawl      crossed-out words, redaction bars, tally marks, jittering black/yellow/red strokes
   inverted    an upside-down crude figure built up from thick gestural strokes
   mirror      live abstraction warped by phone motion/tilt/touch
   afterimage  release: the last frame decays and doubles into black
@@ -42,7 +42,7 @@ GRAIN = {"void": 3, "surveil": 1, "dossier": 1, "flesh": 2, "scrawl": 1, "invert
          "mirror": 1, "afterimage": 2, "erase": 0}
 OCEAN_KEYS = (("O", "OPENNESS"), ("C", "CONSCIENTIOUSNESS"), ("E", "EXTRAVERSION"),
               ("A", "AGREEABLENESS"), ("N", "NEUROTICISM"))
-WORDS = ("DATA", "INTIMACY", "YOURS", "SOLD", "©", "MINE", "TENDER", "PROPERTY",
+WORDS = ("DATA", "INTIMACY", "YOURS", "SOLD", "MINE", "TENDER", "PROPERTY",
          "FOREVER", "OPT OUT", "KEPT", "SUBJECT")
 FADE_S = 0.5
 LOW_W = 192
@@ -504,7 +504,7 @@ class Visuals:
 
     def _make_scrawl_item(self, r):
         w, h, p = self.w, self.h, self.pal
-        kind = r.choice(("crown", "crown", "word", "word", "word", "skull", "strokes"))
+        kind = r.choice(("redact", "tally", "word", "word", "word", "strokes"))
         col = r.choice((p.yellow, p.red, p.light, p.light))
         it = {"kind": kind, "x": r.uniform(0.08, 0.85) * w, "y": r.uniform(0.1, 0.85) * h,
               "s": r.uniform(0.6, 1.4) * h * 0.12, "col": col, "seed": r.random()}
@@ -512,9 +512,8 @@ class Visuals:
             words = list(WORDS)
             if self._vid:
                 words.append(_subject_hex(self._vid))
-            hook = self._state.get("hook")
-            if isinstance(hook, str) and hook and hook not in SCENES:
-                words.append(hook.upper()[:12])
+            # live words from the profiler/oracle (already visitor-safe); never the hook name
+            words += [str(x).upper()[:24] for x in (self._state.get("words") or [])[:6] if x]
             it["text"] = r.choice(words)
             it["cross"] = r.random() < 0.75
         return it
@@ -549,13 +548,15 @@ class Visuals:
         for it in self._scrawl_items:
             x, y, s, col = it["x"] + self._jit(j), it["y"] + self._jit(j), it["s"], it["col"]
             k = it["kind"]
-            if k == "crown":
-                pts = [(x - s, y), (x - s * 0.9, y - s * 0.8), (x - s * 0.45, y - s * 0.25), (x, y - s),
-                       (x + s * 0.45, y - s * 0.25), (x + s * 0.9, y - s * 0.8), (x + s, y)]
-                pts = [(a + self._jit(j * 0.4), b + self._jit(j * 0.4)) for a, b in pts]
-                pygame.draw.lines(surf, col, True, pts, lw + 2)
-                for a, b in pts[1:6:2]:
-                    pygame.draw.circle(surf, col, (int(a), int(b)), lw + 2)
+            if k == "redact":
+                bw, bh = s * 2.2, s * 0.32
+                pygame.draw.rect(surf, (0, 0, 0), (x, y, bw, bh))
+                pygame.draw.rect(surf, col, (x, y, bw, bh), max(1, lw // 2))
+            elif k == "tally":
+                for n in range(5):
+                    xx = x + n * s * 0.22
+                    pygame.draw.line(surf, col, (xx + self._jit(j * 0.4), y), (xx, y + s), lw)
+                pygame.draw.line(surf, col, (x - s * 0.1, y + s * 0.8), (x + s, y + s * 0.2), lw)
             elif k == "word":
                 ts = self._text(it["text"], s * 0.9, col)
                 surf.blit(ts, (x, y))
@@ -564,19 +565,6 @@ class Visuals:
                     tilt = (it["seed"] - 0.5) * th * 0.6
                     pygame.draw.line(surf, p.light if col != p.light else p.red,
                                      (x - 8, y + th * 0.5 - tilt + self._jit(j)), (x + tw + 8, y + th * 0.5 + tilt), lw + 1)
-            elif k == "skull":
-                rr = int(s * 0.6)
-                pygame.draw.circle(surf, col, (int(x), int(y)), rr, lw)
-                for ex in (-0.35, 0.35):
-                    e = (x + ex * rr, y - 0.1 * rr)
-                    d = rr * 0.18
-                    pygame.draw.line(surf, col, (e[0] - d, e[1] - d), (e[0] + d, e[1] + d), lw)
-                    pygame.draw.line(surf, col, (e[0] - d, e[1] + d), (e[0] + d, e[1] - d), lw)
-                ty = y + rr * 0.5
-                pygame.draw.line(surf, col, (x - rr * 0.5, ty), (x + rr * 0.5, ty), lw)
-                for tx in range(-2, 3):
-                    xx = x + tx * rr * 0.2
-                    pygame.draw.line(surf, col, (xx, ty - rr * 0.15), (xx, ty + rr * 0.2), max(2, lw - 2))
             else:
                 rs = random.Random(it["seed"])
                 for _ in range(4):

@@ -306,3 +306,15 @@ def test_oracle_words_win_and_phone_text_forwarded():
     assert any(r == {"oracle"} and m["type"] == P.PROFILE for m, r in sent)
     eng.handle(P.make(P.CONTROL, {"cmd": "wipe"}), "control")
     assert eng.state["words"] == [] and eng.state["dossier"] == []
+
+
+def test_visual_sources_never_reach_visitors():
+    eng, clock, sent = make_engine()
+    run(eng, clock, 25, BUSY)
+    vid = eng.state["visitor_id"]
+    eng.handle(P.make(P.ORACLE, {"visitor_id": vid, "words": ["like Bacon", "YOU STAYED", "a crown for you"]}), "oracle")
+    assert eng.state["words"] == ["YOU STAYED"]
+    hooks = {"flesh", "scrawl", "inverted", "mirror", "void"}
+    for m, _ in sent:
+        if m["type"] == P.PHONE:
+            assert not any(h in str(m["data"]).lower() for h in hooks)
