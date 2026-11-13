@@ -33,6 +33,7 @@ DEFAULTS = {
     "hook_min_dwell": 8.0,      # seconds a hook runs before it may change
     "optout_cover_seconds": 3.0,  # cover the phone's sensor this long = opt out
     "seed": None,               # set for reproducible simulations
+    "mode": "handheld",         # contract default; state.mode overrides
     "prompts_file": os.path.join(HERE, "prompts.json"),
 }
 
@@ -51,7 +52,7 @@ class Profiler:
         self.cfg.update(config or {})
         self.prompts = load_prompts(self.cfg["prompts_file"])
         self.rng = random.Random(self.cfg["seed"])
-        self.features = Features()
+        self.features = Features(self.cfg["mode"])
         self.vision = Vision()
         self.bandit = HookBandit(seed=self.cfg["seed"], min_dwell=self.cfg["hook_min_dwell"])
         self.reset()
@@ -120,6 +121,8 @@ class Profiler:
         hook, release, wipe. 'reveal' is accepted too."""
         vid = data.get("visitor_id")
         phase = data.get("phase")
+        if data.get("mode") in ("handheld", "fixed"):
+            self.features.mode = data["mode"]
         out = []
         if phase in ("end", "ended", "wipe", "idle"):
             return self._end(ts) if self.visitor_id else []
@@ -182,6 +185,8 @@ class Profiler:
         if kind == "vision":
             return bool(data.get("present", True))
         if kind == "phone":
+            if data.get("held") is True:
+                return True
             p = data.get("presence")
             return bool(p) and (p is True or float(p) > 0.5)
         if kind in ("touch", "choice", "keys"):

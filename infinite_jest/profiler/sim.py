@@ -14,16 +14,16 @@ ARCHETYPES = {
     # name: behaviour knobs, hidden favourite hook
     "performer": dict(pace=0.30, close=0.65, motion=0.55, gaze=0.8, voice=0.45,
                       loud=0.5, touch=10, explore=0.8, choices=["look closer", "the scream", "seen", "upside down", "tell"],
-                      latency=1.0, favourite="scrawl"),
+                      latency=1.0, hold=0.4, tilt=60, favourite="scrawl"),
     "lurker":    dict(pace=0.06, close=0.15, motion=0.08, gaze=0.15, voice=0.0,
                       loud=0.0, touch=0, explore=0.1, choices=["look away", "the silence", "forgotten", "right way up", "keep"],
-                      latency=4.5, favourite="void"),
+                      latency=4.5, hold=0.0, tilt=0, favourite="void"),
     "nerve":     dict(pace=0.15, close=0.25, motion=0.35, gaze=0.3, voice=0.05,
                       loud=0.2, touch=4, explore=0.3, choices=["look away", "the scream", "forgotten", "upside down", "keep"],
-                      latency=1.2, burst=True, favourite="flesh"),
+                      latency=1.2, burst=True, hold=0.3, tilt=25, favourite="flesh"),
     "seeker":    dict(pace=0.10, close=0.5, motion=0.25, gaze=0.6, voice=0.1,
                       loud=0.25, touch=6, explore=0.9, choices=["look closer", "the scream", "seen", "upside down", "tell"],
-                      latency=2.5, favourite="inverted"),
+                      latency=2.5, hold=0.5, tilt=80, favourite="inverted"),
 }
 
 
@@ -36,7 +36,8 @@ def visitor(name, profiler_hook=lambda: None, seconds=70, hz=4, seed=0, visitor_
     a = ARCHETYPES[name]
     rng = random.Random(seed)
     t0 = 1000.0
-    yield t0, {"type": "state", "ts": t0, "data": {"visitor_id": visitor_id, "phase": "approach"}}
+    yield t0, {"type": "state", "ts": t0, "data": {"visitor_id": visitor_id, "phase": "approach",
+                                             "mode": "fixed"}}
     cx = 0.0 if rng.random() < 0.5 else 1.0
     direction = 1 if cx == 0.0 else -1
     size = 0.05
@@ -67,10 +68,15 @@ def visitor(name, profiler_hook=lambda: None, seconds=70, hz=4, seed=0, visitor_
             "motion": round(motion, 3), "face": rng.random() < gaze}}
         if i % max(1, hz // 2) == 0:
             voiced = rng.random() < a["voice"]
+            held = el > 10 and (math.sin(el / 7.0) + 1) / 2 < a["hold"]
+            ph = el * a["tilt"] / 30.0
             yield t, {"type": "sensor", "ts": t, "data": {
                 "kind": "phone", "audio": {"level": a["loud"] if voiced else 0.05,
                                            "voiced": voiced},
-                "proximity": {"near": False}, "held": False}}
+                "proximity": {"near": False}, "held": held,
+                "tilt": {"alpha": 0, "beta": round(a["tilt"] * math.sin(ph), 1) if held else 0,
+                         "gamma": round(a["tilt"] * 0.6 * math.cos(ph * 1.3), 1) if held else 0},
+                "accel": {"x": 0.0, "y": 0.0, "z": 1.0 + (rng.gauss(0, 0.2) if a.get("burst") else rng.gauss(0, 0.05))}}}
         if a["touch"] and rng.random() < a["touch"] / 60.0 / hz * 1.0 * (1 + liked):
             x, y = rng.random() * a["explore"] + 0.5 * (1 - a["explore"]), rng.random()
             yield t, {"type": "sensor", "ts": t, "data": {"kind": "touch", "x": x, "y": y, "down": True}}

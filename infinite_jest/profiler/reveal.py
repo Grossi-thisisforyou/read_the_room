@@ -24,6 +24,9 @@ DESCRIBE = {
     "hold_ratio": "{raw:.0%} of your touches lingered",
     "choice_speed": "you answered in {raw:.1f} seconds on average",
     "shake": "your hands shook the device by {raw:.2f} g",
+    "handled": "you held the device {raw:.0%} of the time",
+    "tilt_range": "you turned it through {raw:.0f} degrees",
+    "tilt_speed": "you turned it at {raw:.0f} degrees a second",
     "typing": "you typed {raw:.0f} characters (we kept only the count)",
 }
 

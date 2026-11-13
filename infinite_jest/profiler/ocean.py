@@ -40,6 +40,11 @@ WEIGHTS = {
     "choice_speed":  (0.3, {"C": -0.4, "N": 0.2, "E": 0.2}),
     "shake":         (0.3, {"N": 0.4, "E": 0.2, "C": -0.2}),
     "typing":        (0.4, {"E": 0.4, "O": 0.3, "A": 0.2}),
+    # Visitors pick up and turn the N900. Picking it up = curiosity and
+    # approach; exploring many angles = Openness; fast restless turning = N/E.
+    "handled":       (0.4, {"O": 0.4, "E": 0.3, "N": -0.1}),
+    "tilt_range":    (0.3, {"O": 0.5, "C": -0.1}),
+    "tilt_speed":    (0.3, {"N": 0.3, "E": 0.2, "C": -0.2}),
 }
 CHOICE_RELIABILITY = 0.6
 

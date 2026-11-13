@@ -33,6 +33,9 @@ NORMS = {
     "shake": (0.15, 0.15),        # mean accel deviation from 1 g
     "dwell": (40.0, 25.0),        # seconds present so far
     "typing": (12.0, 15.0),       # characters typed on the slide keyboard
+    "handled": (0.25, 0.25),      # fraction of the visit holding the phone
+    "tilt_range": (60.0, 40.0),   # degrees of beta+gamma explored while held
+    "tilt_speed": (40.0, 30.0),   # mean degrees per second of turning
 }
 
 
@@ -50,8 +53,15 @@ def saturate(n, half):
     return 1.0 - math.exp(-n * math.log(2) / half) if n > 0 else 0.0
 
 
+# In handheld mode the camera is in the visitor's hand: walking pace, roaming
+# and approach are meaningless, and "closeness" becomes how close they hold
+# the phone to their face.
+HANDHELD_DROP = ("pace", "roaming", "approach_time")
+
+
 class Features:
-    def __init__(self):
+    def __init__(self, mode="handheld"):
+        self.mode = mode
         self.reset()
 
     def reset(self):
@@ -85,6 +95,14 @@ class Features:
         self.shake_sum = 0.0
         self.prox_near_since = None
         self.keys_chars = 0
+        self.phone_n = 0
+        self.held_n = 0
+        self.recent_held_t = None
+        self.tilt_min = [999.0, 999.0]
+        self.tilt_max = [-999.0, -999.0]
+        self.prev_tilt = None
+        self.tilt_speed_sum = 0.0
+        self.tilt_speed_n = 0
         self.face_seen_n = 0
         self.touch_down = None
         self.last_vision_ts = None
@@ -194,8 +212,26 @@ class Features:
                              "cx": None, "size": None, "face": None}, ts, dt, fallback=True)
         if isinstance(d.get("audio"), dict):
             self._on_audio(d["audio"], ts, dt)
-        if isinstance(d.get("accel"), dict) and d.get("held", 0) > 0.5:
+        held = bool(d.get("held")) and d.get("held") not in (0, "0")
+        if "held" in d:
+            self.phone_n += 1
+            if held:
+                self.held_n += 1
+                self.recent_held_t = ts
+        if isinstance(d.get("accel"), dict) and held:
             self._on_accel(d["accel"], ts, dt)
+        tilt = d.get("tilt")
+        if held and isinstance(tilt, dict):
+            b, g = float(tilt.get("beta") or 0.0), float(tilt.get("gamma") or 0.0)
+            self.tilt_min = [min(self.tilt_min[0], b), min(self.tilt_min[1], g)]
+            self.tilt_max = [max(self.tilt_max[0], b), max(self.tilt_max[1], g)]
+            if self.prev_tilt is not None and 0 < ts - self.prev_tilt[2] < 2.0:
+                self.tilt_speed_sum += (abs(b - self.prev_tilt[0]) + abs(g - self.prev_tilt[1])) \
+                    / (ts - self.prev_tilt[2])
+                self.tilt_speed_n += 1
+            self.prev_tilt = (b, g, ts)
+        elif not held:
+            self.prev_tilt = None
         if isinstance(d.get("proximity"), dict):
             self._on_proximity(d["proximity"], ts, dt)
 
@@ -221,6 +257,13 @@ class Features:
 
     def summary(self):
         """Return {feature: (value in [-1,1], evidence in [0,1], raw)}."""
+        out = self._summary()
+        if self.mode == "handheld":
+            for k in HANDHELD_DROP:
+                out.pop(k, None)
+        return out
+
+    def _summary(self):
         out = {}
         if len(self.pace_samples) >= 3:
             raw = sum(self.pace_samples) / len(self.pace_samples)
@@ -275,6 +318,15 @@ class Features:
         if self.keys_events:
             out["typing"] = (z("typing", self.keys_chars),
                              saturate(self.keys_events, 2), self.keys_chars)
+        if self.phone_n >= 20:
+            h = self.held_n / self.phone_n
+            out["handled"] = (z("handled", h), saturate(self.phone_n, 60), h)
+        if self.held_n >= 10 and self.tilt_max[0] > -999:
+            rng = (self.tilt_max[0] - self.tilt_min[0]) + (self.tilt_max[1] - self.tilt_min[1])
+            out["tilt_range"] = (z("tilt_range", rng), saturate(self.held_n, 40), rng)
+        if self.tilt_speed_n >= 10:
+            sp = self.tilt_speed_sum / self.tilt_speed_n
+            out["tilt_speed"] = (z("tilt_speed", sp), saturate(self.tilt_speed_n, 40), sp)
         if self.accel_n >= 5:
             s = self.shake_sum / self.accel_n
             out["shake"] = (z("shake", s), saturate(self.accel_n, 30), s)
@@ -298,6 +350,8 @@ class Features:
         touch = 0.0
         if self.recent_touch_t and self.t_last is not None:
             touch = 1.0 if self.t_last - self.recent_touch_t[-1] < 5 else 0.0
+        if self.recent_held_t is not None and self.t_last - self.recent_held_t < 2:
+            touch = 1.0  # holding and turning the phone counts as engaged
         voice = (sum(self.recent_voice) / len(self.recent_voice)) if self.recent_voice else 0.0
         score = (0.30 * min(1.0, near / 0.5) + 0.15 * clamp(trend * 5, 0, 1)
                  + 0.25 * look + 0.15 * absorbed + 0.10 * touch + 0.05 * min(1.0, voice * 3))

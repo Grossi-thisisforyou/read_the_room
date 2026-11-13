@@ -152,6 +152,25 @@ class TestInProcessInterface(unittest.TestCase):
         self.assertIsNone(p.visitor_id)
 
 
+class TestHandheld(unittest.TestCase):
+    def test_handheld_drops_walking_features_and_uses_tilt(self):
+        p = create({"seed": 1})
+        p.handle({"type": "state", "ts": 0, "data": {"visitor_id": "v-1", "phase": "approach",
+                                                       "mode": "handheld"}})
+        for i in range(120):
+            ts = i * 0.1
+            p.handle({"type": "sensor", "ts": ts, "data": {"kind": "vision", "present": True,
+                      "cx": 0.2 + (i % 10) * 0.06, "size": 0.6, "motion": 0.3, "face": True}})
+            p.handle({"type": "sensor", "ts": ts, "data": {"kind": "phone", "held": True,
+                      "tilt": {"alpha": 0, "beta": 40 * ((i % 20) - 10) / 10, "gamma": 10},
+                      "accel": {"x": 0, "y": 0, "z": 1.1}}})
+        s = p.features.summary()
+        for k in ("pace", "roaming", "approach_time"):
+            self.assertNotIn(k, s)
+        for k in ("handled", "tilt_range", "tilt_speed", "gaze"):
+            self.assertIn(k, s)
+
+
 class TestVision(unittest.TestCase):
     def frame(self, w, h, box=None, val=200):
         px = bytearray([30] * (w * h))
