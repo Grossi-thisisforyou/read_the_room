@@ -10,7 +10,7 @@ On the Pi itself you do not need this: plymouth/splash.png is already in the rep
 The look, in three layers:
   1. Bacon: a smeared, fleshy figure trapped in a thin "space frame" cage.
   2. Baselitz: the figure hangs upside down.
-  3. Basquiat: scrawled caps, a crown, crossed-out words, (c) marks.
+  3. Scrawled caps and crossed-out words.
 Everything sits on near-black so the projector shows a dark room, not a
 bright rectangle, while the Pi boots.
 """
@@ -115,15 +115,6 @@ def space_frame(d, rnd):
               fill=(60, 14, 18, 70))
 
 
-def crown(d, x, y, s, rnd, fill):
-    """Basquiat's three-point crown, scrawled."""
-    pts = [(x, y + s), (x + s * 0.15, y), (x + s * 0.4, y + s * 0.55), (x + s * 0.6, y - s * 0.1),
-           (x + s * 0.8, y + s * 0.55), (x + s * 1.05, y), (x + s * 1.2, y + s)]
-    for a, b in zip(pts, pts[1:]):
-        wobbly_line(d, a, b, rnd, 7, fill, 3, 6)
-    wobbly_line(d, pts[0], pts[-1], rnd, 7, fill, 3, 10)
-
-
 def scrawl(img, text, x, y, size, rnd, fill, tilt=4):
     """Hand-lettered caps: each letter its own size, tilt and baseline."""
     f = font(size)
@@ -165,16 +156,13 @@ def main():
     img.alpha_composite(smear_figure(rnd))
     d = ImageDraw.Draw(img)
 
-    # Basquiat layer
-    crown(d, 168, 120, 110, rnd, BONE + (230,))
-    end = scrawl(img, args.title, 330, 112, 92, rnd, BONE + (240,))
-    scrawl(img, "©", end + 20, 100, 60, rnd, RUST + (230,))
+    # lettering layer
+    scrawl(img, args.title, 172, 112, 92, rnd, BONE + (240,))
     x = scrawl(img, "DARK DATA", 172, 900, 54, rnd, RUST + (230,), tilt=6)
     strike(d, 172, x, 930, rnd, BONE + (210,))
     scrawl(img, "CUSTOM MADE INTIMACY", 172, 966, 40, rnd, BONE + (200,), tilt=5)
     rx = scrawl(img, "IN ART WE TRUST", 1340, 966, 40, rnd, BONE + (190,), tilt=5)
     strike(d, 1340 + 40 * 3.6, rx, 990, rnd, RUST + (220,))  # cross out "WE TRUST"
-    scrawl(img, "© YOU", 1560, 120, 46, rnd, RUST + (210,))
 
     # vignette so the corners fall into the dark room
     vig = Image.new("L", (W, H), 0)

@@ -2,8 +2,8 @@
 
 Two halves of one object: the physical housing for the Raspberry Pi 5, and what
 the projector shows while the Pi boots. Both follow the piece's references:
-Bacon's cage and smeared flesh, Baselitz's upside-down figures, Basquiat's
-crown, scrawled caps and crossed-out words. Deep, dark, industrial.
+Bacon's cage and smeared flesh, Baselitz's upside-down figures, scrawled
+caps and crossed-out words. Deep, dark, industrial.
 
 Concept drawings, materials and the recommended build are on the case page:
 https://claude.ai/artifact/K8ieND4PyYRjzZzYYN21oY (private to Baby). This folder holds the files for the Pi.
@@ -75,7 +75,7 @@ cabled to the desk so nobody walks off with it.
 | 2 | 1 in galvanized plumber's strap, about 40 cm each, with nuts and bolts | Straps the router onto the lid. |
 | 1 | Vinyl-coated steel security cable, about 6 ft, with a padlock | Through a knockout, around a desk leg. |
 | - | Zip ties, adhesive tie-down mounts | Cable management. |
-| - | Matte black spray paint, oil sticks (red, flesh pink, bone white), a white paint marker | Finish. Markal Paintstiks are the welders' oil sticks; Basquiat used oil stick too. |
+| - | Matte black spray paint, oil sticks (red, flesh pink, bone white), a white paint marker | Finish. Markal Paintstiks are the welders' oil sticks. |
 
 Tools: drill with a step bit, screwdriver, hammer plus flat screwdriver for the
 knockouts, tin snips, gloves, safety glasses. The school shop has the drill.
@@ -98,7 +98,7 @@ Evening 2 (about 3 hours)
    to the router, micro-HDMI, USB audio. Leave a loop inside, zip-tie each
    cable to a tie-down mount before it reaches the Pi.
 7. Strap the router to the lid, antennas up.
-8. Scrawl: crown, crossed-out words, (c), the figure upside down. Smear raw
+8. Scrawl: J R A, crossed-out words, the figure upside down. Smear raw
    pink into the black with your thumb.
 9. Close the lid, run the security cable through a knockout and around
    something fixed, lock it.

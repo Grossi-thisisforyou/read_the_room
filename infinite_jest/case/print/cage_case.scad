@@ -1,7 +1,7 @@
 // INFINITE JEST · Raspberry Pi 5 cage case
 // ------------------------------------------------------------
 // A printed cage for the Pi, after Bacon's space frames and curtain
-// streaks, Basquiat's scrawled caps and Baselitz's upside-down lettering.
+// streaks, scrawled caps and Baselitz's upside-down lettering.
 //
 // Two parts, both print flat with no supports:
 //   part = "base";  // tray with cage walls, cable tie bars, screw ears
@@ -157,12 +157,6 @@ module lid_outline(h) {
         translate([x, y, 0]) cylinder(d = boss_d, h = h);
 }
 
-module crown2d(w, h) {
-    // Basquiat's three-point crown, slightly off-kilter
-    polygon([[0, 0], [w * 0.06, h * 0.92], [w * 0.28, h * 0.42], [w * 0.5, h * 1.08],
-             [w * 0.72, h * 0.40], [w * 0.95, h], [w, 0]]);
-}
-
 module scrawl_text(str, size) {
     // each letter its own tilt and baseline, like hand lettering
     tilts = [-6, 4, -3, 7, -5, 2, -7, 5, -2, 6, -4, 3, -6, 4];
@@ -210,8 +204,6 @@ module lid() {
     // lettering on the wide band, upside down after Baselitz
     translate([outer_x / 2 + 30, text_band / 2 + 2.5, lid_t - 0.01]) rotate(180)
         linear_extrude(1.2) scrawl_text("INFINITE JEST", 6.2);
-    translate([outer_x - margin - 1, 3, lid_t - 0.01]) rotate(180)
-        linear_extrude(1.2) text("©", size = 5, font = "Liberation Sans:style=Bold", halign = "center");
 }
 
 // ---------------------------------------------------------------------
