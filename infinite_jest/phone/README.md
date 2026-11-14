@@ -40,8 +40,9 @@ screen), and `wipe` (everything cleared, back to the first screen).
   microphone and motion of this phone feed a performance made only for you.
   Nothing leaves this room. Everything is erased when you leave.*
 - **Opt-out**: covering the proximity sensor ("the eye", top left of the
-  screen) for 3 seconds stops all reading of that visitor until the next wipe.
-  The screen says *you are not being read*.
+  screen) for 3 seconds stops all reading of that visitor until the phone has
+  been put down for 8 seconds (`optout_release_s`), even if the Pi ends the
+  visit sooner. The screen says *you are not being read*.
 - Sound is reduced to a level and a yes/no "someone is talking" on the phone
   itself. No audio is ever recorded or sent.
 - Nothing is written to the phone's disk except settings and a log of errors.

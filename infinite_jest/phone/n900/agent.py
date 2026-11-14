@@ -55,6 +55,7 @@ DEFAULTS = {
     'local_prompts': 1,       # show bundled either/or prompts when the Pi sends none
     'prompt_every_s': 25.0,
     'idle_reset_s': 90.0,     # back to the consent screen after this long with nobody
+    'optout_release_s': 8.0,  # an opt-out lasts until the phone has been put down this long
     'name': 'n900',
 }
 
@@ -157,6 +158,8 @@ class Agent(object):
         self.touch_t = 0.0
         self.near_since = None
         self.opted_out = False
+        self.held_t = 0.0           # last time the phone was held (local only, never sent)
+        self.optout_t = 0.0
         self.lock = threading.Lock()
         self.listeners = []
         self.prompts = load_prompts()
@@ -266,6 +269,11 @@ class Agent(object):
                 self.events.get_nowait()
             except Exception:
                 break
+        if self.opted_out and time.time() - self.held_t < float(self.conf['optout_release_s']):
+            # The engine ends the visit once the opted-out phone stops reporting presence,
+            # but the same person may still be holding it: stay opted out until it is put down.
+            self.ui_update(text='', prompt=None, state={}, reading={}, wiped_t=time.time())
+            return
         self.opted_out = False
         self.near_since = None
         self.ui_update(screen='consent', text='', prompt=None, state={},
@@ -298,16 +306,22 @@ class Agent(object):
             if self.near_since is None:
                 self.near_since = t
             elif not self.opted_out and t - self.near_since >= 3.0:
-                self.opt_out()
+                self.opt_out(t)
         else:
             self.near_since = None
+        if r.get('held'):
+            self.held_t = t
         if self.opted_out:
+            if not near and t - max(self.held_t, self.optout_t) >= float(self.conf['optout_release_s']):
+                self.opted_out = False      # put down: the opted-out visitor has left
+                self.wipe()
             return {'kind': 'phone', 'optout': True}
         return r
 
-    def opt_out(self):
+    def opt_out(self, t=None):
         log('visitor opted out')
         self.opted_out = True
+        self.optout_t = t is None and time.time() or t
         if self.camera:
             self.camera.wipe()
         self.emit('sensor', {'kind': 'optout'})
