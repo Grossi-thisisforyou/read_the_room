@@ -7,6 +7,7 @@ one to two bars; drum patterns are re-drawn on bar boundaries and the bigger
 structure (risers, impacts) on 8-bar phrases. Patterns come from an RNG seeded
 by the visitor id, so a given visitor always gets 'their' track.
 """
+import os
 import zlib
 
 import numpy as np
@@ -98,8 +99,165 @@ class DNA:
         self.pans = rng.uniform(-0.7, 0.7, 8)
 
 
+def _prep_init():
+    try:
+        os.nice(5)          # the helper yields to the render loop and the visuals
+    except OSError:
+        pass
+
+
+def _noop():
+    return True
+
+
+class _Prep:
+    """Slow sample generation (bank sections, risers) in a helper process.
+
+    A rebuilt clank/metal/swell section takes ~200 ms on a fast x86 and about
+    three times that on a Pi 5; done inside render_block it drains the 150 ms
+    output buffer and the sound drops out mid-visit. A thread does not help:
+    the helper holds the GIL and render_block's many small numpy calls queue
+    behind it (measured: worse). So one helper process makes the samples and
+    render_block keeps the old ones until the new ones have arrived. One job
+    runs at a time; a newer request for the same name replaces a queued one.
+    """
+
+    ORDER = ("riser", "shake", "bank:k", "bank:h", "bank:s", "bank:c", "bank:t")
+
+    def __init__(self):
+        import concurrent.futures as cf
+        import multiprocessing as mp
+        self._ex = cf.ProcessPoolExecutor(1, mp_context=mp.get_context("spawn"), initializer=_prep_init)
+        self._queued = {}        # name -> (key, fn, args)
+        self._running = None     # (name, key, future)
+        self._done = {}          # name -> (key, result)
+        self.broken = False
+        self._running = ("warmup", None, self._ex.submit(_noop))
+
+    def submit(self, name, key, fn, *args):
+        self._queued[name] = (key, fn, args)
+        self.poll()
+
+    def poll(self):
+        """Collect a finished job and start the next one. Cheap; call often."""
+        if self.broken:
+            return
+        if self._running is not None:
+            name, key, fut = self._running
+            if not fut.done():
+                return
+            self._running = None
+            try:
+                res = fut.result()
+            except Exception:          # helper died: fall back to building inline
+                self.broken = True
+                return
+            if name != "warmup":
+                self._done[name] = (key, res)
+        for name in self.ORDER:
+            if name in self._queued:
+                key, fn, args = self._queued.pop(name)
+                try:
+                    self._running = (name, key, self._ex.submit(fn, *args))
+                except Exception:
+                    self.broken = True
+                return
+
+    def take(self, name, key=None):
+        """The finished (key, result) for name, or None. With key: only that one."""
+        self.poll()
+        got = self._done.get(name)
+        if got is None or (key is not None and got[0] != key):
+            return None
+        return self._done.pop(name)
+
+    def has(self, name):
+        """Requested, being made, or ready."""
+        return name in self._done or name in self._queued or (
+            self._running is not None and self._running[0] == name)
+
+    def forget(self):
+        self._queued.clear()
+        self._done.clear()
+
+    def idle(self):
+        self.poll()
+        return not self._queued and self._running is None
+
+    def close(self):
+        self._ex.shutdown(wait=False, cancel_futures=True)
+
+
+def _riser(seed, vbar, n, tension, sps2, salt=9):
+    rng = np.random.default_rng([seed, vbar, salt])
+    return V.riser(rng, n, tension=tension, sps=sps2)
+
+
+def build_section(name, s, I, O, E, A, N, bpm):
+    """One sample-bank section, from the visitor seed s and the (gliding)
+    parameters. Module level so the helper process can run it."""
+    d = DNA(s)
+    if name == "k":
+        drive = round((1.5 + 2.5 * I) * 2) / 2.0
+        bq = int(bpm // 2)
+        rng = np.random.default_rng([s, 1, int(drive * 2), bq])
+        k0 = V.kick(rng, drive=drive)
+        return {"kick": [k0, V.kick(rng, drive=drive, f0=130, f1=50, decay=0.2, length=0.35),
+                         V.kick(rng, drive=drive + 1.5, f0=120, f1=38, decay=0.6, length=0.8)],
+                "kick_far": [V.kick(rng, drive=1.2, decay=0.5, length=0.7, click=0.0, lowpass=180)],
+                "rumble": [V.rumble(rng, k0, int(SR * 60.0 / (bq * 2 + 1)), drive=drive)]}
+    if name == "h":
+        hk = (round(E * 4), round(I * 4))
+        rng = np.random.default_rng([s, 2, hk[0], hk[1]])
+        b, dr = E, 1.0 + 2.0 * I
+        hs = [V.hat(rng, 0.032, b, 0.3, dr), V.hat(rng, 0.05, b, 0.5, dr), V.hat(rng, 0.022, b, 0.8, dr)]
+        return {"hat": hs, "hat_r": [h[::-1].copy() for h in hs],
+                "ohat": [V.hat(rng, 0.22, b, 0.45, dr)],
+                "clap": [V.clap(rng, 0.12, 1300 + 600 * E), V.clap(rng, 0.2, 1100 + 500 * E)]}
+    if name == "c":
+        ck = (round(O * 4), round(A * 4))
+        rng = np.random.default_rng([s, 3, ck[0], ck[1]])
+        Oq, Aq = ck[0] / 4.0, ck[1] / 4.0
+        root_hz = float(midi_hz(d.root + 36))
+        scale = (0, 3, 5, 7, 10, 12, 15)
+        out = []
+        for i in range(6):
+            if rng.random() < Aq:   # tonal, tuned to the visitor's root
+                fc = root_hz * 2.0 ** (scale[int(rng.integers(len(scale)))] / 12.0)
+                ratio = float(rng.choice([1.0, 2.0, 3.0, 1.5]))
+            else:                   # atonal metal
+                fc = rng.uniform(180.0, 1800.0)
+                ratio = float(d.clank_ratios[i])
+            ratio += Oq * rng.uniform(-0.4, 0.6)
+            out.append(V.clank(rng, fc, max(0.3, ratio), index=2 + 6 * Oq * rng.random() + 4 * (1 - Aq),
+                               decay=0.12 + 0.3 * rng.random(), ring=(1 - Aq) * 0.7))
+        return {"clank": out, "clank_r": [c[::-1].copy() for c in out],
+                "metal": [V.metal(rng, rng.uniform(150, 700), harsh=1 - Aq) for _ in range(3)],
+                "swell": [V.swell(rng), V.swell(rng, 2.4)]}
+    if name == "s":
+        sk = (round(A * 4), round(N * 4), round(I * 3))
+        rng = np.random.default_rng([s, 4, sk[0], sk[1], sk[2]])
+        Aq, Nq, Iq = sk[0] / 4.0, sk[1] / 4.0, sk[2] / 3.0
+        if Aq > 0.62:
+            voicings = [[0, 3, 7, 10], [0, 3, 7, 14], [-2, 3, 7, 10]]
+        elif Aq < 0.38:
+            voicings = [[0, 1, 6, 11], [0, 1, 2, 7], [0, 6, 11, 13]]
+        else:
+            voicings = [[0, 3, 7, 13], [0, 3, 7, 10, 13], [-2, 3, 6, 10]]
+        root = float(midi_hz(d.root + 24))
+        st = [V.stab(rng, root, v, 6 + 35 * Nq, 500 + 2500 * Iq, 0.18 + 0.25 * rng.random())
+              for v in voicings]
+        return {"stab": st, "stab_r": [x[::-1].copy() for x in st]}
+    rng = np.random.default_rng([s, 5])
+    return {"tick": [V.tick(rng, rng.uniform(1500, 9000), rng.uniform(0.003, 0.012),
+                            rng.random() < 0.4) for _ in range(8)],
+            "impact": [V.impact(rng)],
+            "vox": [V.vox(rng, rng.uniform(0.06, 0.16)) for _ in range(8)],
+            "breath": [V.breath(rng, 1.3, 800), V.breath(rng, 1.6, 1300)]}
+
+
 class TechnoSynth:
-    def __init__(self, block=1024, seed=0, volume=0.9):
+    def __init__(self, block=1024, seed=0, volume=0.9, helper=True):
         self.B = int(block)
         assert self.B % 64 == 0
         self.R = 1 << 19                      # ~10.9 s scheduling ring
@@ -107,6 +265,13 @@ class TechnoSynth:
         self.user_seed = int(seed)
         self.volume = float(volume)
         self.ar = np.arange(self.B)
+        self.prep = None
+        if helper:
+            try:
+                self.prep = _Prep()
+            except Exception:       # no processes allowed here: build inline as before
+                self.prep = None
+        self.gen = 0                          # bumped on every reset: stale prep results are ignored
         self._alloc()
         self.targets = dict(I=0.15, O=0.5, C=0.5, E=0.5, A=0.5, N=0.5, bpm=None)
         self.phase = "idle"
@@ -160,6 +325,10 @@ class TechnoSynth:
         self.riser_due = False
         self.bank = {}
         self.bank_keys = {}
+        self.bank_asked = {}
+        self.gen += 1
+        if self.prep is not None:
+            self.prep.forget()
         self.hw = {h: (1.0 if h == "default" else 0.0) for h in HOOKS}
         self._set_visitor(self.visitor, force=True)
         if snap or not hasattr(self, "p"):
@@ -173,7 +342,7 @@ class TechnoSynth:
         self.sens = dict(x=0.0, y=0.0, e=0.0, f=0.0)   # smoothed tilt / motion / flip
         self.sens_t = dict(x=0.0, y=0.0, e=0.0, f=0.0)
         self.shake_cool = 0
-        self._build_bank()
+        self._build_bank(sync=True)
 
     def _set_visitor(self, vid, force=False):
         if vid == self.visitor and not force and hasattr(self, "dna"):
@@ -339,83 +508,43 @@ class TechnoSynth:
             else min(self.mg + step, self.mg_target)
 
     # ------------------------------------------------------------ sample bank
-    def _build_bank(self):
-        p, d, s = self.p, self.dna, self.seed
+    def _bank_keys(self):
+        """section -> key; a section is rebuilt when its key changes."""
+        p, s = self.p, self.seed
         I, O, E, A, N = p["I"], p["O"], p["E"], p["A"], p["N"]
-        keys = self.bank_keys
-        bank = self.bank
+        return {"k": (s, round((1.5 + 2.5 * I) * 2) / 2.0, int(p["bpm"] // 2)),
+                "h": (s, round(E * 4), round(I * 4)),
+                "c": (s, round(O * 4), round(A * 4)),
+                "s": (s, round(A * 4), round(N * 4), round(I * 3)),
+                "t": s}
 
-        drive = round((1.5 + 2.5 * I) * 2) / 2.0
-        bq = int(p["bpm"] // 2)
-        kk = (s, drive, bq)
-        if keys.get("k") != kk:
-            rng = np.random.default_rng([s, 1, int(drive * 2), bq])
-            k0 = V.kick(rng, drive=drive)
-            bank["kick"] = [k0, V.kick(rng, drive=drive, f0=130, f1=50, decay=0.2, length=0.35),
-                            V.kick(rng, drive=drive + 1.5, f0=120, f1=38, decay=0.6, length=0.8)]
-            bank["kick_far"] = [V.kick(rng, drive=1.2, decay=0.5, length=0.7, click=0.0, lowpass=180)]
-            bank["rumble"] = [V.rumble(rng, k0, int(SR * 60.0 / (bq * 2 + 1)), drive=drive)]
-            keys["k"] = kk
+    def _build_bank(self, sync=False):
+        """Bring the sample bank up to date with the gliding parameters.
 
-        hk = (s, round(E * 4), round(I * 4))
-        if keys.get("h") != hk:
-            rng = np.random.default_rng([s, 2, hk[1], hk[2]])
-            b, dr = E, 1.0 + 2.0 * I
-            hats = [V.hat(rng, 0.032, b, 0.3, dr), V.hat(rng, 0.05, b, 0.5, dr), V.hat(rng, 0.022, b, 0.8, dr)]
-            bank["hat"] = hats
-            bank["hat_r"] = [h[::-1].copy() for h in hats]
-            bank["ohat"] = [V.hat(rng, 0.22, b, 0.45, dr)]
-            bank["clap"] = [V.clap(rng, 0.12, 1300 + 600 * E), V.clap(rng, 0.2, 1100 + 500 * E)]
-            keys["h"] = hk
-
-        ck = (s, round(O * 4), round(A * 4))
-        if keys.get("c") != ck:
-            rng = np.random.default_rng([s, 3, ck[1], ck[2]])
-            Oq, Aq = ck[1] / 4.0, ck[2] / 4.0
-            root_hz = float(midi_hz(d.root + 36))
-            scale = (0, 3, 5, 7, 10, 12, 15)
-            clanks = []
-            for i in range(6):
-                if rng.random() < Aq:   # tonal, tuned to the visitor's root
-                    fc = root_hz * 2.0 ** (scale[int(rng.integers(len(scale)))] / 12.0)
-                    ratio = float(rng.choice([1.0, 2.0, 3.0, 1.5]))
-                else:                   # atonal metal
-                    fc = rng.uniform(180.0, 1800.0)
-                    ratio = float(d.clank_ratios[i])
-                ratio += Oq * rng.uniform(-0.4, 0.6)
-                clanks.append(V.clank(rng, fc, max(0.3, ratio), index=2 + 6 * Oq * rng.random() + 4 * (1 - Aq),
-                                      decay=0.12 + 0.3 * rng.random(), ring=(1 - Aq) * 0.7))
-            bank["clank"] = clanks
-            bank["clank_r"] = [c[::-1].copy() for c in clanks]
-            bank["metal"] = [V.metal(rng, rng.uniform(150, 700), harsh=1 - Aq) for _ in range(3)]
-            bank["swell"] = [V.swell(rng), V.swell(rng, 2.4)]
-            keys["c"] = ck
-
-        sk = (s, round(A * 4), round(N * 4), round(I * 3))
-        if keys.get("s") != sk:
-            rng = np.random.default_rng([s, 4, sk[1], sk[2], sk[3]])
-            Aq, Nq, Iq = sk[1] / 4.0, sk[2] / 4.0, sk[3] / 3.0
-            if Aq > 0.62:
-                voicings = [[0, 3, 7, 10], [0, 3, 7, 14], [-2, 3, 7, 10]]
-            elif Aq < 0.38:
-                voicings = [[0, 1, 6, 11], [0, 1, 2, 7], [0, 6, 11, 13]]
-            else:
-                voicings = [[0, 3, 7, 13], [0, 3, 7, 10, 13], [-2, 3, 6, 10]]
-            root = float(midi_hz(d.root + 24))
-            st = [V.stab(rng, root, v, 6 + 35 * Nq, 500 + 2500 * Iq, 0.18 + 0.25 * rng.random())
-                  for v in voicings]
-            bank["stab"] = st
-            bank["stab_r"] = [x[::-1].copy() for x in st]
-            keys["s"] = sk
-
-        if keys.get("t") != s:
-            rng = np.random.default_rng([s, 5])
-            bank["tick"] = [V.tick(rng, rng.uniform(1500, 9000), rng.uniform(0.003, 0.012),
-                                   rng.random() < 0.4) for _ in range(8)]
-            bank["impact"] = [V.impact(rng)]
-            bank["vox"] = [V.vox(rng, rng.uniform(0.06, 0.16)) for _ in range(8)]
-            bank["breath"] = [V.breath(rng, 1.3, 800), V.breath(rng, 1.6, 1300)]
-            keys["t"] = s
+        sync (start, wipe, silent anyway): build now. Otherwise out-of-date
+        sections are made by the helper process and swapped in at a later bar;
+        until then the current samples keep playing, so render_block never
+        stalls on them."""
+        keys, asked, prep = self.bank_keys, self.bank_asked, self.prep
+        if prep is not None and prep.broken:
+            prep = self.prep = None
+        if prep is not None:
+            for name in ("k", "h", "c", "s", "t"):
+                got = prep.take("bank:" + name)
+                if got is not None and got[0][0] == self.gen:
+                    self.bank.update(got[1])
+                    keys[name] = got[0][1]
+        p = self.p
+        args = (self.seed, p["I"], p["O"], p["E"], p["A"], p["N"], p["bpm"])
+        for name, key in self._bank_keys().items():
+            if keys.get(name) == key:
+                continue
+            if sync or prep is None or name not in keys:
+                self.bank.update(build_section(name, *args))
+                keys[name] = key
+            elif asked.get(name) != key:
+                asked[name] = key
+                prep.submit("bank:" + name, (self.gen, key), build_section, name, *args)
 
     # -------------------------------------------------------------- patterns
     def _bar_start(self):
@@ -424,6 +553,7 @@ class TechnoSynth:
             self.bar_phase = self.phase
         bip = self.vbar % 8
         self._build_bank()
+        self._prefetch(bip)
         p, d = self.p, self.dna
         I, O, C, E, A, N = (p[k] for k in ("I", "O", "C", "E", "A", "N"))
         rng = np.random.default_rng([self.seed, self.vbar % 4096, 77])
@@ -601,9 +731,11 @@ class TechnoSynth:
                 self.stutters.append([at, at + int(nst * sps), max(64, int(sps / div)), None])
                 continue
             if inst == "riser":
-                n = int(min(8.5 * SR, 64 * sps))
-                rng = np.random.default_rng([self.seed, self.vbar, 9])
-                sig = V.riser(rng, n, tension=p["N"], sps=sps / 2.0)
+                got = self.prep.take("riser", (self.gen, self.vbar)) if self.prep is not None else None
+                if got is not None:
+                    sig = got[1]          # made a bar ahead by _prefetch
+                else:
+                    sig = _riser(self.seed, self.vbar, int(min(8.5 * SR, 64 * sps)), p["N"], sps / 2.0)
                 g = 0.3 * self.p["riser"] * self._hookmod("riser")
                 self._add(self.fx, sig, at, (g, g))
                 self._add(self.vsend, sig[0], at, g * 0.3)
@@ -692,11 +824,29 @@ class TechnoSynth:
             sps = self.sps()
             div = 4 if e < 0.7 else (8 if e < 0.9 else 16)
             self.stutters.append([b0, b0 + int(sps * (1 + 2 * e)), int(sps / div), None])
-            rng = np.random.default_rng([self.seed, b0 & 0xFFFFFF, 11])
-            sig = V.riser(rng, int(16 * sps), tension=0.6, sps=sps / 2.0)
+            got = self.prep.take("shake", None) if self.prep is not None else None
+            if got is not None and got[0][0] == self.gen:
+                sig = got[1]              # made ahead by _prefetch; a new one is ordered next bar
+            else:
+                rng = np.random.default_rng([self.seed, b0 & 0xFFFFFF, 11])
+                sig = V.riser(rng, int(16 * sps), tension=0.6, sps=sps / 2.0)
             g = 0.22 * e
             self._add(self.dry, sig, b0 + self.B, (g, g))
             self.shake_cool = int(16 * sps / self.B)   # at most once per bar
+
+    def _prefetch(self, bip):
+        """At a bar start: order the noise risers that may be needed soon, so
+        render_block never makes one itself (an 8 s riser costs ~120 ms on x86)."""
+        prep = self.prep
+        if prep is None:
+            return
+        sps = self.sps()
+        if bip == 3 and self.p["riser"] * self._hookmod("riser") > 0.05:
+            n = int(min(8.5 * SR, 64 * sps))
+            prep.submit("riser", (self.gen, self.vbar + 1), _riser, self.seed, self.vbar + 1, n, self.p["N"], sps / 2.0)
+        if not prep.has("shake") and self.phase in ("approach", "profiling", "hook"):
+            prep.submit("shake", (self.gen, self.vbar), _riser, self.seed, self.vbar & 0xFFFFFF,
+                        int(16 * sps), 0.6, sps / 2.0, 11)
 
     def mg_target_ok(self):
         return 1.0
@@ -736,6 +886,8 @@ class TechnoSynth:
         B = self.B
         b0 = self.pos
         b1 = b0 + B
+        if self.prep is not None:
+            self.prep.poll()
         self._smooth()
         p = self.p
         while self.next_step_at < b1:
@@ -811,6 +963,12 @@ class TechnoSynth:
             mix[over] = np.sign(mix[over]) * (0.8 + 0.17 * np.tanh((ax[over] - 0.8) / 0.17))
         self.pos = b1
         return (mix.T * 32767.0).astype(np.int16)
+
+    def close(self):
+        """Stop the helper process (the audio worker calls this on stop)."""
+        if self.prep is not None:
+            self.prep.close()
+            self.prep = None
 
     def silence(self):
         return np.zeros((self.B, 2), np.int16)
