@@ -221,6 +221,11 @@ def camera_frame(t, visitor, pose, rng):
     if near:
         return np.full((120, 160), 4, np.uint8)            # a thumb over the lens area
     img = ghost_body(160, 120, t, seed=sum(map(ord, visitor.name)) % 50, present=1.0).astype(np.float32)
+    # closer = bigger face in frame: zoom about the head (close 0.25 -> 0.85x, 0.95 -> 1.6x)
+    k = 0.6 + 1.05 * close
+    ys = np.clip(((np.arange(120) - 36) / k + 36).astype(int), 0, 119)
+    xs = np.clip(((np.arange(160) - 80) / k + 80).astype(int), 0, 159)
+    img = img[ys][:, xs]
     # the hand moves the camera: shift with tilt, jitter with tremor
     dx = int(gamma * 0.5 + rng.normal(0, 30 * noise + 1e-9))
     dy = int((beta - 25) * 0.35 + rng.normal(0, 30 * noise + 1e-9))
