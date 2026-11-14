@@ -25,6 +25,9 @@ import time
 from compat import to_bytes, to_text, byte_at, bchr, EMPTY, exc, log, dumps
 
 CRLF2 = to_bytes('\r\n\r\n')
+# Engine messages are small JSON (state, phone text). Anything bigger is a
+# broken or hostile peer: drop the link instead of filling the phone's RAM.
+MAX_MESSAGE = 256 * 1024
 ZERO_MASK = to_bytes('\x00\x00\x00\x00')
 
 
@@ -34,7 +37,7 @@ class WSClosed(Exception):
 
 class WSClient(object):
 
-    def __init__(self, host, port, path='/ws', timeout=5.0):
+    def __init__(self, host, port, path='/ws', timeout=5.0, max_message=MAX_MESSAGE):
         self.host = host
         self.port = int(port)
         self.path = path
@@ -43,6 +46,7 @@ class WSClient(object):
         self.lock = threading.Lock()
         self.buf = EMPTY
         self.open = False
+        self.max_message = max_message
 
     # -------------------------------------------------------- connect --
     def connect(self):
@@ -52,7 +56,11 @@ class WSClient(object):
             s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception:
             pass
-        s.connect((self.host, self.port))
+        try:
+            s.connect((self.host, self.port))
+        except Exception:
+            s.close()  # don't leak a file descriptor per failed attempt over days
+            raise
         key = to_text(base64.b64encode(os.urandom(16)))
         req = ('GET %s HTTP/1.1\r\n'
                'Host: %s:%d\r\n'
@@ -150,6 +158,7 @@ class WSClient(object):
     def recv_text(self):
         """Block until one complete text message arrives; answer pings."""
         parts = []
+        total = 0
         while True:
             h = self._read(2)
             b0 = byte_at(h, 0)
@@ -161,6 +170,9 @@ class WSClient(object):
                 n = struct.unpack('!H', self._read(2))[0]
             elif n == 127:
                 n = struct.unpack('!Q', self._read(8))[0]
+            if n > self.max_message or total + n > self.max_message:
+                self.open = False
+                raise WSClosed('message too big (%d bytes)' % (total + n))
             mask = None
             if b1 & 0x80:
                 mask = self._read(4)
@@ -181,6 +193,7 @@ class WSClient(object):
                 continue
             if op in (0x0, 0x1, 0x2):
                 parts.append(payload)
+                total += n
                 if fin:
                     return to_text(EMPTY.join(parts))
 
@@ -190,6 +203,7 @@ class UDPSender(object):
 
     def __init__(self, host, port):
         self.addr = (host, int(port))
+        self.host = host
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.seq = 0
 
@@ -205,6 +219,12 @@ class UDPSender(object):
         try:
             self.sock.sendto(data, self.addr)
         except socket.error:
+            pass
+
+    def close(self):
+        try:
+            self.sock.close()
+        except Exception:
             pass
 
 

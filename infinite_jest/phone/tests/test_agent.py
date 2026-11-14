@@ -13,7 +13,16 @@ sys.path.insert(0, os.path.join(HERE, '..', 'n900'))
 import websockets
 from agent import Agent, DEFAULTS
 
-PORT, UDP = 18765, 18766
+def _free(kind):
+    s = socket.socket(socket.AF_INET, kind)
+    s.bind(('127.0.0.1', 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+# free ports, so parallel runs (or a running engine) don't collide
+PORT, UDP = _free(socket.SOCK_STREAM), _free(socket.SOCK_DGRAM)
 got = {'types': [], 'sensor_kinds': [], 'frames': [], 'udp': [], 'choices': [], 'hello': None}
 clients = []
 
@@ -89,6 +98,9 @@ async def main():
         check(k in p, 'sensor field ' + k)
     check(isinstance(p.get('held'), bool) and isinstance(p.get('audio', {}).get('voiced'), bool), 'held/voiced are bools')
     check(abs(p['accel']['z'] + 1.008) < 0.01, 'accel in g')
+    check(len(got['frames']) == 0, 'no camera frames before the visitor taps in')
+    agent.on_consent()
+    await asyncio.sleep(2.5)
     f = got['frames'][-1] if got['frames'] else {}
     check(len(got['frames']) >= 6 and len(base64.b64decode(f.get('b64', ''))) == 160 * 120, 'gray8 frames 160x120 (%d)' % len(got['frames']))
     check(agent.ui_snapshot()['state'].get('hook') == 'flesh', 'state reaches the screen')
@@ -122,7 +134,8 @@ async def main():
     await asyncio.sleep(0.5)
     s = agent.ui_snapshot()
     check(s['screen'] == 'consent' and not s['optout'] and s['state'] == {}, 'wipe returns to consent and clears')
-    await asyncio.sleep(0.6)
+    agent.on_consent()
+    await asyncio.sleep(0.8)
     check(len(got['frames']) > nframes, 'reading resumes for the next visitor')
 
     # 5) reconnect
@@ -138,7 +151,13 @@ async def main():
     agent.stop()
     server.close()
     print('FAILED' if check.failed else 'ALL PASSED')
-    sys.exit(1 if check.failed else 0)
 
-if __name__ == "__main__":  # a script, not a pytest module (it exits with a status)
+
+def test_agent_end_to_end():
     asyncio.run(main())
+    assert not check.failed
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
+    sys.exit(1 if check.failed else 0)

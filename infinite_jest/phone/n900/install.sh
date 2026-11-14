@@ -57,4 +57,4 @@ su - user -c "gconftool-2 -s /system/osso/dsm/locks/devicelock_autolock_enabled 
 echo "Installed. Starting now (and at every boot)."
 stop infinite-jest-phone 2>/dev/null || true
 start infinite-jest-phone || echo "Could not start; reboot the phone."
-echo "Log: /home/user/.ij-phone.log   Quit on the phone: hold the top-left corner 5 s, or Ctrl+Q."
+echo "Log: /home/user/.ij-phone.log   Quit on the phone: hold the top-left corner 5 s."

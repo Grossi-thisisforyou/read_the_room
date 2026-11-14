@@ -36,7 +36,7 @@ screen), and `wipe` (everything cleared, back to the first screen).
 
 ## Consent and privacy, built in
 
-- The first screen says plainly: *This room is recording you. The camera,
+- The first screen says plainly: *This room is reading you. The camera,
   microphone and motion of this phone feed a performance made only for you.
   Nothing leaves this room. Everything is erased when you leave.*
 - The consent text and opt-out lines come from `infinite_jest/text/corpus/`
@@ -44,8 +44,13 @@ screen), and `wipe` (everything cleared, back to the first screen).
   fallback. The either/or prompts come from the same folder, then the
   profiler's `prompts.json`.
 - **Opt-out**: covering the proximity sensor ("the eye", top left of the
-  screen) for 3 seconds stops all reading of that visitor until the next wipe.
-  The screen says *you are not being read*.
+  screen) for 3 seconds stops all reading of that visitor until the phone has
+  been out of anyone's hands for 8 seconds (`optout_release_s`, judged from
+  the accelerometer and touch only), even if the Pi ends the visit sooner.
+  While the sensor stays covered it stays closed, unless the phone lies still
+  face-down (that is the plinth). After the opt-out ends, the sensor must read
+  uncovered once before it can opt out again, so a phone left face-down does
+  not loop. The screen says *you are not being read*.
 - Sound is reduced to a level and a yes/no "someone is talking" on the phone
   itself. No audio is ever recorded or sent.
 - Nothing is written to the phone's disk except settings and a log of errors.
@@ -77,15 +82,14 @@ tilt sender), they are probably there already: check in X Terminal with
    sudo gainroot
    sh /home/user/MyDocs/infinite_jest_phone/phone/n900/install.sh
    ```
-4. The screen turns black with *THIS ROOM IS RECORDING YOU*. That's it: it
+4. The screen turns black with *THIS ROOM IS READING YOU*. That's it: it
    starts by itself at every boot from now on.
 
 Check it worked: the small dot in the top-right corner is **pale** when the Pi
 is connected, **blinking yellow** when only the UDP fallback works, **blinking
 red** when it can't reach the Pi. The log is `/home/user/.ij-phone.log`.
 
-To quit on the phone: hold the top-left corner for 5 seconds, or Ctrl+Q on the
-keyboard. To uninstall: `sh install.sh --remove` as root.
+To quit on the phone: hold the top-left corner for 5 seconds. To uninstall: `sh install.sh --remove` as root.
 
 Settings (Pi address, rates, camera) are in `/home/user/.ij-phone.conf`.
 

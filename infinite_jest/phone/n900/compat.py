@@ -69,13 +69,36 @@ def exc():
     return sys.exc_info()[1]
 
 
-def log(*parts):
-    msg = ' '.join([str(p) for p in parts])
+def _safe_str(p):
+    # str() of a unicode exception message raises UnicodeEncodeError on 2.5
     try:
+        return str(p)
+    except Exception:
+        try:
+            return repr(p)
+        except Exception:
+            return '?'
+
+
+def log(*parts):
+    try:
+        msg = ' '.join([_safe_str(p) for p in parts])
         sys.stderr.write('[ij-phone] ' + msg + '\n')
         sys.stderr.flush()
     except Exception:
         pass
+
+
+def finite(v):
+    """True for a real number (not NaN, not +-inf). math.isnan is 2.6+."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return False
+    return v == v and v not in (_INF, -_INF)
+
+
+_INF = float('1e400')  # float('inf') is platform-dependent on 2.5
 
 
 def clamp(v, lo=0.0, hi=1.0):
@@ -131,7 +154,7 @@ def _enc_num(v):
         return v and 'true' or 'false'
     if isinstance(v, integer_types):
         return str(v)
-    if v != v or v in (float('inf'), float('-inf')):
+    if not finite(v):
         return 'null'
     s = '%.4f' % v
     s = s.rstrip('0').rstrip('.')
