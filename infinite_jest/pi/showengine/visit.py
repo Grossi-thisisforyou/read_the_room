@@ -15,7 +15,9 @@ one, so nothing about the last visitor survives in the engine.
 """
 from __future__ import annotations
 
+import re
 import secrets
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -65,14 +67,38 @@ def clean_ocean(raw: Any) -> dict[str, float] | None:
 
 
 # Baby keeps the visual sources hidden from visitors: these never reach the wall or the phone.
-HIDDEN = ("bacon", "baselitz", "basquiat", "crown")
+HIDDEN = re.compile(r"bacon|baselitz|basquiat|crown|skull|copyright|expressionis|jean[\s.-]*michel|"
+                    r"\bsamo\b|\bfrancis\b|\(c\)|\btm\b|\bscrawl", re.I)
+
+
+def visible_text(raw: Any, limit: int = 80) -> str:
+    """One line a visitor may read, or "" if it must not be shown.
+
+    Folds Unicode (full-width, accents, invisible characters) to plain ASCII
+    first, so a disguised source name is still caught, and drops what cannot be
+    folded (emoji, other scripts): the projector font has no glyphs for them
+    and the sources include symbols (crowns, skulls, copyright marks).
+    """
+    if not isinstance(raw, (str, int, float)) or isinstance(raw, bool):
+        return ""
+    t = str(raw)
+    if any(c in t for c in "\u00a9\u00ae\u2117\u2122\u24b8\u24d2\U0001f12f"):   # (c) (r) (tm) marks
+        return ""
+    t = unicodedata.normalize("NFKC", t)
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(" " if unicodedata.category(c) == "Cc" else c for c in t
+                if not unicodedata.combining(c) and unicodedata.category(c) not in ("Cf", "Co", "Cs", "Cn"))
+    t = " ".join(t.split())[:limit]
+    if not t or not t.isascii() or HIDDEN.search(t) or HIDDEN.search(re.sub(r"[^a-z]", "", t.lower())):
+        return ""
+    return t
 
 
 def clean_words(raw: Any, limit: int = 24) -> list[str]:
     if not isinstance(raw, list):
         return []
-    out = [str(w)[:80] for w in raw if isinstance(w, (str, int, float))]
-    return [w for w in out if not any(h in w.lower() for h in HIDDEN)][:limit]
+    out = [visible_text(w) for w in raw]
+    return [w for w in out if w][:limit]
 
 
 class VisitMachine:
@@ -117,9 +143,9 @@ class VisitMachine:
             if k in data:
                 self.visit.profile_extra[k] = data[k]
         ev = clean_words(data.get("evidence")) or clean_words(data.get("words"))
-        line = self.visit.hook_params.get("line")
-        if isinstance(line, str) and line:
-            ev = [line[:80]] + ev
+        line = visible_text(self.visit.hook_params.get("line"))
+        if line:
+            ev = [line] + ev
         if ev:
             self.visit.words = ev[:24]
         hook = data.get("hook")
@@ -136,7 +162,7 @@ class VisitMachine:
             return False
         self.visit.reveal = {
             "lines": clean_words(data.get("lines"), 12),
-            "label": str(data.get("label", ""))[:80],
+            "label": visible_text(data.get("label", "")),
         }
         return True
 
