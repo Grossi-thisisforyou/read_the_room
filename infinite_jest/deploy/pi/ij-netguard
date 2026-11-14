@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# ij-netguard: keep the show address (192.168.1.10) on whichever connection is live.
+# Cable in: the address is on eth0 (NetworkManager puts it there; we double-check).
+# No cable: the address moves to wlan0, if the Pi is on the show Wi-Fi.
+# Runs as the ij-netguard service, checking every 10 seconds. Changes are logged.
+CONF=/boot/firmware/infinitejest-network.txt; [[ -f $CONF ]] || CONF=/boot/infinitejest-network.txt
+ADDR=192.168.1.10; PREFIX=24; SSID=infinitejest
+if [[ -f $CONF ]]; then
+  v=$(sed -n 's/\r$//; s/^[[:space:]]*PI_ADDRESS[[:space:]]*=[[:space:]]*"\{0,1\}\([0-9.]*\).*/\1/p' "$CONF" | tail -1); [[ -n $v ]] && ADDR=$v
+  v=$(sed -n 's/\r$//; s/^[[:space:]]*PREFIX[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$CONF" | tail -1); [[ -n $v ]] && PREFIX=$v
+  v=$(sed -n 's/\r$//; s/^[[:space:]]*SHOW_SSID[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$CONF" | tail -1); [[ -n $v ]] && SSID=$v
+fi
+has()  { ip -4 addr show dev "$1" 2>/dev/null | grep -q "inet $ADDR/"; }
+up()   { [[ "$(cat /sys/class/net/$1/carrier 2>/dev/null)" == 1 ]]; }
+on_show_wifi() { command -v iw >/dev/null && iw dev wlan0 link 2>/dev/null | grep -q "SSID: $SSID\$"; }
+add()  { has "$1" || { ip addr add "$ADDR/$PREFIX" dev "$1" 2>/dev/null && echo "show address $ADDR now on $1"; }; }
+del()  { has "$1" && ip addr del "$ADDR/$PREFIX" dev "$1" 2>/dev/null && echo "show address $ADDR removed from $1"; }
+once() {
+  if [[ -e /sys/class/net/eth0 ]] && up eth0; then
+    add eth0; [[ -e /sys/class/net/wlan0 ]] && del wlan0
+  elif [[ -e /sys/class/net/wlan0 ]] && on_show_wifi; then
+    add wlan0
+  elif [[ -e /sys/class/net/wlan0 ]]; then
+    del wlan0
+  fi
+}
+[[ ${1:-} == --once ]] && { once; exit 0; }
+echo "ij-netguard: keeping $ADDR on the live show connection (Wi-Fi '$SSID' as fallback)"
+while true; do once; sleep 10; done

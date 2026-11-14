@@ -1,0 +1,22 @@
+# INFINITE JEST network settings
+#
+# You can edit this file on the Mac: put the Pi's SD card in the Mac, open the
+# drive called "bootfs", open this file in TextEdit, change, save, eject, put
+# the card back in the Pi. The Pi applies it when it starts.
+#
+# Must match the Linksys router (Wireless > Basic Wireless Settings and
+# Wireless Security). Keep the quotes if your password has spaces.
+
+SHOW_SSID=infinitejest
+SHOW_PASSWORD=
+PI_ADDRESS=192.168.1.10
+ROUTER=192.168.1.1
+
+# Wi-Fi only works once a country is set (two letters: US, DE, ...).
+COUNTRY=US
+
+# Optional: a Wi-Fi with internet (home, or your phone's hotspot) the Pi may
+# also join when the show network isn't around. Leave empty to keep what the
+# Pi already knows.
+HOME_SSID=
+HOME_PASSWORD=
