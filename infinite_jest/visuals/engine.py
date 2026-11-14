@@ -179,6 +179,10 @@ class Visuals:
     def on_wipe(self):
         """Drop everything held about the visitor and paint the room over."""
         self.fig.wipe()
+        # the strokes and the last figure were drawn from the camera: drop them now, the
+        # house-painter wipe still sweeps over the room
+        self.paint.fill((0, 0, 0, 0))
+        self.fig_surf.fill((0, 0, 0, 0))
         self.extra_words = []
         self.wipe_t = self.t
         if time.monotonic() - self.bank_loaded > 600:  # pick up new overnight images
