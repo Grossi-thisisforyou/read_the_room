@@ -94,9 +94,12 @@ class Sensors(object):
                 self.flat = (abs(beta) < 12 or abs(beta) > 168) and abs(gamma) < 12
                 shake = clamp(math.sqrt(self.jerk(abs(d))) * 2.2)
                 out['shake'] = round(shake, 3)
-                if v > 0.0004 or shake > 0.25:
-                    self.held_until = t + 2.5
-                held = t < self.held_until or not self.flat
+                # Held = moved recently. A hand always trembles a little; a phone
+                # hanging still from its tether or lying on the plinth doesn't,
+                # whatever angle it rests at.
+                if v > 0.00015 or shake > 0.25:
+                    self.held_until = t + 4.0
+                held = t < self.held_until
                 out['held'] = bool(held)
                 out['_handling'] = clamp(math.sqrt(v) * 20.0)
             except ValueError:

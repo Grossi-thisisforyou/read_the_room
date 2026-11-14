@@ -25,6 +25,7 @@ from agent import Agent, DEFAULTS  # noqa: E402
 
 FLAT = '18 -36 -1008'          # lying on the table
 TILTED = '400 -600 -700'       # in a hand, not flat
+TREMOR = '420 -585 -720'       # the same hand a moment later (held = recent movement, not angle)
 
 
 def sysfs(accel=FLAT, prox='open'):
@@ -140,7 +141,12 @@ def test_agent_writes_nothing_and_never_logs_typed_text(monkeypatch, capsys):
 def cover(a, root, t, seconds=3.4, step=0.05):
     put(root, PROX, 'closed')
     end = t + seconds
+    i = 0
+    still = open(root + ACCEL).read().strip()
     while t < end:
+        if still == TILTED:             # a hand trembles; a phone on the plinth doesn't
+            i += 1
+            put(root, ACCEL, i % 2 and TILTED or TREMOR)
         t += step
         a.reading(t)
     return t
@@ -159,7 +165,10 @@ def test_optout_stops_every_reading_and_frame():
         sent.append(a.events.get_nowait())
     assert {'kind': 'optout'} in [m['data'] for m in sent]
     put(root, PROX, 'open')
-    assert a.reading(t + 0.1) == {'kind': 'phone', 'optout': True}
+    # only "is it in someone's hand" (accelerometer) survives, so the engine can end the visit
+    r = a.reading(t + 0.1)
+    assert r.pop('held') in (True, False)
+    assert r == {'kind': 'phone', 'optout': True}
     a.on_keys('SENTINEL-AFTER-OPTOUT')
     a.on_touch(0.5, 0.5, True)
     a.ui_update(prompt={'prompt_id': 'closer', 'ask': 'x', 'options': ['a', 'b'], 't': t})
@@ -175,12 +184,16 @@ def test_optout_survives_a_pi_wipe_while_still_held():
     a.on_consent()
     t = cover(a, root, time.time())
     put(root, PROX, 'open')
-    for i in range(20):                 # still in the hand
+    for i in range(20):                 # still in the hand: a hand always trembles a little
+        put(root, ACCEL, i % 2 and TILTED or TREMOR)
         t += 0.05
         a.reading(t)
     a.handle({'type': 'wipe', 'data': {'visitor_id': 'v-1'}})
     assert a.opted_out, 'a wipe from the Pi restarted reading of the opted-out visitor'
-    assert a.reading(t + 0.1) == {'kind': 'phone', 'optout': True}
+    # only "is it in someone's hand" (accelerometer) survives, so the engine can end the visit
+    r = a.reading(t + 0.1)
+    assert r.pop('held') in (True, False)
+    assert r == {'kind': 'phone', 'optout': True}
     assert a.ui_snapshot()['optout']
 
 
@@ -191,7 +204,7 @@ def test_optout_ends_once_the_phone_is_put_down():
     t = cover(a, root, time.time())
     put(root, PROX, 'open')
     put(root, ACCEL, FLAT)
-    end = t + DEFAULTS['optout_release_s'] + 3.5      # handling decays ~2.5 s, then the release time
+    end = t + DEFAULTS['optout_release_s'] + 5.0      # 'held' lasts 4 s after the last movement, then the release time
     while t < end:
         t += 0.05
         a.reading(t)

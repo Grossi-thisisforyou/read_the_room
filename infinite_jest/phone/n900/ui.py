@@ -7,7 +7,8 @@ Input:
   the left or right half (or keys 1 / 2) answers it.
 - slide-out keyboard: typing shows a line at the bottom, Enter sends it as a
   "keys" event with how long it took and how often they deleted.
-- maintenance: hold the top-left corner for 5 s, or Ctrl+Q, to quit.
+- maintenance: hold the top-left corner for 5 s to quit (no keyboard shortcut,
+  so a visitor typing on the keyboard can't close it).
 """
 
 import time
@@ -113,10 +114,6 @@ class Screen(object):
 
     def key(self, widget, ev):
         name = gtk.gdk.keyval_name(ev.keyval) or ''
-        ctrl = ev.state & gtk.gdk.CONTROL_MASK
-        if ctrl and name.lower() == 'q':
-            self.quit()
-            return True
         snap = self.agent.ui_snapshot()
         if snap.get('screen') != 'live':
             self.agent.on_consent()
