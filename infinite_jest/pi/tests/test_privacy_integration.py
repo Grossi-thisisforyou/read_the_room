@@ -362,7 +362,7 @@ def scan_memory(needles_str, needles_bytes, ignore=()):
             elif isinstance(obj, np.ndarray) and obj.size >= 16:
                 arr = obj
                 if arr.dtype != np.uint8:
-                    if not np.issubdtype(arr.dtype, np.number):
+                    if not (np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.floating)):
                         continue
                     if not np.all(np.mod(arr, 1) == 0) or arr.min() < 0 or arr.max() > 255:
                         continue
@@ -671,6 +671,7 @@ def test_optout_end_to_end_the_holder_is_not_read_again(rig):
     keeps holding the phone for a minute: no new visit is profiled, no frame is analysed."""
     a, root = _phone_agent("400 -600 -700")          # tilted in a hand: held
     prox = root + "/sys/devices/platform/gpio-switch/proximity/state"
+    coord = root + "/sys/class/i2c-adapter/i2c-3/3-001d/coord"
     to_phone = []
     real_emit = rig.engine.emit
 
@@ -686,6 +687,9 @@ def test_optout_end_to_end_the_holder_is_not_read_again(rig):
         while rig.clock.t < end:
             with open(prox, "w") as f:
                 f.write("closed" if cover else "open")
+            with open(coord, "w") as f:                 # a hand is never perfectly still
+                j = 25 if int(rig.clock.t * 10) % 2 else -25
+                f.write("%d %d %d" % (400 + j, -600 - j, -700))
             r = a.reading(rig.clock.t)
             rig.phone(r)
             while not a.events.empty():

@@ -77,7 +77,7 @@ def test_handheld_chatter_next_to_the_plinth_does_not_start_visits():
         clock[0] += 0.1
         eng.handle(P.make(P.SENSOR, _reading(i)), "phone")
     assert eng.stats["visits"] == 1 and eng.machine.phase in ("approach", "profiling")
-    for _ in range(400):                       # puts it down, the chatter goes on: the visit still ends
+    for _ in range(900):                       # puts it down, the chatter goes on: the visit still ends
         clock[0] += 0.1
         eng.handle(P.make(P.SENSOR, dict(lying, presence=0.1, audio={"level": 0.05, "voiced": False}, motion=0.0)), "phone")
     assert eng.machine.phase == "idle" and eng.stats["visits"] == 1

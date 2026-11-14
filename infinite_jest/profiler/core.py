@@ -122,6 +122,8 @@ class Profiler:
         return []
 
     def _frame(self, data, ts):
+        if self.opted_out:
+            return []  # an opted-out visitor's frames are not even looked at
         v = self.vision.frame(data)
         return self._sensor(v, ts) if v else []
 
