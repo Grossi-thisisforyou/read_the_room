@@ -120,6 +120,18 @@ class TestLifecycleAndPrivacy(unittest.TestCase):
         self.assertEqual(p.handle({"type": "sensor", "ts": 30, "data": {"kind": "vision", "present": True,
                                                                         "cx": 0.5, "size": 0.3, "motion": 0.2}}), [])
 
+    def test_opt_out_from_the_n900_periodic_flag_once(self):
+        # the N900 agent's own opt-out: one kind "optout" (may be lost on UDP), then
+        # {"kind": "phone", "optout": true} at 20 Hz until the wipe
+        p = create({"seed": 1})
+        p.handle({"type": "visit", "ts": 0, "data": {"visitor_id": "v-1", "phase": "approach"}})
+        out = []
+        for i in range(10):
+            out += p.handle({"type": "sensor", "ts": 1 + i * 0.05,
+                             "data": {"kind": "phone", "optout": True, "held": True}})
+        self.assertEqual(len([m for m in out if m["data"].get("phase") == "opted_out"]), 1)
+        self.assertTrue(p.opted_out)
+
     def test_own_visit_ends_after_absence(self):
         p = create({"seed": 1})
         p.handle({"type": "sensor", "ts": 0, "data": {"kind": "vision", "present": True, "cx": .5, "size": .2, "motion": .1}})
