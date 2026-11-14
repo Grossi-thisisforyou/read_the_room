@@ -188,6 +188,33 @@ class TestHandheld(unittest.TestCase):
             self.assertIn(k, s)
 
 
+class TestJunkInput(unittest.TestCase):
+    def test_junk_never_raises(self):
+        rng = random.Random(0)
+        junk = [None, {}, [], "x", "nan", float("nan"), float("inf"), -1e308, {"a": 1}, [1, 2], True, 10 ** 400]
+        kinds = ["vision", "phone", "touch", "choice", "keys", "accel", "proximity", "audio", "optout", None, 5]
+        fields = ["present", "cx", "size", "motion", "face", "presence", "audio", "accel", "proximity",
+                  "held", "tilt", "x", "y", "down", "gesture", "duration_ms", "prompt_id", "option",
+                  "latency_ms", "text", "level", "voiced", "near", "z"]
+        p = create({"seed": 0})
+        for i in range(3000):
+            data = {"kind": rng.choice(kinds)}
+            for f in rng.sample(fields, 6):
+                data[f] = rng.choice(junk)
+            m = {"type": rng.choice(["sensor", "frame", "state", "wipe", "answer", None]),
+                 "ts": rng.choice(junk + [i * 0.1]), "rx_ts": rng.choice([None, i * 0.1]),
+                 "data": rng.choice([data, None, "x", []])}
+            p.handle(m)
+        self.assertTrue(True)
+
+    def test_rx_ts_wins_over_phone_clock(self):
+        p = create({"seed": 0})
+        p.handle({"type": "state", "ts": 0, "rx_ts": 100.0, "data": {"visitor_id": "v-1", "phase": "approach"}})
+        out = p.handle({"type": "sensor", "ts": 9e9, "rx_ts": 101.0,
+                        "data": {"kind": "vision", "present": True, "cx": .5, "size": .3, "motion": .2}})
+        self.assertFalse([m for m in out if m["type"] == "reveal"])
+
+
 class TestVision(unittest.TestCase):
     def frame(self, w, h, box=None, val=200):
         px = bytearray([30] * (w * h))
