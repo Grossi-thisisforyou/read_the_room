@@ -170,6 +170,25 @@ class TestInProcessInterface(unittest.TestCase):
 
 
 class TestHandheld(unittest.TestCase):
+    def test_scene_loop_settles_on_the_favourite(self):
+        """Integration film finding: the loop cycled through all scenes every 8 s."""
+        settled, total_changes, runs = 0, 0, 0
+        for seed in range(4):
+            for name, persona in sim.HANDHELD.items():
+                profiles, _ = sim.run_handheld(name, seed=seed)
+                hooks = [p["data"]["hook"] for p in profiles]
+                total_changes += sum(1 for a, b in zip(hooks, hooks[1:]) if a != b)
+                late = [p["data"]["hook"] for p in profiles if p["data"]["seconds"] > 50]
+                settled += max(set(late), key=late.count) == persona["favourite"]
+                runs += 1
+        self.assertGreaterEqual(settled, 11, "favourite should win most 100 s visits")
+        self.assertLessEqual(total_changes / runs, 6, "a 100 s visit cycled 11+ times before")
+
+    def test_personas_read_differently(self):
+        e = {n: sim.run_handheld(n, seed=1)[0][-1]["data"]["ocean"]["E"] for n in sim.HANDHELD}
+        self.assertLess(e["lurker"], 0.4)
+        self.assertGreater(e["performer"], e["nerve"])
+
     def test_handheld_drops_walking_features_and_uses_tilt(self):
         p = create({"seed": 1})
         p.handle({"type": "state", "ts": 0, "data": {"visitor_id": "v-1", "phase": "approach",
@@ -182,9 +201,9 @@ class TestHandheld(unittest.TestCase):
                       "tilt": {"alpha": 0, "beta": 40 * ((i % 20) - 10) / 10, "gamma": 10},
                       "accel": {"x": 0, "y": 0, "z": 1.1}}})
         s = p.features.summary()
-        for k in ("pace", "roaming", "approach_time"):
+        for k in ("pace", "roaming", "approach_time", "handled"):  # everyone holds it
             self.assertNotIn(k, s)
-        for k in ("handled", "tilt_range", "tilt_speed", "gaze"):
+        for k in ("tilt_range", "tilt_speed", "gaze"):
             self.assertIn(k, s)
 
 
