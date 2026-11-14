@@ -227,7 +227,9 @@ class Visit:
         ocean {O..N}, trait_confidence {O..N}, confidence, segment_pole 'E+',
         hook, scenes_tried, seconds, choices {prompt_id: option}, vid,
         visits_today, opted_out.
-        Returns {"header", "lines", "wipe", "label"}.
+        Returns {"header", "lines", "wipe", "label", "n_confession"}: the last
+        n_confession entries of "lines" are the confession proper (type them
+        slower); the ones before are evidence, numbers, segment and scene.
         """
         ctx = dict(p)
         ctx.setdefault("dwell", p.get("seconds"))
@@ -236,13 +238,13 @@ class Visit:
         if p.get("opted_out"):
             lines = self.sequence(ctx, surface="wall", beat="confession.optout")
             return {"header": "", "lines": lines,
-                    "wipe": ["nothing about you was kept."], "label": ""}
+                    "wipe": ["nothing about you was kept."], "label": "", "n_confession": len(lines)}
         header = self.pick(ctx, surface="wall", beat="header") or "FILE"
         if seconds and seconds < 15:
             lines = self.sequence(ctx, surface="wall", beat="confession.short")
             return {"header": header, "lines": lines,
                     "wipe": self.sequence(ctx, surface="wall", beat="deletion") or
-                    ["nothing about you was kept."], "label": ""}
+                    ["nothing about you was kept."], "label": "", "n_confession": len(lines)}
 
         seen = set()
         for ev in p.get("evidence", [])[:12]:
@@ -298,9 +300,11 @@ class Visit:
             why = self.pick(ctx, surface="wall", beat="why")
             if why:
                 lines.append(why)
-        lines += self.sequence(ctx, surface="wall", beat="confession")
+        confession = self.sequence(ctx, surface="wall", beat="confession")
+        lines += confession
         wipe = self.sequence(ctx, surface="wall", beat="deletion") or ["nothing about you was kept."]
-        return {"header": header, "lines": lines, "wipe": wipe, "label": label}
+        return {"header": header, "lines": lines, "wipe": wipe, "label": label,
+                "n_confession": len(confession)}
 
 
 def load(**kw):

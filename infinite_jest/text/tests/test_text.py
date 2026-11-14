@@ -130,6 +130,8 @@ class VisitTest(unittest.TestCase):
         self.assertIn("THE PERFORMER", text)
         self.assertIn("the mirror", text)
         self.assertTrue(r["lines"][-1].startswith("it still felt like it knew you"))
+        self.assertGreaterEqual(r["n_confession"], 5)
+        self.assertNotIn("CONFIDENCE", " ".join(r["lines"][-r["n_confession"]:]))
         self.assertEqual(r["wipe"][0], "you asked to be forgotten.")
         self.assertNotIn("mirror", " ".join(r["wipe"]))
 
