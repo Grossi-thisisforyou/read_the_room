@@ -148,13 +148,27 @@ def pick_hook(bank, rng, forced=None):
     return rng.choices(HOOKS, weights=weights)[0]
 
 
+def is_kept(path):
+    """curate.py marks favourites with "keep": true in the sidecar."""
+    try:
+        with open(os.path.splitext(path)[0] + ".json") as f:
+            return json.load(f).get("keep") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def enforce_cap(hook_dir, cap):
-    """Delete the oldest images (by modification time) beyond cap, with sidecars."""
+    """Delete the oldest images (by modification time) beyond cap, with
+    sidecars. Images marked keep (see curate.py) are never deleted."""
     imgs = images_in(hook_dir)
     if cap <= 0 or len(imgs) <= cap:
         return []
+    imgs = [p for p in imgs if not is_kept(p)]
+    excess = len(images_in(hook_dir)) - cap
+    if excess <= 0:
+        return []
     imgs.sort(key=lambda p: (os.path.getmtime(p), os.path.basename(p)))
-    doomed = imgs[:len(imgs) - cap]
+    doomed = imgs[:excess]
     for p in doomed:
         for q in (p, os.path.splitext(p)[0] + ".json"):
             try:
@@ -170,6 +184,23 @@ def free_mb(path):
         return st.f_bavail * st.f_frsize / 1e6
     except OSError:
         return float("inf")
+
+
+def remember_bank(deck, bank):
+    """Teach the prompt deck which combinations the bank already has."""
+    n = 0
+    for h in HOOKS:
+        d = os.path.join(bank, h)
+        for p in images_in(d):
+            try:
+                with open(os.path.splitext(p)[0] + ".json") as f:
+                    sig = json.load(f).get("signature")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if sig:
+                deck.remember(sig)
+                n += 1
+    return n
 
 
 def looks_like_image(path):
@@ -195,6 +226,12 @@ class Generator:
         self.sysrng = random.SystemRandom()
         self.proc = None
         self.stopping = False
+        self.deck = prompts.PromptDeck(self.rng)
+        self.post_engine = None
+        if args.postprocess and not args.dry_run:
+            import postprocess
+            self.post = postprocess
+            self.post_engine = postprocess.pick_engine()
 
     # -- process control
     def _signal_group(self, sig):
@@ -270,7 +307,8 @@ class Generator:
     def make_one(self):
         a = self.a
         hook = pick_hook(a.bank, self.rng, a.hook)
-        prompt, negative, parts = prompts.build_prompt(hook, self.rng)
+        pr = prompts.make(hook, deck=self.deck, theme=a.theme)
+        prompt, negative = pr["prompt"], pr["negative"]
         seed = a.seed if a.seed is not None else self.sysrng.randrange(0, 2**31 - 1)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         name = "%s_%d" % (stamp, seed)
@@ -281,6 +319,7 @@ class Generator:
 
         if a.dry_run:
             print("hook:     %s" % hook)
+            print("tags:     %s" % " ".join(pr["tag_list"][1:]))
             print("prompt:   %s" % prompt)
             print("negative: %s" % negative)
             print("seed:     %d" % seed)
@@ -345,11 +384,9 @@ class Generator:
 
         final_png = os.path.join(hook_dir, name + ".png")
         os.replace(tmp_png, final_png)
-        sidecar = {
-            "hook": hook,
-            "prompt": prompt,
-            "negative_prompt": negative,
-            "parts": parts,
+        sidecar = {"hook": hook}
+        sidecar.update(prompts.sidecar_fields(pr))
+        sidecar.update({
             "seed": seed,
             "model": os.path.basename(a.model),
             "model_path": a.model,
@@ -363,17 +400,33 @@ class Generator:
             "paused_seconds": round(paused_total, 1),
             "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "generator": "bank_gen/generate.py (stable-diffusion.cpp)",
-        }
+        })
         tmp_json = os.path.join(incoming, name + ".json")
         with open(tmp_json, "w") as f:
             json.dump(sidecar, f, indent=2)
         os.replace(tmp_json, os.path.join(hook_dir, name + ".json"))
         removed = enforce_cap(hook_dir, a.max_per_hook)
+        if self.post_engine is not None:
+            self.postprocess(final_png, hook, bool(removed))
         log("done   %s (%.0f s working%s)%s" % (
             os.path.relpath(final_png, a.bank), seconds - paused_total,
             ", %.0f s paused" % paused_total if paused_total else "",
             "; removed %d oldest" % len(removed) if removed else ""))
         return "ok"
+
+    def postprocess(self, png, hook, prune):
+        """Make the renderer-friendly versions (postprocess.py) right away,
+        unless a visitor has come in: then the next postprocess run does it."""
+        if self.busy():
+            log("visitor present, postprocessing left for later")
+            return
+        try:
+            if prune:
+                self.post.prune(self.a.bank, [hook])
+            st = self.post.process_one(png, hook, self.post_engine, self.post.Options(quiet=True))
+            log("post   " + ", ".join("%s %s" % kv for kv in st.items()))
+        except Exception as e:  # never let postprocessing stop the painting
+            log("postprocess failed: %s" % e)
 
     @staticmethod
     def _discard(path):
@@ -455,10 +508,20 @@ def main(argv=None):
                    help="abandon an image paused longer than this many seconds (default: 600)")
     p.add_argument("--min-free-mb", type=int, default=1000,
                    help="wait while the disk has less free space than this (default: 1000)")
+    p.add_argument("--theme", default="none",
+                   help="theme of the night: auto (a different one each night), mix (any, per image), "
+                   "none, or one of %s"
+                   % ", ".join(prompts.THEME_NAMES))
+    p.add_argument("--postprocess", action="store_true",
+                   help="also make the 16:9, grey, posterized and cut-out versions of each image")
     p.add_argument("--dry-run", action="store_true", help="print the command and prompt, run nothing")
     p.add_argument("extra", nargs="*", help="extra arguments passed to sd after --, e.g. -- --vae-tiling")
     a = p.parse_args(argv)
 
+    try:
+        prompts.resolve_theme(a.theme)
+    except ValueError as e:
+        p.error(str(e))
     a.bank = os.path.abspath(os.path.expanduser(a.bank))
     a.sd_bin = os.path.expanduser(a.sd_bin) if a.sd_bin else first_existing(SD_BIN_CANDIDATES)
     a.model = os.path.expanduser(a.model) if a.model else first_existing(MODEL_CANDIDATES)
@@ -478,9 +541,13 @@ def main(argv=None):
         os.makedirs(a.bank, exist_ok=True)
 
     g = Generator(a)
+    known = remember_bank(g.deck, a.bank)
     signal.signal(signal.SIGTERM, g.shutdown)
     signal.signal(signal.SIGINT, g.shutdown)
     if not a.dry_run:
+        theme = prompts.resolve_theme(a.theme)
+        log("theme %s | %d known prompt combinations in the bank%s" % (
+            theme or "none", known, " | postprocess on (%s)" % g.post_engine.name if g.post_engine else ""))
         log("bank %s | model %s | %d steps, cfg %s, %dx%d, %d threads | hours %s | cap %d/hook" % (
             a.bank, os.path.basename(a.model), a.steps, a.cfg, a.width, a.height, a.threads,
             "any" if a.anytime else "%02d-%02d" % a.hours, a.max_per_hook))

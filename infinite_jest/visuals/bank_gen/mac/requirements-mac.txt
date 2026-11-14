@@ -1,0 +1,14 @@
+# Python packages for the Mac image painter (installed by install_mac.sh into
+# its own folder, ~/infinite-jest-mac/venv; nothing else on the Mac changes).
+#
+# Pinned to one combination released together in late 2024 that has
+# ready-made Apple Silicon wheels for Python 3.12, so nothing is compiled and
+# every Mac gets the same thing. To try the newest versions instead:
+#     LATEST=1 bash install_mac.sh
+torch==2.5.1
+diffusers==0.31.0
+transformers==4.46.3
+accelerate==1.1.1
+safetensors>=0.4.5
+huggingface_hub>=0.26,<1.0
+pillow>=10.4

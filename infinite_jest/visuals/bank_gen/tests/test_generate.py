@@ -3,9 +3,10 @@
 
     python3 tests/test_generate.py -v
 
-Linux only (reads /proc/<pid>/stat). Uses the real pause file
-/tmp/infinite_jest_busy, so don't run it while the installation is live.
-Everything it writes goes to a temporary bank folder that is deleted afterwards.
+Linux only (reads /proc/<pid>/stat). Uses its own pause file (passed with
+--pause-file), never the installation's /tmp/infinite_jest_busy, so it is safe
+to run next to a live show. Everything it writes goes to a temporary bank
+folder that is deleted afterwards.
 """
 import json
 import os
@@ -27,7 +28,7 @@ import prompts  # noqa: E402
 
 GEN = os.path.join(ROOT, "generate.py")
 FAKE = os.path.join(HERE, "fake_sd.py")
-BUSY = "/tmp/infinite_jest_busy"
+BUSY = os.path.join(tempfile.gettempdir(), "infinite_jest_busy_test_%d" % os.getpid())
 
 
 def proc_state(pid):
@@ -48,7 +49,7 @@ class Run:
         self.model = os.path.join(bank, "fake-model.gguf")
         open(self.model, "w").close()
         cmd = [sys.executable, GEN, "--bank", bank, "--sd-bin", FAKE, "--model", self.model,
-               "--anytime", *extra]
+               "--anytime", "--pause-file", BUSY, *extra]
         self.p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   text=True, env=env)
         self.lines = []
@@ -94,7 +95,7 @@ class GenerateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if os.path.exists(BUSY):
-            raise unittest.SkipTest("%s already exists (installation running?)" % BUSY)
+            os.remove(BUSY)
 
     def setUp(self):
         self.bank = tempfile.mkdtemp(prefix="bankgen-test-")
@@ -139,6 +140,22 @@ class GenerateTests(unittest.TestCase):
                 self.assertEqual(self.hook_files(h), [])
         leftovers = [f for f in os.listdir(os.path.join(self.bank, ".incoming")) if f != "last_sd.log"]
         self.assertEqual(leftovers, [])
+
+    # 1b. v2 sidecar: tags, theme, signature; --postprocess makes the versions
+    def test_tags_theme_postprocess(self):
+        r = self.start("--count", "1", "--hook", "flesh", "--theme", "ledger", "--postprocess", fake_seconds=1)
+        self.assertEqual(r.finish(), 0, r.text())
+        pngs = [f for f in self.hook_files("flesh") if f.endswith(".png")]
+        with open(os.path.join(self.bank, "flesh", pngs[0][:-4] + ".json")) as f:
+            meta = json.load(f)
+        self.assertEqual(meta["theme"], "ledger")
+        self.assertEqual(meta["tags"]["hook"], "flesh")
+        self.assertIn("theme:ledger", meta["tag_list"])
+        self.assertEqual(meta["prompt_version"], 2)
+        self.assertIn("theme ledger", r.text())
+        derived = os.listdir(os.path.join(self.bank, "flesh", "derived"))
+        self.assertIn(pngs[0][:-4] + ".wide.png", derived)
+        self.assertIn("post   ", r.text())
 
     # 2. pause file stops sd (state T); removing it resumes
     def test_pause_and_resume(self):
