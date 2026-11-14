@@ -24,6 +24,37 @@ log = logging.getLogger("showengine")
 Emit = Callable[[dict, "set[str] | None"], None]   # (message, roles or None = everyone)
 
 
+# The contract's periodic phone fields, each read into a known shape. Anything else
+# a sender puts in a sensor message is not kept (it would pile up and be rebroadcast).
+OPT_OUT_COVER_S = 3.0   # docs/CONTRACT.md privacy promise; the profiler uses the same number
+_UNIT = ("motion", "presence", "loudness", "light", "shake", "battery")
+
+
+def clean_sensor(d: dict) -> dict:
+    out: dict[str, Any] = {}
+    for k in _UNIT:
+        if k in d:
+            out[k] = P.num(d[k])
+    if "faces" in d:
+        out["faces"] = int(P.num(d["faces"], 0, 0, 16))
+    for k in ("held", "slide"):
+        if k in d:
+            v = d[k]
+            out[k] = v if isinstance(v, bool) else P.num(v)
+    if "audio" in d:
+        a = d["audio"] if isinstance(d["audio"], dict) else {}
+        out["audio"] = {"level": P.num(a.get("level")), "voiced": a.get("voiced") is True}
+    if "proximity" in d:
+        p = d["proximity"]
+        near = p.get("near") if isinstance(p, dict) else p
+        out["proximity"] = {"near": near is True or P.num(near) >= 0.5}
+    if isinstance(d.get("accel"), dict):
+        out["accel"] = {k: P.num(d["accel"].get(k), 0.0, -8.0, 8.0) for k in ("x", "y", "z")}
+    if isinstance(d.get("tilt"), dict):
+        out["tilt"] = {k: P.num(d["tilt"].get(k), 0.0, -360.0, 360.0) for k in ("alpha", "beta", "gamma")}
+    return out
+
+
 def _dataclass_kwargs(cls: type, raw: dict) -> dict:
     fields = cls.__dataclass_fields__  # type: ignore[attr-defined]
     return {k: float(v) for k, v in (raw or {}).items() if k in fields}
@@ -58,6 +89,8 @@ class Engine:
         self._state_period = 1.0 / max(1.0, float(cfg.get("state_hz", 10)))
         self._last_state_emit = -1e9
         self._last_frame_t = -1e9
+        self._last_frame_in = -1e9
+        self._near_since: float | None = None
         self._unknown_types: set[str] = set()
 
     # ------------------------------------------------------------------ input
@@ -69,8 +102,10 @@ class Engine:
         elif t == P.FRAME:
             self._on_frame_msg(msg, now)
         elif t == P.PROFILE:
+            if role != "profiler":
+                return   # a profile decides the hook and the words on the wall
             self.stats["profile"] += 1
-            self.machine.on_profile(d, now)
+            self._on_profile(d, now)
             self.emit(self._fwd(msg), {"oracle"})
         elif t == P.ORACLE:
             if role in ("oracle", "profiler") and self.machine.on_oracle(d):
@@ -79,8 +114,12 @@ class Engine:
                 if isinstance(text, str) and text.strip():
                     self.emit(P.make(P.PHONE, {"text": text.strip()[:120]}), {"phone"})
         elif t == P.REVEAL:
+            if role != "profiler":
+                return
             self.machine.on_reveal(d)
         elif t == P.ANSWER:
+            if self.machine.visit.opted_out:
+                return   # opted out: their words go nowhere
             self.machine.on_answer(str(d.get("text", "")))
             self.emit(self._fwd(msg), {"profiler"})
         elif t == P.PHONE:
@@ -90,11 +129,13 @@ class Engine:
             if role == "control":
                 self._on_control(d, now)
             else:
-                log.warning("control message from role %s ignored", role)
+                plugins.report(log, "control-role", f"control message from role {role} ignored",
+                               exc_info=False, level=logging.WARNING)
         elif t == P.HELLO:
             pass  # the hub records the role and sends the current state
         else:
-            if t not in self._unknown_types:
+            t = t[:40]
+            if t not in self._unknown_types and len(self._unknown_types) < 32:
                 self._unknown_types.add(t)
                 log.info("ignoring message type %r", t)
             return
@@ -113,22 +154,47 @@ class Engine:
         self.last_sensor_ts = time.time()
         kind = d.get("kind", "phone")
         if kind == "phone":
-            self.sensor.update({k: v for k, v in d.items() if k != "kind"})
+            clean = clean_sensor(d)
+            self.sensor.update(clean)
+            self._watch_cover(clean, now)
+            d = {**d, **clean}            # the modules get the contract fields in their contract shapes
+            msg = {**msg, "data": d}
             self.tilt.feed(d, now)
             plugins.call(self.visuals, "on_sensor", d)
             plugins.call(self.audio, "on_sensor", d)
         elif kind == "touch":
-            self.sensor["touch"] = {"x": d.get("x"), "y": d.get("y")}
-        elif kind == "keys":
+            d = {**d, "x": P.num(d.get("x")), "y": P.num(d.get("y"))}
+            msg = {**msg, "data": d}
+            self.sensor["touch"] = {"x": d["x"], "y": d["y"]}
+        elif kind == "keys" and not self.machine.visit.opted_out:
             self.machine.on_answer(str(d.get("text", "")))
-        elif kind == "choice":
+        elif kind == "choice" and not self.machine.visit.opted_out:
             self.machine.on_answer(str(d.get("option", "")))
-        self.presence.feed(d, now)
+        self.presence.feed(d, now)       # still needed after an opt-out: to see them leave
+        if self.machine.visit.opted_out:
+            return   # opted out: nothing more is read about them until the visit ends
         if self.machine.phase in ("approach", "profiling", "hook"):
             self.fallback.feed(d)
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, msg["ts"]), now)
+            # the engine's clock, not the sender's ts: the N900's clock can be years off
+            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, now), now)
         self.emit(self._fwd(msg), {"profiler"})
+
+    def _watch_cover(self, clean: dict, now: float) -> None:
+        """Covering the proximity sensor for 3 s opts out. The profiler watches for it too;
+        this makes the promise hold when no profiler is running (fallback mode)."""
+        if "proximity" in clean:
+            near = clean["proximity"]["near"]
+            self._near_since = (self._near_since if self._near_since is not None else now) if near else None
+        m = self.machine
+        if (self._near_since is not None and now - self._near_since >= OPT_OUT_COVER_S
+                and m.phase in ("approach", "profiling", "hook") and not m.visit.opted_out):
+            vid = m.visit.visitor_id
+            self._on_profile({"visitor_id": vid, "phase": "opted_out", "wiped": True}, now)
+            visit = {"visitor_id": vid, "phase": m.phase, "opt_out": True}
+            self.emit(P.make(P.VISIT, visit), {"profiler"})
+            self.emit(P.make(P.PROFILE, {"visitor_id": vid, "phase": "opted_out", "wiped": True}), {"oracle"})
+            plugins.call(self.profiler, "on_visit", visit, now)
 
     def _from_profiler(self, result: Any, now: float) -> None:
         """What an in-process profiler hands back: a profile, a reveal, or None."""
@@ -139,15 +205,27 @@ class Engine:
             self.machine.on_reveal(result)
         else:
             self.stats["profile"] += 1
-            self.machine.on_profile(result, now)
+            self._on_profile(result, now)
             self.emit(P.make(P.PROFILE, {k: v for k, v in result.items() if k != "type"}), {"oracle"})
 
+    def _on_profile(self, d: dict, now: float) -> None:
+        was_out = self.machine.visit.opted_out
+        self.machine.on_profile(d, now)
+        if self.machine.visit.opted_out and not was_out:
+            # covered the phone: the frames and the figure drawn from them go now, not at the end
+            self.frames.reset()
+            self.fallback.reset()
+            plugins.call(self.visuals, "on_wipe")
+
     def _on_frame_msg(self, msg: dict, now: float) -> None:
-        if self.blackout:
-            return
+        if self.blackout or self.machine.visit.opted_out:
+            return   # covered the phone: no more pictures of them, not even in RAM
+        if now - self._last_frame_in < 0.09:
+            return   # the phone sends at most 4 fps; a flood shouldn't eat the Pi's CPU
+        self._last_frame_in = now
         self.emit(self._fwd(msg), {"profiler"})
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], msg["ts"]), now)
+            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], now), now)
         rgb = self.frames.decode(msg["data"])
         if rgb is not None:
             self._use_frame(rgb, now)
@@ -155,7 +233,7 @@ class Engine:
     def on_jpeg(self, jpeg: bytes) -> None:
         """A JPEG from the raw TCP camera stream (port 8767)."""
         now = self.clock()
-        if self.blackout or now - self._last_frame_t < 0.1:   # analyse at most 10 fps
+        if self.blackout or self.machine.visit.opted_out or now - self._last_frame_t < 0.1:   # at most 10 fps
             return
         data = {"fmt": "jpeg", "b64": base64.b64encode(jpeg).decode("ascii")}
         self._on_frame_msg(P.make(P.FRAME, data), now)
@@ -252,6 +330,7 @@ class Engine:
             self._wipe_everything(m.last_wiped_id)
 
     def _wipe_everything(self, visitor_id: str | None) -> None:
+        self._near_since = None
         self.fallback.reset()
         self.frames.reset()
         for k in ("touch",):
