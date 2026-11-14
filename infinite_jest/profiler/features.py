@@ -67,7 +67,7 @@ def saturate(n, half):
 # In handheld mode the camera is in the visitor's hand: walking pace, roaming
 # and approach are meaningless, and "closeness" becomes how close they hold
 # the phone to their face.
-HANDHELD_DROP = ("pace", "roaming", "approach_time")
+HANDHELD_DROP = ("pace", "roaming", "approach_time", "handled")  # everyone holds it
 
 
 class Features:
@@ -109,6 +109,8 @@ class Features:
         self.phone_n = 0
         self.held_n = 0
         self.recent_held_t = None
+        self.recent_tilt_speed = deque(maxlen=20)
+        self.recent_shake = deque(maxlen=20)
         self.tilt_min = [999.0, 999.0]
         self.tilt_max = [-999.0, -999.0]
         self.prev_tilt = None
@@ -212,6 +214,7 @@ class Features:
         mag = math.sqrt(x * x + y * y + zz * zz)
         self.accel_n += 1
         self.shake_sum += abs(mag - 1.0)
+        self.recent_shake.append(abs(mag - 1.0))
 
     def _on_phone(self, d, ts, dt):
         """The N900's bundled ~10 Hz packet: unpack the parts we use."""
@@ -237,9 +240,10 @@ class Features:
             self.tilt_min = [min(self.tilt_min[0], b), min(self.tilt_min[1], g)]
             self.tilt_max = [max(self.tilt_max[0], b), max(self.tilt_max[1], g)]
             if self.prev_tilt is not None and 0 < ts - self.prev_tilt[2] < 2.0:
-                self.tilt_speed_sum += (abs(b - self.prev_tilt[0]) + abs(g - self.prev_tilt[1])) \
-                    / (ts - self.prev_tilt[2])
+                sp = (abs(b - self.prev_tilt[0]) + abs(g - self.prev_tilt[1])) / (ts - self.prev_tilt[2])
+                self.tilt_speed_sum += sp
                 self.tilt_speed_n += 1
+                self.recent_tilt_speed.append(sp)
             self.prev_tilt = (b, g, ts)
         elif not held:
             self.prev_tilt = None
@@ -343,12 +347,37 @@ class Features:
             out["shake"] = (z("shake", s), saturate(self.accel_n, 30), s)
         return out
 
+    def _engagement_handheld(self):
+        """Handheld: a visitor who is held by a scene steadies the phone,
+        turns it less, stops shaking it and brings it closer. Each part is
+        compared with this visitor's own average so far, so calm and restless
+        people both give the bandit a contrast to learn from."""
+        def mean(q):
+            return sum(q) / len(q) if q else 0.0
+        rel = lambda now, base: clamp(now / (2.0 * base + 1e-6), 0.0, 1.0)
+        base_tilt = self.tilt_speed_sum / max(1, self.tilt_speed_n)
+        steady = 1.0 - rel(mean(self.recent_tilt_speed), base_tilt)
+        base_shake = self.shake_sum / max(1, self.accel_n)
+        calm = 1.0 - rel(mean(self.recent_shake), base_shake) if self.recent_shake else 0.5
+        base_mot = self.motion_sum / max(1, self.motion_n)
+        still = 1.0 - rel(mean(self.recent_motion), base_mot) if self.recent_motion else 0.5
+        near = clamp(mean(self.recent_size) / 0.6, 0.0, 1.0) if self.recent_size else 0.5
+        look = mean(self.recent_face) if self.recent_face else 0.5
+        voice = min(1.0, mean(self.recent_voice) * 3) if self.recent_voice else 0.0
+        score = (0.35 * steady + 0.15 * calm + 0.20 * still + 0.15 * near
+                 + 0.10 * look + 0.05 * voice)
+        if self.recent_held_t is None or self.t_last - self.recent_held_t > 2:
+            score *= 0.3  # put down
+        return clamp(score, 0.0, 1.0)
+
     def engagement(self):
         """How held is the visitor right now, 0..1, from the recent window.
 
         Held = present, close or getting closer, looking, still-but-there or
         touching/speaking. Gone = 0. This is the reward the hook bandit uses.
         """
+        if self.mode == "handheld" and self.recent_tilt_speed:
+            return self._engagement_handheld()
         if not self.recent_size and not self.recent_motion:
             return 0.0
         size = list(self.recent_size) or [0.3]

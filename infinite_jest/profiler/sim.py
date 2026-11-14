@@ -115,3 +115,85 @@ def run(name, seed=0, seconds=70, profiler=None, verbose=False):
             elif out["type"] == "reveal":
                 reveal = out
     return profiles, reveal
+
+
+# ------------------------------------------------------------ handheld mode --
+# Mirrors the integration film's personas (infinite_jest/integration/film.py):
+# the visitor holds the N900; the scene they like makes them steadier (tilt
+# amplitude x0.45, speed x0.7, tremor x0.6). The camera sees a face of fixed
+# size, moved by the hand, so frame motion follows tilt speed.
+HANDHELD = {
+    "performer": dict(amp=(55, 70), speed=1.4, tremor=0.03, shakes=4.0, voice=0.55, favourite="mirror",
+                      choices=["look closer", "the noise", "seen", "upside down", "tell"], latency=0.9),
+    "lurker":    dict(amp=(6, 8), speed=0.25, tremor=0.004, shakes=0.0, voice=0.0, favourite="void",
+                      choices=["look away", "the silence", "forgotten", "right way up", "keep"], latency=6.0),
+    "nerve":     dict(amp=(18, 25), speed=2.2, tremor=0.05, shakes=7.0, voice=0.08, favourite="flesh",
+                      choices=["look away", "the noise", "forgotten", "upside down", "keep"], latency=1.3),
+    "seeker":    dict(amp=(80, 85), speed=0.6, tremor=0.01, shakes=0.5, voice=0.12, favourite="inverted",
+                      choices=["look closer", "the noise", "seen", "upside down", "tell"], latency=2.6),
+}
+
+
+def handheld_visitor(name, profiler_hook=lambda: None, seconds=100, hz=10, seed=0, visitor_id="v-hh"):
+    a = HANDHELD[name]
+    rng = random.Random(seed)
+    t0 = 1000.0
+    yield t0, {"type": "state", "ts": t0, "data": {"visitor_id": visitor_id, "phase": "approach",
+                                                    "mode": "handheld"}}
+    prev = None
+    shake_until, next_shake = -1, t0 + 6 + rng.random() * 6
+    prompts = ["closer", "scream", "seen", "upside", "secret"]
+    next_prompt, n_choice = 12.0, 0
+    for i in range(int(seconds * hz)):
+        t = t0 + i / hz
+        el = t - t0
+        liked = profiler_hook() == a["favourite"]
+        calm = 0.45 if liked else 1.0
+        sp = a["speed"] * (0.7 if liked else 1.0)
+        beta = 25 + a["amp"][0] * calm * math.sin(el * sp * 0.73 + 0.4)
+        gamma = a["amp"][1] * calm * math.sin(el * sp + 1.1)
+        noise = a["tremor"] * (0.6 if liked else 1.0)
+        if a["shakes"] and t >= next_shake and el > 5:
+            shake_until = t + 0.6 + rng.random() * 0.6
+            next_shake = t + 60.0 / a["shakes"] * (0.5 + rng.random())
+        if t < shake_until:
+            noise += 0.9
+        voiced = a["voice"] > 0 and (math.sin(el * 0.35) + 1) / 2 < a["voice"] * (1.3 if liked else 1.0)
+        yield t, {"type": "sensor", "ts": t, "data": {
+            "kind": "phone", "held": True, "presence": 1.0,
+            "tilt": {"alpha": 0, "beta": round(beta, 1), "gamma": round(gamma, 1)},
+            "accel": {"x": 0.0, "y": 0.0, "z": 1.0 + rng.gauss(0, noise)},
+            "audio": {"level": 0.5 if voiced else 0.05, "voiced": voiced},
+            "proximity": {"near": False}}}
+        if i % max(1, hz // 4) == 0:  # ~4 fps frames
+            mot = 0.0 if prev is None else min(1.0, (abs(beta - prev[0]) + abs(gamma - prev[1])) / 40.0
+                                               + noise * 3 + rng.gauss(0, 0.02))
+            prev = (beta, gamma)
+            yield t, {"type": "sensor", "ts": t, "data": {
+                "kind": "vision", "present": True, "cx": round(0.5 + gamma / 400, 3),
+                "size": 0.55, "motion": round(max(0.0, mot), 3), "face": rng.random() < 0.7}}
+        if el >= next_prompt and n_choice < len(prompts):
+            lat = int(a["latency"] * 1000 * (0.7 + 0.6 * rng.random()))
+            yield t, {"type": "sensor", "ts": t, "data": {"kind": "choice", "prompt_id": prompts[n_choice],
+                                                          "option": a["choices"][n_choice], "latency_ms": lat}}
+            n_choice += 1
+            next_prompt += 12.0
+    t = t0 + seconds
+    yield t, {"type": "state", "ts": t, "data": {"visitor_id": visitor_id, "phase": "release"}}
+    yield t + 6, {"type": "wipe", "ts": t + 6, "data": {"visitor_id": visitor_id}}
+
+
+def run_handheld(name, seed=0, seconds=100, profiler=None):
+    """Run one handheld visit. Returns (profiles, reveal)."""
+    from .core import create
+    p = profiler or create({"seed": seed})
+    current = {"hook": None}
+    profiles, reveal = [], None
+    for _ts, m in handheld_visitor(name, lambda: current["hook"], seconds=seconds, seed=seed):
+        for out in p.handle(m):
+            if out["type"] == "profile" and "ocean" in out["data"]:
+                current["hook"] = out["data"]["hook"]
+                profiles.append(out)
+            elif out["type"] == "reveal":
+                reveal = out
+    return profiles, reveal

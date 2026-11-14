@@ -92,8 +92,12 @@ guess, which is the profile. Its reward is how held the visitor actually is
 while the hook runs: closer, looking, still but present, touching, talking.
 That reward is compared against the visitor's own baseline, which is the A/B
 test. Each hook runs for at least 8 s. What the person does soon outweighs what
-we guessed about them. In simulation the hidden favourite scene wins in about 12
-of 16 runs within 70 s.
+we guessed about them. In handheld mode "held" means the phone gets steadier:
+less turning, less shaking, less camera motion, each compared with the visitor's
+own average. A scene that just beat the visitor's average and is the best so far
+keeps running instead of being re-drawn. In simulated 100 s handheld visits
+(the integration film's personas) the hidden favourite owns the second half in
+about 12 of 16 runs, with 2 to 6 scene changes per visit.
 
 Each profile also carries tailored `hook_params`, the way Matz et al. (2017)
 wrote different ads for extraverts and introverts:

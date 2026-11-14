@@ -86,8 +86,10 @@ TRAIT_STYLE = {
 class HookBandit:
     """Thompson sampling over HOOKS with a trait-based prior."""
 
-    def __init__(self, seed=None, prior_strength=4.0, min_dwell=8.0, trial_weight=4.0):
+    def __init__(self, seed=None, prior_strength=4.0, min_dwell=8.0, trial_weight=4.0,
+                 keep_above=0.55):
         self.trial_weight = trial_weight  # one 8 s trial counts as this many pulls
+        self.keep_above = keep_above      # relative reward that keeps a scene running
         self.rng = random.Random(seed)
         self.prior_strength = prior_strength
         self.min_dwell = min_dwell
@@ -103,6 +105,7 @@ class HookBandit:
         self.history = []  # (hook, seconds, mean engagement)
         self.all_sum = 0.0
         self.all_n = 0
+        self.last_rel = None
 
     def observe(self, engagement):
         """Feed the current engagement (0..1) while self.current runs."""
@@ -120,6 +123,7 @@ class HookBandit:
         # never as "engaged" as a lively one, so compare them to themselves.
         base = self.all_sum / self.all_n if self.all_n else 0.5
         rel = max(0.0, min(1.0, 0.5 + 2.5 * (r - base)))
+        self.last_rel = rel
         self.wins[self.current] += rel * self.trial_weight
         self.trials[self.current] += self.trial_weight
         self.history.append((self.current, round(ts - self.since, 1), round(r, 3)))
@@ -130,6 +134,15 @@ class HookBandit:
             return self.current
         self._close_trial(ts)
         strength = self.prior_strength * confidence
+        # Exploit: if the scene that just ran held this visitor better than
+        # their own average and is the best we have seen, keep it running.
+        if self.current is not None and self.last_rel is not None and self.last_rel >= self.keep_above:
+            means = {h: (self.wins[h] / self.trials[h]) if self.trials[h] else 0.0 for h in HOOKS}
+            if means[self.current] >= max(means.values()) - 1e-9:
+                self.since = ts
+                self.reward_sum = 0.0
+                self.reward_n = 0
+                return self.current
         best, best_draw = None, -1.0
         for h in HOOKS:
             a = 1.0 + strength * affinity(h, ocean) + self.wins[h]
