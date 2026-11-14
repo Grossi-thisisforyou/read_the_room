@@ -85,3 +85,30 @@ def test_the_real_corpus_loads_through_the_engine_config():
     pytest.importorskip("infinite_jest.text", reason="text corpus lives in its own PR")
     corpus = load_corpus(_config.load(None)["modules"]["text"])
     assert corpus is not None
+
+
+def test_reveal_names_what_was_really_shown():
+    """The confession counts the scenes the room really showed and names the longest one,
+    not the profiler's last request; the header is the card's title, not a line."""
+    corpus = _corpus()
+    eng, clock, sent = make_engine(mode="handheld", short_ending=False, corpus=corpus)
+    run(eng, clock, 30, HOLD)
+    assert eng.state["phase"] == "hook"
+    vid = eng.state["visitor_id"]
+    prof = {"visitor_id": vid, "confidence": 0.7, "ocean": {"O": .6, "C": .4, "E": .7, "A": .5, "N": .6},
+            "segment_pole": "E+", "scenes_tried": 1}
+    run(eng, clock, 10, HOLD)                          # the fallback scene runs first
+    eng.handle(P.make(P.PROFILE, dict(prof, hook="mirror")), "profiler")
+    run(eng, clock, 40, HOLD)
+    eng.handle(P.make(P.PROFILE, dict(prof, hook="void")), "profiler")
+    run(eng, clock, 12, HOLD)
+    dwell = dict(eng.machine.visit.dwell)
+    assert dwell.get("mirror", 0) > dwell.get("void", 0) > 4
+    run(eng, clock, 40, {"kind": "phone", "held": False})
+    rv = eng.state["reveal"]
+    text = " ".join(rv["lines"]).lower()
+    assert rv["lines"][0] != rv.get("header")
+    if "scene" in text:
+        assert "1 scenes" not in text and "the mirror" in text
+    run(eng, clock, 30, {"kind": "phone", "held": False})
+    assert not eng.machine.visit.dwell, "forgotten with the visitor"

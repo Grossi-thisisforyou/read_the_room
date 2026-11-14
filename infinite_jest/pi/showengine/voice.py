@@ -176,6 +176,11 @@ class Voice:
                              "opted_out": vis.opted_out}
         p.update({k: v for k, v in vis.profile_extra.items() if k in
                   ("evidence", "trait_confidence", "segment_pole", "scenes_tried", "choices")})
+        # What the room really showed beats what the profiler asked for.
+        dwell = {h: s for h, s in vis.dwell.items() if s > 0}
+        if dwell:
+            p["hook"] = max(dwell, key=dwell.get)
+            p["scenes_tried"] = max(1, sum(1 for s in dwell.values() if s >= 4.0))
         if not all(isinstance(e, (list, tuple)) and len(e) == 5 for e in p.get("evidence", [])):
             p.pop("evidence", None)         # the corpus wants (conf, trait, feature, raw, sign) tuples
         try:
@@ -186,7 +191,7 @@ class Voice:
         confession = r.get("n_confession")
         if not isinstance(confession, int) or confession < 0:
             confession = self._sequence_len_guess(r)
-        lines = [x for x in ([r.get("header")] + list(r.get("lines", []))) if x]
+        lines = [x for x in r.get("lines", []) if x]     # the header is the card's title, not a line
         confession = min(confession, len(lines))
         self.reveal = {"header": r.get("header", ""), "lines": lines, "wipe": list(r.get("wipe", [])),
                        "label": r.get("label", ""), "n_data": max(0, len(lines) - confession),
