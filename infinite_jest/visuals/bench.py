@@ -7,6 +7,11 @@ Renders every hook at 1920x1080 with no window, at a few internal resolutions
 with smooth scaling on and off,
 times the techno engine, then prints a recommendation for the show config.
 Run it on the Pi with the language model running too, to get honest numbers.
+The quality governor is off here (each setting is measured as it is); in the
+show it steps the picture down by itself when frames run over
+`frame_budget_ms` (see governor.py). For a whole simulated show (scene
+changes, the image library, camera frames, the reveal, the wipe) use
+`python3 -m infinite_jest.visuals.profile_show`.
 """
 import argparse
 import json
@@ -29,7 +34,8 @@ def bench_visuals(internal, seconds_per_hook, out_size=(1920, 1080), smooth=True
     pygame.display.init()
     pygame.font.init()
     target = pygame.Surface(out_size)
-    vis = create(out_size, {"internal_size": internal, "busy_file": None, "smooth_scale": smooth})
+    vis = create(out_size, {"internal_size": internal, "busy_file": None, "smooth_scale": smooth,
+                            "frame_budget_ms": 0})
     times = {}
     t = 0.0
     dt = 1 / 30
@@ -79,10 +85,10 @@ def bench_audio(seconds):
     return seconds / max(cpu, 1e-9), None
 
 
-# The knobs, in the order to turn them: smoothing off first (about -25% frame
-# time at 1080p on a Pi 5, hardly visible on a projector), then the smaller
-# internal picture. Measured on a Pi 5: hook frames 30-45 ms at 1080p with
-# the defaults (22-30 fps).
+# The knobs, in the order to turn them: smoothing off first (hardly visible on
+# a projector), then the smaller internal picture. Measured on a Pi 5 before
+# the speed pass: hook frames 30-45 ms at 1080p with the defaults (22-30 fps).
+# The governor turns the same knobs at run time (after fewer strokes and taps).
 CANDIDATES = [((960, 540), True), ((640, 360), True), ((640, 360), False), ((480, 270), False)]
 
 

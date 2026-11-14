@@ -39,18 +39,41 @@ def make_tooth(w, h, seed=3):
     """Canvas tooth: an irregular grainy field in 0..1 (fine grain, a little
     stringy in random directions, plus slow patches). Dry paint catches on its
     high points."""
+    gen = make_tooth_steps(w, h, seed)
+    try:
+        while True:
+            next(gen)
+    except StopIteration as e:
+        return e.value
+
+
+FINE_PX = 120000   # sizes from this many pixels up split their work into more steps
+
+
+def make_tooth_steps(w, h, seed=3):
+    """make_tooth as a generator that yields between its stages (for work
+    spread over frames; only at sizes of FINE_PX and up); returns the tooth
+    (StopIteration.value)."""
+    fine = w * h >= FINE_PX
     rng = np.random.default_rng(seed)
     n = rng.random((w, h)).astype(np.float32)
     f = (n + np.roll(n, 1, 0) + np.roll(n, 1, 1) + np.roll(n, (1, 1), (0, 1))) * 0.25
+    if fine:
+        yield
     s1 = (n + np.roll(n, 1, 0) + np.roll(n, 2, 0) + np.roll(n, 3, 0)) * 0.25
     s2 = (n + np.roll(n, (1, 1), (0, 1)) + np.roll(n, (2, 2), (0, 1))) / 3
+    if fine:
+        yield
     pick = rng.random((w // 6 + 2, h // 6 + 2)) < 0.5
     pick = np.repeat(np.repeat(pick, 6, 0), 6, 1)[:w, :h]
     t = 0.5 * f + 0.5 * np.where(pick, s1, s2)
+    del f, s1, s2
     coarse = rng.random((w // 10 + 2, h // 10 + 2)).astype(np.float32)
     coarse = np.repeat(np.repeat(coarse, 10, 0), 10, 1)[:w, :h]
     for ax in (0, 1):
         coarse = (coarse + np.roll(coarse, 5, ax)) * 0.5
+    if fine:
+        yield
     t = 0.75 * t + 0.25 * coarse
     t = (t + np.roll(t, 1, 0) + np.roll(t, 1, 1)) / 3
     t -= t.min()
@@ -187,12 +210,18 @@ def strokes(rgb, alpha, ctrl, width, color, family="loaded", rng=None, tooth=Non
     lat = off[:, None, :] * (width[:, None] * prof[None, :])[..., None]  # (N, P, B)
     if family == "nervous":
         trem = np.sin(s[None, :] * (30 + 40 * rng.random((n, 1))) + rng.random((n, 1)) * 6.3) * 0.45
-        lat = lat + trem.astype(np.float32)[..., None]
+        lat += trem.astype(np.float32)[..., None]
     B2 = B
     # a little per-sample wobble breaks the moire of evenly spaced bristles
-    lat = lat + (rng.random(lat.shape, dtype=np.float32) - 0.5) * 0.9
-    X = pts[..., 0][..., None] + nx[..., None] * lat
-    Y = pts[..., 1][..., None] + ny[..., None] * lat
+    # (the big (N, P, B) arrays are worked in place: no per-step temporaries)
+    wob = rng.random(lat.shape, dtype=np.float32)
+    wob -= 0.5
+    wob *= 0.9
+    lat += wob
+    X = np.multiply(nx[..., None], lat, out=wob)
+    X += pts[..., 0][..., None]
+    Y = np.multiply(ny[..., None], lat, out=lat)
+    Y += pts[..., 1][..., None]
     # ---- alpha per sample (N, P, B2) ----
     bl = 0.7 + 0.6 * rng.random((n, 1, B2), dtype=np.float32)  # bristle load
     if family == "knife":
@@ -207,16 +236,32 @@ def strokes(rgb, alpha, ctrl, width, color, family="loaded", rng=None, tooth=Non
         load = np.exp(-s * (fam["decay"] * 3.0))[None, :, None] * bl
     ix = X.astype(np.int32)
     iy = Y.astype(np.int32)
-    out = (ix < 0) | (ix >= W) | (iy < 0) | (iy >= H)
+    # outside the canvas: negative ints are huge as unsigned, so one test per axis
+    out = ix.view(np.uint32) >= W
+    out |= iy.view(np.uint32) >= H
     np.clip(ix, 0, W - 1, out=ix)
     np.clip(iy, 0, H - 1, out=iy)
+    flat_idx = ix
+    flat_idx *= H                 # ix is not needed on its own any more
+    flat_idx += iy
     if tooth is not None and family != "knife":
         n1 = _bristle_noise()
         bo = rng.integers(0, 8000, (n, 1, B2))
         step = (np.arange(P, dtype=np.float32) * (0.25 + 0.2 * rng.random())).astype(np.int32)[None, :, None]
-        streak = n1[(bo + step) % 8192]
-        th = tooth[ix, iy] * 0.3 + streak * 0.7
-        a = np.clip((th - (1 - load) * (fam["dry"] * dry_scale) - 0.05) * 4.0 + load * 0.5, 0, 1)
+        si = bo + step
+        si %= 8192
+        a = np.take(n1, si).astype(np.float32, copy=False)
+        a *= 0.7
+        th = np.take(tooth.ravel() if tooth.flags.c_contiguous else np.ascontiguousarray(tooth).ravel(), flat_idx)
+        th *= 0.3
+        a += th                    # a = th = tooth * 0.3 + streak * 0.7
+        dl = 1 - load
+        dl *= fam["dry"] * dry_scale
+        a -= dl
+        a -= 0.05
+        a *= 4.0
+        a += load * 0.5
+        np.clip(a, 0, 1, out=a)
     else:
         a = np.clip(load * 1.2, 0, 1)
     ends = np.minimum(1, s * 12) * np.minimum(1, (1 - s) * 9)
@@ -236,24 +281,27 @@ def strokes(rgb, alpha, ctrl, width, color, family="loaded", rng=None, tooth=Non
     flat = np.flatnonzero(a.ravel() > 0.04)
     if flat.size == 0:
         return 0
-    ixs = ix.ravel()[flat]
-    iys = iy.ravel()[flat]
+    fi = flat_idx.ravel()[flat]
+    ixs = fi // H
+    iys = fi - ixs * H
     af = a.ravel()[flat]
     ni = flat // (P * B2)
     pi = (flat // B2) % P
     bi = flat % B2
     if src is not None:
         # smear: running window of what the bristle touched, plus where it started
-        under = src[ix, iy].astype(np.float32)  # (N, P, B2, 3)
+        # (the window sums need every sample; the rest only the painted ones)
+        ixa = flat_idx // H
+        under = src[ixa, flat_idx - ixa * H].astype(np.float32)  # (N, P, B2, 3)
+        del ixa
         L = int(max(2, min(drag, P - 1)))
-        cs = np.cumsum(under, axis=1)
-        win = cs.copy()
-        win[:, L:] -= cs[:, :-L]
-        cnt = np.minimum(np.arange(1, P + 1, dtype=np.float32), L)[None, :, None, None]
-        carried = win / cnt
-        keep = np.exp(-s * 2.2)[None, :, None, None]
-        carried = carried * (1 - keep * 0.6) + under[:, :1] * (keep * 0.6)
-        col = carried[ni, pi, bi]
+        win = np.cumsum(under, axis=1)
+        win[:, L:] -= win[:, :-L].copy()
+        cnt = np.minimum(np.arange(1, P + 1, dtype=np.float32), L)
+        keep = np.exp(-s * 2.2).astype(np.float32) * 0.6
+        kp = keep[pi][:, None]
+        col = win[ni, pi, bi] / cnt[pi][:, None]
+        col = col * (1 - kp) + under[ni, 0, bi] * kp
         if charge > 0:
             col = col * (1 - charge) + bc[ni, bi] * charge
     else:

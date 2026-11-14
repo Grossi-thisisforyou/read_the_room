@@ -35,8 +35,9 @@ import numpy as np
 import pygame
 
 from . import bankimg, brush, ground, palettes, scenes, scrawl
+from .governor import LEVELS as _QUALITY, Governor
 from .corpus import BLOCK as _BLOCK, WallText
-from .figure import Figure, flesh_lut, flesh_luts, ghost_body  # noqa: F401 (flesh_lut kept for callers)
+from .figure import Figure, _percentiles, flesh_lut, flesh_luts, ghost_body  # noqa: F401 (flesh_lut kept for callers)
 
 HOOKS = ("flesh", "scrawl", "inverted", "mirror", "void")
 
@@ -49,6 +50,7 @@ LEX_COLD = ["DATA", "PROFILE", "SUBJECT", "HARVEST", "SCORE", "PREDICTED", "CONS
             "INVENTORY", "RAW MATERIAL", "PROPERTY OF", "MONETIZE", "NO NAME", "BEHAVIOUR"]
 LEX_JEST = ["INFINITE", "JEST", "ENTERTAINMENT", "LOOP", "MORE", "AGAIN", "ONE MORE",
             "THE ENTERTAINMENT", "DONT LOOK AWAY", "PLEASURE"]
+LEX_OPTOUT = ["NOT READING YOU", "NOTHING KEPT", "EYE CLOSED"]
 LEX_IDLE = ["NOBODY", "WAITING", "EMPTY ROOM", "NEXT", "COME IN", "WE ARE READY"]
 LEX_DATA = ["DWELL", "GRIP", "TILT", "MOTION", "HESITATION", "RETURN RATE", "FACE 1",
             "NO MATCH", "LOGGED", "FLAGGED", "REVIEW", "RETAIN 30D", "ANOMALY", "STILL"]
@@ -77,6 +79,16 @@ def _text(v, limit=120):
     if v is None or isinstance(v, (dict, list, tuple, set)):
         return ""
     return str(v)[:limit]
+
+
+def _alpha(surf, a):
+    """set_alpha that drops the surface alpha of an opaque (non-SRCALPHA) surface
+    at 255: blitted with alpha 255 it takes SDL's slow blend path (~20x slower).
+    (Not for SRCALPHA surfaces: set_alpha(None) there turns blending off.)"""
+    if a >= 255 and not surf.get_flags() & pygame.SRCALPHA:
+        surf.set_alpha(None)
+    else:
+        surf.set_alpha(min(255, max(0, int(a))))
 
 
 def _smooth(x):
@@ -151,12 +163,22 @@ class Visuals:
         self.W, self.H = int(iw), int(ih)
         self.u = self.W / 640.0                     # unit: one pixel at 640x360
         self.M = int(24 * self.u)                   # ground margin for parallax
-        self.smooth = bool(config.get("smooth_scale", True))
+        self.smooth_cfg = self.smooth = bool(config.get("smooth_scale", True))
+        self.upscale_full = bool(config.get("upscale_full", False))
+        self._mid = None
+        self.base_internal = (self.W, self.H)
+        # quality governor: steps the picture down when frames run over budget (see governor.py)
+        self.governor = Governor(_num(config.get("frame_budget_ms", 28.0), 28.0), smooth=self.smooth_cfg,
+                                 can_shrink=self.W * self.H > 480 * 270)
+        self.q = dict(_QUALITY[0])
         self.fig = Figure(int(config.get("figure_w", 160)), int(config.get("figure_h", 180)))
         self.low = pygame.Surface((self.W, self.H))
         self.under = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
         self.over = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
         self.cover = pygame.Surface((self.W, self.H), pygame.SRCALPHA)  # the wipe's house paint
+        # where each paint layer may hold paint (None: empty): blits and fades touch only that
+        self.over_rect = self.under_rect = self.cover_rect = None
+        self.over_faded = self.under_faded = 0
         self.tooth = brush.make_tooth(self.W, self.H, 9)
         self.prng = np.random.default_rng(5)       # paint randomness
         # words at the full output resolution
@@ -174,6 +196,7 @@ class Visuals:
         self.shake_t = -10.0
         self.last_shake = -10.0
         self.fig_surf = pygame.Surface((self.fig.w, self.fig.h), pygame.SRCALPHA)
+        self.fig.shifts = tuple(self.fig_surf.get_shifts())   # the figure writes packed pixels straight in
         self.echoes = []          # the visitor a few seconds ago (memory only)
         self.echo_t = 0.0
         self.ghosts = []          # screen-space motion trail of the main figure
@@ -244,8 +267,14 @@ class Visuals:
         self.hist_t = 0.0
         self.big_cache = None
         self.reveal_cache = None
+        self._reveal_job = None
+        self._gcomp = self._gcomp_key = None
+        self._light_s = self._light_key = None
         self.fade_acc = 0.0
         self.ufade_acc = 0.0
+        self._stroke_debt = 0
+        self.stroke_cap = int(config.get("stroke_cap", 4))   # figure strokes painted per frame at most (v2: 10)
+        self._wipe_queue = None
         self._install_now(("idle",), scenes.idle_scene(random.Random(0)), self.pal)
 
     # ---- engine interface -------------------------------------------------
@@ -265,6 +294,8 @@ class Visuals:
                 self.visits += 1
         if state.get("phase") == "wipe" and self.state.get("phase") != "wipe":
             self.on_wipe()
+        elif state.get("opted_out") and not self.state.get("opted_out"):
+            self.on_wipe()          # they said no: their painted body goes now, not at the wipe
         self.state = state
         self._read_tilt(state)
         self._busy(state.get("phase", "idle") not in ("idle", None))
@@ -335,6 +366,8 @@ class Visuals:
     @property
     def paint(self):
         """The paint layer on top of the figure (painted from the visitor)."""
+        self.over_rect = pygame.Rect(0, 0, self.W, self.H)   # someone may paint into it
+        self.over_faded = 0
         return self.over
 
     def on_wipe(self):
@@ -343,6 +376,8 @@ class Visuals:
         # everything painted from the visitor's camera goes at once, not by fading
         self.over.fill((0, 0, 0, 0))
         self.under.fill((0, 0, 0, 0))
+        self.over_rect = self.under_rect = None
+        self._stroke_debt = 0
         self.fig_surf.fill((0, 0, 0, 0))
         self._fig_rgb = None
         self.snap = None
@@ -378,7 +413,72 @@ class Visuals:
                 pygame.transform.scale(self.low, surface.get_size(), surface)
             except Exception:
                 pass
-        self.frame_ms = self.frame_ms * 0.9 + (time.perf_counter() - t0) * 100
+        ms = (time.perf_counter() - t0) * 1000
+        self.frame_ms = self.frame_ms * 0.9 + ms * 0.1
+        lvl = self.governor.observe(ms, self.t)
+        if lvl is not None:
+            try:
+                self._apply_quality(lvl)
+            except Exception as e:  # never let a quality change take the wall down
+                if os.environ.get("IJ_VISUALS_STRICT"):
+                    raise
+                import sys
+                print("visuals: quality change failed: %r" % (e,), file=sys.stderr)
+
+    # ---- quality governor ---------------------------------------------------
+    def _apply_quality(self, level):
+        q = dict(_QUALITY[level])
+        self.q = q
+        self.smooth = self.smooth_cfg and q["smooth"]
+        target = (480, 270) if q["small"] else self.base_internal
+        if target != (self.W, self.H):
+            self._resize(*target)
+
+    def _resize(self, W, H):
+        """Change the internal picture size while running. Everything sized to
+        it is scaled over at once (the paint layers keep their paint); the
+        current scene is then repainted at the new size in the background (same
+        key: the same painting) and comes in with a transition."""
+        sx = W / float(self.W)
+        sy = H / float(self.H)
+        self.W, self.H = int(W), int(H)
+        self.u = self.W / 640.0
+        self.M = int(24 * self.u)
+        self.k = self.TW / self.W
+        sm = pygame.transform.smoothscale
+        self.low = pygame.Surface((self.W, self.H))
+        for name in ("under", "over", "cover"):
+            setattr(self, name, sm(getattr(self, name), (self.W, self.H)))
+            r = getattr(self, name + "_rect")
+            if r is not None:
+                r = pygame.Rect(int(r.x * sx) - 2, int(r.y * sy) - 2, int(r.w * sx) + 4, int(r.h * sy) + 4)
+                setattr(self, name + "_rect", r.clip(pygame.Rect(0, 0, self.W, self.H)))
+        self.tooth = brush.make_tooth(self.W, self.H, 9)
+        self.grain = self._make_grain()
+        gs = (self.W + 2 * self.M, self.H + 2 * self.M)
+        if self.ground_surf is not None:
+            self.ground_surf = sm(self.ground_surf, gs)
+        if self.glaze_surf is not None:
+            self.glaze_surf = sm(self.glaze_surf, gs)
+        if self.light is not None:
+            n = max(8, int(self.light.get_width() * sy))
+            self.light = pygame.transform.scale(self.light, (n, n))
+        self.props = [(pd, sm(spr, (max(8, int(spr.get_width() * sx)), max(8, int(spr.get_height() * sy)))))
+                      for pd, spr in self.props]
+        if self.scene_cut is not None:
+            self.scene_cut = sm(self.scene_cut, (max(2, int(self.scene_cut.get_width() * sy)),
+                                                 max(2, int(self.scene_cut.get_height() * sy))))
+        self.snap = None
+        self.trans = None
+        self.ghosts = []
+        self.swipes = []
+        self._wipe_queue = None
+        self.last_center = None
+        self._gcomp = self._gcomp_key = None
+        self._light_s = self._light_key = None
+        self._resized_key = self.scene_key
+        self.scene_key = None            # repaint the same scene at the new size
+        self.pending = None
 
     def _render(self, surface, dt):
         nb = self.bank_loader.poll()
@@ -390,21 +490,40 @@ class Visuals:
         self._draw_ground()
         self._draw_figures(dt)
         self._paint(dt)
-        self.low.blit(self.over, (0, 0))
-        if self.wipe_t is not None:
-            self.low.blit(self.cover, (0, 0))
+        if self.over_rect is not None:
+            self.low.blit(self.over, self.over_rect.topleft, self.over_rect)
+        if self.wipe_t is not None and self.cover_rect is not None:
+            self.low.blit(self.cover, self.cover_rect.topleft, self.cover_rect)
         self._draw_cage()
         self._draw_transition()
         self._finish(dt)
-        if surface.get_size() == (self.W, self.H):
-            surface.blit(self.low, (0, 0))
-        elif self.smooth:
-            pygame.transform.smoothscale(self.low, surface.get_size(), surface)
-        else:
-            pygame.transform.scale(self.low, surface.get_size(), surface)
+        self._upscale(surface)
         self._update_text(dt)
         self._blit_marks(surface)
         self._overlay(surface)
+
+    def _upscale(self, surface):
+        """The painting, scaled up to the output. Smooth scaling costs in
+        proportion to the output's pixels (~3.2 ms for 640x360 -> 1080p on x86,
+        about a quarter of a Pi 5 frame), so by default it smooth-scales to half
+        the output size (still 1.5x the painting) and doubles that with a plain
+        pixel copy: ~1.8 ms, the same picture to within ~2 levels on average
+        (config "upscale_full": true for the single smooth scale)."""
+        size = surface.get_size()
+        if size == (self.W, self.H):
+            surface.blit(self.low, (0, 0))
+        elif not self.smooth:
+            pygame.transform.scale(self.low, size, surface)
+        else:
+            mid = (size[0] // 2, size[1] // 2)
+            if (not self.upscale_full and size[0] % 2 == 0 and size[1] % 2 == 0
+                    and mid[0] >= self.W * 1.25 and mid[1] >= self.H * 1.25):
+                if self._mid is None or self._mid.get_size() != mid:
+                    self._mid = pygame.Surface(mid)
+                pygame.transform.smoothscale(self.low, mid, self._mid)
+                pygame.transform.scale(self._mid, size, surface)
+            else:
+                pygame.transform.smoothscale(self.low, size, surface)
 
     # ---- state -> look ----------------------------------------------------
     def _ocean(self):
@@ -608,8 +727,8 @@ class Visuals:
             self.pending = (want, sc, pal, gen)
         if self.pending is not None:
             want, sc, pal, gen = self.pending
-            # one step per frame; after a shake, as many as fit in ~5 ms (the
-            # whole scene at once took 60-90 ms: a visible hitch on the cut)
+            # one step per frame; after a shake, as many as fit in ~5 ms (the whole scene at once
+            # took 60-90 ms: a visible hitch on the cut)
             budget = 0.005 if self._trans_mode_now() == "cut" else 0.0
             t0 = time.perf_counter()
             try:
@@ -640,10 +759,10 @@ class Visuals:
             yield
             cut = bank.pick("cut", hook, self.pal_name, rb)
             if cut is not None:
-                out["cut"] = self._paint_cut(cut, pal, rb.randrange(1 << 16))
+                out["cut"] = yield from self._paint_cut_steps(cut, pal, rb.randrange(1 << 16))
                 yield
         r = random.Random(zlib.crc32(repr(key).encode()) + 3)
-        out["glaze"] = ground.glaze(surf, r.choice([-24, -16, 16, 24]), 1.15)
+        out["glaze"] = yield from ground.glaze_steps(surf, r.choice([-24, -16, 16, 24]), 1.15)
         out["glaze_period"] = r.uniform(40, 90)
         yield
         lc = palettes.mix(pal[3], pal[4], 0.5)
@@ -652,7 +771,8 @@ class Visuals:
         for pd in sc.get("props", []):
             yield
             w = pd["w"] * self.W; h = pd["h"] * self.H
-            props.append((pd, ground.build_prop(pd["kind"], w, h, pal, r.randrange(1000))))
+            spr = yield from ground.build_prop_steps(pd["kind"], w, h, pal, r.randrange(1000))
+            props.append((pd, spr))
         out["props"] = props
         return out
 
@@ -697,8 +817,10 @@ class Visuals:
                 mode, dur = "fade", self.hook_fade_s      # one hook into another: a slow crossfade
             self.trans = (mode, self.t, dur)
         self._trans_mode = None
+        if key != getattr(self, "_resized_key", None):
+            self.scene_t = self.t        # (a repaint after a size change is not a new scene)
+        self._resized_key = None
         self.scene_key = key
-        self.scene_t = self.t
         self.scene = sc
         self.scene_pal = pal
         self.scene_cut = prep["cut"]
@@ -708,10 +830,15 @@ class Visuals:
         self.light = prep["light"]
         self.props = prep["props"]
         self.under.fill((0, 0, 0, 0))
+        self.under_rect = None
+        self._gcomp_key = None
         if key[0] == "idle":
             self.cover.fill((0, 0, 0, 0))
+            self.cover_rect = None
+            self._wipe_queue = None
             self.wipe_t = None
             self.reveal_cache = None
+            self._reveal_job = None
         self.lut_key = None
 
     # ---- layers -----------------------------------------------------------
@@ -719,12 +846,21 @@ class Visuals:
         M = self.M
         ox = int(-M + self.tilt[0] * M * 0.85)
         oy = int(-M - self.tilt[1] * M * 0.6)
-        self.low.blit(self.ground_surf, (ox, oy))
         a = 0.5 + 0.5 * math.sin(self.t * 2 * math.pi / self.glaze_period)
         ga = int(130 * a)
-        if ga > 8:
-            self.glaze_surf.set_alpha(ga)
-            self.low.blit(self.glaze_surf, (ox, oy))
+        # the glaze drifts by one alpha step every ~0.1-0.3 s: the ground with its
+        # glaze is composed once per step and blitted opaque in between
+        gkey = (id(self.ground_surf), id(self.glaze_surf), ga if ga > 8 else 0)
+        if self._gcomp_key != gkey:
+            if self._gcomp is None or self._gcomp.get_size() != self.ground_surf.get_size():
+                self._gcomp = self.ground_surf.copy()
+            else:
+                self._gcomp.blit(self.ground_surf, (0, 0))
+            if ga > 8:
+                self.glaze_surf.set_alpha(ga)
+                self._gcomp.blit(self.glaze_surf, (0, 0))
+            self._gcomp_key = gkey
+        self.low.blit(self._gcomp, (ox, oy))
         # the light pool follows the figure and the tilt, breathing slowly
         if self.light is not None:
             breath = 0.75 + 0.25 * math.sin(self.t * 2 * math.pi / (6.0 if self.hook == "void" else 11.0))
@@ -739,7 +875,10 @@ class Visuals:
                 light = self.light
                 if breath < 0.98:
                     s = int(lw * (0.8 + 0.2 * breath))
-                    light = pygame.transform.scale(self.light, (s, s))
+                    if self._light_key != (id(self.light), s):
+                        self._light_s = pygame.transform.scale(self.light, (s, s))
+                        self._light_key = (id(self.light), s)
+                    light = self._light_s
                 self.low.blit(light, (int(lx - light.get_width() / 2), int(ly - light.get_height() / 2)),
                               special_flags=pygame.BLEND_RGB_ADD)
 
@@ -788,7 +927,8 @@ class Visuals:
         self.main = None
         self.insts = []
         sc = self.scene
-        self.low.blit(self.under, (0, 0))
+        if self.under_rect is not None:
+            self.low.blit(self.under, self.under_rect.topleft, self.under_rect)
         for pd, spr in self.props:
             # props move with the figure they belong to, a little less than it does
             x = pd["x"] * self.W + self.tilt[0] * self.W * 0.11 - spr.get_width() / 2
@@ -801,15 +941,14 @@ class Visuals:
         paint_i = next((i for i, s in enumerate(sc["figs"]) if s.get("paint")), len(insts) - 1)
         mains = insts[paint_i]
         smear = self.p["smear"] * mains.spec.get("smear", 1.0) / max(0.4, mains.scale / 2.0) ** 0.3
-        rgb, a = self.fig.render(self.t, dt, smear, self.p["twist"], self.p["swipe"], self._lut(),
-                                 self.p["fig_alpha"], trail=0.55 if self.hook != "void" else 0.8,
-                                 contrast=(0.25 if not mains.spec.get("crop") else 0.0) if self.hook != "void" else 0.6,
-                                 planes=0.65 if not mains.spec.get("crop") else 0.2)
-        pygame.surfarray.blit_array(self.fig_surf, rgb)
-        al = pygame.surfarray.pixels_alpha(self.fig_surf)
-        al[:] = a
-        del al
-        self._fig_rgb = rgb
+        pix = self.fig.render_packed(self.t, dt, smear, self.p["twist"], self.p["swipe"], self._lut(),
+                                     self.p["fig_alpha"], trail=0.55 if self.hook != "void" else 0.8,
+                                     contrast=(0.25 if not mains.spec.get("crop") else 0.0) if self.hook != "void" else 0.6,
+                                     planes=0.65 if not mains.spec.get("crop") else 0.2, taps=self.q["taps"])
+        px = pygame.surfarray.pixels2d(self.fig_surf)
+        px[:] = pix
+        del px
+        self._fig_rgb = pix            # packed; strokes unpack the few pixels they sample
         # echoes: the visitor a few seconds ago (memory only, dropped on wipe)
         if self.t - self.echo_t > 1.6 and self.phase in ("hook", "profiling", "release"):
             self.echo_t = self.t
@@ -842,11 +981,9 @@ class Visuals:
                 fs = pygame.transform.rotate(fs, inst.rot)
             r = fs.get_rect(center=(int(inst.cx), int(inst.cy)))
             alpha = sp.get("alpha", 1.0)
-            if sp.get("shadow"):
-                sh = fs.copy()
-                sh.fill((40, 30, 50, 0), special_flags=pygame.BLEND_RGBA_MIN)
-                sh.set_alpha(int(110 * alpha))
-                self.low.blit(sh, r.move(int(12 * self.u), int(5 * self.u)))
+            # (scenes ask for a drop "shadow"; v2 drew it as fs.copy() filled with
+            # (40, 30, 50, 0) under BLEND_RGBA_MIN, which zeroes its alpha: it never
+            # showed. The ~0.6 ms of work per frame is skipped; the look is unchanged.)
             if i == paint_i:
                 self._motion_ghosts(fs, r)
             if alpha < 0.99:
@@ -861,13 +998,14 @@ class Visuals:
         sockets, mouth and hairline stay dark and it doesn't wash out to milk."""
         px = pygame.surfarray.pixels3d(sub)
         lum = px[::2, ::2].mean(axis=2)
-        lo, hi = np.percentile(lum, (6, 97))
+        lo, hi = _percentiles(lum, (6, 97))
         if hi - lo > 4:
             k = min(3.0, 215.0 / (hi - lo))
-            f = (px.astype(np.float32) - lo) * k + 18.0
+            # one value in, one value out: a 256-entry table instead of a power per pixel
+            f = (np.arange(256, dtype=np.float32) - lo) * k + 18.0
             # a little extra weight in the darks: paint, not a photocopy
             f = 255.0 * (np.clip(f, 0, 255) / 255.0) ** 1.25
-            px[:] = f.astype(np.uint8)
+            px[:] = f.astype(np.uint8)[px]
         del px
 
     def _feather(self, w, h):
@@ -883,8 +1021,18 @@ class Visuals:
         return self._feather_arr
 
     def _paint_cut(self, cut, pal, seed):
+        """_paint_cut_steps, all at once."""
+        gen = self._paint_cut_steps(cut, pal, seed)
+        try:
+            while True:
+                next(gen)
+        except StopIteration as e:
+            return e.value
+
+    def _paint_cut_steps(self, cut, pal, seed):
         """A library cutout recoloured in this scene's flesh and dragged a
-        little, so it sits in the painting instead of on it."""
+        little, so it sits in the painting instead of on it. Generator (yields
+        between stages; returns the painted cutout)."""
         try:
             lut = flesh_luts(pal, 0.5, 0.2, zones=2, seed=seed % 5)[0]
             rgb = pygame.surfarray.array3d(cut).astype(np.float32)
@@ -893,6 +1041,10 @@ class Visuals:
             g = np.clip((g - lo) / max(10.0, hi - lo), 0, 0.999)
             out = cut.copy()
             pygame.surfarray.blit_array(out, lut[(g * 255).astype(np.int32)])
+            w, h = out.get_size()
+            if w * h >= brush.FINE_PX // 4:
+                yield
+            tooth = yield from brush.make_tooth_steps(w, h, seed % 7)
             av = pygame.surfarray.pixels_alpha(out)
             rv = pygame.surfarray.pixels3d(out)
             w, h = out.get_size()
@@ -901,7 +1053,7 @@ class Visuals:
             x0 = rng.uniform(0.1, 0.9, n) * w; y0 = rng.uniform(0.05, 0.9, n) * h
             ctrl = brush.flow_paths(x0, y0, rng.uniform(0.2, 0.5, n) * w, lambda x, y: np.full_like(x, 0.4), steps=4, rng=rng)
             brush.strokes(rv, None, ctrl, rng.uniform(0.04, 0.1, n) * w, np.array([pal[3]] * n), "wipe", rng,
-                          brush.make_tooth(w, h, seed % 7), src=rv.copy(), charge=0.2, opacity=0.8)
+                          tooth, src=rv.copy(), charge=0.2, opacity=0.8)
             del av, rv
             return out
         except Exception:
@@ -937,18 +1089,40 @@ class Visuals:
         step = int(self.fade_acc)
         if step >= 1:
             self.fade_acc -= step
-            a = pygame.surfarray.pixels_alpha(self.over)
-            np.maximum(a, step, out=a)   # saturating subtract, two cheap passes
-            a -= step
-            del a
+            self._fade("over", step)
         self.ufade_acc += 12.0 * dt
         step = int(self.ufade_acc)
         if step >= 4:                    # the under layer fades in coarse steps
             self.ufade_acc -= step
-            a = pygame.surfarray.pixels_alpha(self.under)
-            np.maximum(a, step, out=a)
-            a -= step
-            del a
+            self._fade("under", step)
+
+    def _fade(self, name, step):
+        """Saturating subtract of step from a paint layer's alpha, only where it
+        holds paint; once everything there has faded out the layer is empty."""
+        r = getattr(self, name + "_rect")
+        if r is None:
+            return
+        a = pygame.surfarray.pixels_alpha(getattr(self, name))[r.left:r.right, r.top:r.bottom]
+        np.maximum(a, step, out=a)   # two cheap passes
+        a -= step
+        del a
+        faded = getattr(self, name + "_faded") + step
+        setattr(self, name + "_faded", faded)
+        if faded >= 255:
+            setattr(self, name + "_rect", None)
+
+    def _paint_dirty(self, name, ctrl, width):
+        """Grow a paint layer's paint rect by the strokes about to be drawn."""
+        c = np.asarray(ctrl, np.float32).reshape(-1, 2)
+        if not len(c):
+            return
+        m = float(np.max(width)) * 0.85 + 4
+        x0, y0 = c.min(0) - m
+        x1, y1 = c.max(0) + m
+        r = pygame.Rect(int(x0), int(y0), int(x1 - x0) + 2, int(y1 - y0) + 2).clip(pygame.Rect(0, 0, self.W, self.H))
+        old = getattr(self, name + "_rect")
+        setattr(self, name + "_rect", r if old is None else old.union(r))
+        setattr(self, name + "_faded", 0)
 
     def _paint(self, dt):
         self._fade_layers(dt)
@@ -960,8 +1134,13 @@ class Visuals:
             return
         sc = self.scene
         weights = sc.get("strokes") or {}
-        rate = self.p["stroke_rate"] * (0.25 + 0.75 * self.p["fig_alpha"])
-        n = np.random.poisson(rate * dt) if rate > 0 else 0
+        rate = self.p["stroke_rate"] * (0.25 + 0.75 * self.p["fig_alpha"]) * self.q["strokes"]
+        n = (np.random.poisson(rate * dt) if rate > 0 else 0) + self._stroke_debt
+        # at most a few strokes per frame: a Poisson burst of 6-10 was a 5 ms frame;
+        # the rest are painted over the next frames (same rate, no visible delay)
+        cap = max(2, int(self.stroke_cap * self.q["strokes"] + 0.5))
+        self._stroke_debt = min(8, max(0, int(n) - cap))
+        n = min(int(n), cap)
         swipe_rate = sc.get("swipes", 0) / 24.0 * (0.3 + 0.7 * self.inten) * (0.4 + 0.8 * self.oc["N"] + 0.3 * self.oc["O"])
         if self.phase == "hook" and swipe_rate > 0 and random.random() < swipe_rate * dt and len(self.swipes) < 3:
             self._new_swipe()
@@ -976,7 +1155,7 @@ class Visuals:
                 w = np.array([weights[f] for f in fams], np.float64)
                 if w.sum() > 0:
                     fam = fams[int(np.searchsorted(np.cumsum(w / w.sum()), random.random()))]
-                    self._figure_strokes(rgbv, av, src, fam, min(int(n), 10))
+                    self._figure_strokes(rgbv, av, src, fam, n)
             self._paint_swipes(rgbv, av, src, dt)
         finally:
             del rgbv, av, src
@@ -1049,16 +1228,16 @@ class Visuals:
         sx, sy = m.to_screen(ctrl[..., 0], ctrl[..., 1])
         ctrl = np.stack([sx, sy], -1)
         # colour: the figure's own paint at that point, pushed apart in value
-        rgb = self._fig_rgb
         ix = np.clip(bx.astype(np.int32), 0, f.w - 1)
         iy = np.clip(by.astype(np.int32), 0, f.h - 1)
-        col = rgb[ix, iy].astype(np.float32)
+        col = f.unpack(self._fig_rgb[ix, iy]).astype(np.float32)
         lum = col.mean(1, keepdims=True)
         push = np.where(lum > 140, 1.12, 0.85)
         col = np.clip(lum + (col - lum) * 1.2, 0, 255) * push
         pal = self.scene_pal
         c2 = np.array([pal[1] if l < 130 else pal[4] for l in lum[:, 0]], np.float32)
         opac = 0.9 if fam != "wipe" else 0.7
+        self._paint_dirty("over", ctrl, ws)
         if fam == "wipe":
             brush.strokes(rgbv, av, ctrl, ws, col, "wipe", rng, self.tooth, src=src, charge=0.35, drag=14,
                           opacity=opac)
@@ -1091,6 +1270,7 @@ class Visuals:
                 a0 = s["a0"] + (s["a1"] - s["a0"]) * s["done"]
                 a1 = s["a0"] + (s["a1"] - s["a0"]) * k
                 ctrl = brush.arc_path(s["cx"], s["cy"], s["r"], a0, a1, 6, squash=s["sq"])[None]
+                self._paint_dirty("over", ctrl, [s["w"]])
                 if s["kind"] == "smear":
                     brush.strokes(rgbv, av, ctrl, [s["w"]], [pal[3]], "wipe", self.prng, self.tooth, src=src,
                                   charge=0.08, drag=int(18 * self.u), opacity=1.0, dry_scale=0.35)
@@ -1119,11 +1299,23 @@ class Visuals:
             rate = 0.7
             if k >= 1:
                 self.cover.fill((0, 0, 0, 0))
+                self.cover_rect = None
                 self.marks = []
                 self.wipe_t = None
                 return
         if k > 0.6:
             self.marks = [m for m in self.marks if random.random() < 0.97]
+        q = self._wipe_queue
+        if q is not None:
+            # the second stroke of the last pass (one ~1.5 ms knife stroke per frame)
+            self._wipe_queue = None
+            rgbv = pygame.surfarray.pixels3d(self.cover)
+            av = pygame.surfarray.pixels_alpha(self.cover)
+            try:
+                brush.strokes(rgbv, av, q[0], q[1], q[2], "knife", self.prng, self.tooth, opacity=0.95)
+            finally:
+                del rgbv, av
+            return
         if random.random() < rate:
             pal = self.scene_pal
             rgbv = pygame.surfarray.pixels3d(self.cover)
@@ -1135,8 +1327,11 @@ class Visuals:
                 ctrl = brush.flow_paths(x0, y0, np.full(n, self.W * 1.1), lambda x, y: np.full_like(x, 0.03),
                                         steps=3, rng=self.prng, wander=0.05)
                 col = np.array([pal[2]] * n, np.float32) * self.prng.uniform(0.92, 1.05, (n, 1))
-                brush.strokes(rgbv, av, ctrl, self.prng.uniform(30, 60, n) * self.u, col, "knife", self.prng,
-                              self.tooth, opacity=0.95)
+                ws = self.prng.uniform(30, 60, n) * self.u
+                self._paint_dirty("cover", ctrl, ws)
+                self.cover_faded = 0
+                brush.strokes(rgbv, av, ctrl[:1], ws[:1], col[:1], "knife", self.prng, self.tooth, opacity=0.95)
+                self._wipe_queue = (ctrl[1:], ws[1:], col[1:])
             finally:
                 del rgbv, av
 
@@ -1224,7 +1419,7 @@ class Visuals:
             return
         W, H = self.W, self.H
         if mode == "fade":
-            self.snap.set_alpha(int(255 * (1 - _smooth(k))))
+            _alpha(self.snap, int(255 * (1 - _smooth(k))))
             self.low.blit(self.snap, (0, 0))
         elif mode == "wipe":
             # the new scene is painted in with broad horizontal strokes
@@ -1236,7 +1431,7 @@ class Visuals:
                     self.low.blit(self.snap, (edge, y), (edge, y, W - edge, band))
         elif mode == "drag":
             dx = int(W * 0.35 * k * k)
-            self.snap.set_alpha(int(255 * (1 - k)))
+            _alpha(self.snap, int(255 * (1 - k)))
             self.low.blit(self.snap, (dx, 0))
         elif mode == "cut":
             if k < 0.25:
@@ -1263,17 +1458,26 @@ class Visuals:
                 arr[:, :, 2] = np.roll(arr[:, :, 2], -s, axis=1)
             del arr
         if burst > 0.85:
-            self.low.fill((60, 60, 60), special_flags=pygame.BLEND_RGB_ADD)
+            self._solid_blend(60, pygame.BLEND_RGB_ADD)
         if p["flicker"] > 0.05 and random.random() < p["flicker"] * 0.2:
             v = random.randint(30, 90)
-            self.low.fill((v, v, v), special_flags=pygame.BLEND_RGB_SUB)
+            self._solid_blend(v, pygame.BLEND_RGB_SUB)
         if p["hinge"] > 0.02:
             # the hinge: everything drops away to near black
             v = int(235 * p["hinge"])
-            self.low.fill((v, v, v), special_flags=pygame.BLEND_RGB_SUB)
+            self._solid_blend(v, pygame.BLEND_RGB_SUB)
         self.low.blit(self.canvas, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
         gx = random.randint(0, 63); gy = random.randint(0, 63)
         self.low.blit(self.grain, (-gx, -gy), special_flags=pygame.BLEND_RGB_SUB)
+
+    def _solid_blend(self, v, flags):
+        """low.fill((v, v, v), special_flags=flags), as a blit of a solid surface:
+        fill with a blend flag takes a slow path (~1.2 ms at 640x360 vs ~0.05)."""
+        sol = getattr(self, "_solid", None)
+        if sol is None or sol.get_size() != (self.W, self.H):
+            sol = self._solid = pygame.Surface((self.W, self.H))
+        sol.fill((v, v, v))
+        self.low.blit(sol, (0, 0), special_flags=flags)
 
     def _make_grain(self):
         rng = np.random.default_rng(11)
@@ -1300,6 +1504,9 @@ class Visuals:
             sw = [sw]
         if not isinstance(sw, (list, tuple)):
             sw = []
+        if s.get("opted_out"):
+            # the visitor covered the eye: no tailored or reactive lines, only the fact
+            return list(LEX_OPTOUT)
         words = [w for w in (_text(x, 60) for x in sw) if w.strip()] + self.extra_words
         oc = self.oc
         tone = "tender" if oc["A"] >= 0.5 else "cold"
@@ -1344,14 +1551,34 @@ class Visuals:
             keep.append(m)
             if a < 6:
                 continue
-            m[0].set_alpha(int(a))
             if sx == 1:
-                surface.blit(m[0], m[1])
+                surface.blit(self._mark_surf(m, int(a)), m[1])
             else:  # demo window smaller than 1080p
+                _alpha(m[0], int(a))
                 w, h = m[0].get_size()
                 surface.blit(pygame.transform.smoothscale(m[0], (max(1, int(w * sx)), max(1, int(h * sx)))),
                              (int(m[1][0] * sx), int(m[1][1] * sx)))
         self.marks = keep
+
+    @staticmethod
+    def _mark_surf(m, a):
+        """The mark at alpha a. A per-pixel-alpha surface blitted with a surface
+        alpha below 255 takes SDL's slow path (~5x), so the fade is baked
+        into a copy's alpha channel instead, re-baked only when it has moved by
+        6 levels (every ~4 frames: the steps do not show)."""
+        if a >= 250:
+            m[0].set_alpha(255)          # (never None: that would switch blending off)
+            return m[0]
+        if len(m) < 6:
+            m[0].set_alpha(255)
+            m.extend([m[0].copy(), 999, pygame.surfarray.array_alpha(m[0])])
+        if abs(m[4] - a) >= 6:
+            lut = (np.arange(256, dtype=np.uint16) * a // 255).astype(np.uint8)
+            v = pygame.surfarray.pixels_alpha(m[3])
+            v[...] = lut[m[5]]
+            del v
+            m[4] = a
+        return m[3]
 
     def _update_text(self, dt):
         if self.phase in ("hook", "profiling", "release") and self.t - self.hist_t > 0.5:
@@ -1539,7 +1766,7 @@ class Visuals:
         if big and rv < 0.5:
             self._draw_big(surface, str(big), ink if hinge < 0.5 else (236, 232, 224))
         if rv > 0.05:
-            self._draw_reveal(surface, rv)
+            self._draw_reveal(surface, rv, budget_ms=3.0)
 
     def _overlay_small(self, surface):
         """Demo window smaller than 1080p: only the big line, scaled."""
@@ -1610,15 +1837,21 @@ class Visuals:
             rows = [r for r in rows if r[0] != drop] or rows[-1:]
         return size, lh, rows, top
 
-    def _draw_reveal(self, surface, amount):
+    def _draw_reveal(self, surface, amount, budget_ms=None):
         """The visitor's file: a hand-ruled record, lines typed in one by one;
         in wipe, lines are struck out from the bottom, then deletion lines.
         Long lines wrap to the card (the font shrinks when they would not fit)
-        and the card stays inside a 5% safe margin of the output."""
+        and the card stays inside a 5% safe margin of the output.
+
+        The card is drawn once per change of its contents (a new line, a new
+        strike) and kept. With budget_ms (the show), a changed card is drawn a
+        few rows per frame while the previous one stays up, so a new line never
+        costs one long frame (a whole card is ~16 ms of drawing on x86)."""
         rv = self.state.get("reveal")
         if not isinstance(rv, dict):
             rv = (self.reveal_cache or {}).get("rv") or {}
         u = self.TW / 1920.0
+
         def _lst(v):
             if isinstance(v, str):
                 return [_text(v, 240)]
@@ -1631,85 +1864,83 @@ class Visuals:
         dele = _lst(rv.get("wipe"))[:4] if self.phase == "wipe" else []
         key = (header, label, tuple(lines[:-1]), lines[-1] if lines else None, total, struck, tuple(dele))
         pal = self.scene_pal
-        paper = tuple(int(c) for c in palettes.mix(pal[4], (236, 232, 222), 0.6))
-        ink = (26, 22, 24)
-        red = tuple(int(c) for c in palettes.mix(pal[3], (170, 30, 30), 0.6))
         W = int(min(1180 * u, self.TW * 0.9))
         H = int(min(940 * u, self.TH * 0.9))
+        if self.reveal_cache is None or self.reveal_cache.get("key") != key:
+            job = getattr(self, "_reveal_job", None)
+            if job is None or job[0] != key:
+                job = (key, self._reveal_build(key, rv, header, label, lines, total, struck, dele, pal, W, H, u))
+                self._reveal_job = job
+            t0 = time.perf_counter()
+            try:
+                while True:
+                    next(job[1])
+                    if budget_ms is not None and (time.perf_counter() - t0) * 1000 >= budget_ms \
+                            and self.reveal_cache is not None:
+                        break
+            except StopIteration as e:
+                self.reveal_cache = e.value
+                self._reveal_job = None
+        c = self.reveal_cache
+        if c is None:
+            return
+        # type and place the card that is ready (the previous one while a new one is drawn)
+        lines, struck = c["lines"], c["struck"]
+        W, H = c["surf"].get_size()
+        ink = (26, 22, 24)
+        red = c["red"]
         lw = max(2, int(3 * u))
         tx = 130 * u
-        right = W - 40 * u                          # nothing is written past this
-        if self.reveal_cache is None or self.reveal_cache.get("key") != key:
-            rr = random.Random(zlib.crc32(header.encode()))
-            size, lh, rows, top = self._reveal_layout(lines, len(dele), W, H, u)
-            s = pygame.Surface((W, H))
-            s.fill(paper)
-            boxes = []
-            # hand-ruled lines and a margin
-            y = top
-            while y < H - 30 * u:
-                pygame.draw.line(s, palettes.mix(paper, (120, 140, 170), 0.45), (30 * u, y + rr.uniform(-1, 1)),
-                                 (W - 30 * u, y + rr.uniform(-2, 2)), max(1, int(2 * u)))
-                y += lh
-            pygame.draw.line(s, red, (110 * u, 20 * u), (112 * u + rr.uniform(-2, 2), H - 20 * u), max(1, int(2 * u)))
-            count = "%d/%d" % (len(lines), max(total, len(lines)))
-            csize = scrawl.fit_size(count, 40 * u, 240 * u)
-            cx = right - scrawl.text_width(count, csize) * 1.06
-            boxes.append(scrawl.draw_text(s, header, tx, 22 * u, scrawl.fit_size(header, 48 * u, (cx - 30 * u - tx) * 0.93),
-                                          ink, rr, 0.15, max(3, int(4 * u))))
-            if label:
-                boxes.append(scrawl.draw_text(s, label, tx, 84 * u, scrawl.fit_size(label, 26 * u, (right - tx) * 0.93),
-                                              red, rr, 0.15, lw))
-            n_struck_from = len(lines) - struck          # lines at or after this index are struck
-            newest = len(lines) - 1
-            for j, (li, row) in enumerate(rows):
-                if li == newest:
-                    continue                             # typed in per frame below
-                bb = scrawl.draw_text(s, row, tx, top + j * lh - size * 1.05, size, ink, rr, 0.18, lw)
-                boxes.append(bb)
-                if struck and li >= n_struck_from:
-                    scrawl.cross_out(s, bb, red, rr, max(3, int(4 * u)), mode="bar")
-            for j, ln in enumerate(dele):
-                ds = scrawl.fit_size(ln, 28 * u, (right - tx) * 0.93)
-                boxes.append(scrawl.draw_text(s, ln, tx, H - 30 * u - (len(dele) - j) * 48 * u, ds, red, rr, 0.2, lw))
-            boxes.append(scrawl.draw_text(s, count, cx, 44 * u, csize, red, rr, 0.12, lw))
-            self.reveal_cache = dict(key=key, surf=s, rv=rv, t_last=self.t, last=lines[-1] if lines else "",
-                                     layout=(size, lh, rows, top), boxes=boxes)
-        c = self.reveal_cache
-        if (lines[-1] if lines else "") != c.get("last"):
-            c["last"] = lines[-1] if lines else ""
-            c["t_last"] = self.t
-        boxes = list(c["boxes"])
-        rr = random.Random(len(lines))
+        right = W - 40 * u
+        boxes = c["boxes"]
         size, lh, rows, top = c["layout"]
         newest = len(lines) - 1
         n = 999 if self.phase == "wipe" else int((self.t - c["t_last"]) * 28) + 1
-        if lines and n >= sum(len(r) + 1 for li, r in rows if li == newest) and "full" in c:
+        need = sum(len(r) + 1 for li, r in rows if li == newest)
+        if lines and n >= need and "full" in c:
             s, boxes = c["full"]                    # typed out: reuse the finished card
         elif lines:
-            s = c["surf"].copy()
-            # the newest line types itself out, row by row
-            # (in the wipe nothing is added any more: the file is shown whole)
-            typed = n >= sum(len(r) + 1 for li, r in rows if li == newest)
-            bb = None
-            for j, (li, row) in enumerate(rows):
-                if li != newest or n <= 0:
-                    continue
-                part = row[:n]
-                n -= len(row) + 1
-                bb = scrawl.draw_text(s, part, tx, top + j * lh - size * 1.05, size, ink, rr, 0.18, lw)
-                boxes.append(bb)
-                if struck >= 1:
-                    scrawl.cross_out(s, bb, red, rr, max(3, int(4 * u)), mode="bar")
-            if bb is not None and n < 0 and int(self.t * 3) % 2 == 0:
-                cx = min(bb.right + 6 * u, right)
-                pygame.draw.line(s, ink, (cx, bb.top + 4 * u), (cx, bb.bottom - 4 * u), lw)
-            if typed:
-                c["full"] = (s, boxes)
+            typed = n >= need
+            blink = (int(self.t * 3) % 2 == 0) and not typed
+            tkey = (min(n, need), blink)
+            if c.get("tkey") != tkey:
+                # the newest line types itself out, row by row (in the wipe nothing
+                # is added any more: the file is shown whole). Only its rows are
+                # redrawn: the band they sit in is restored from the static card.
+                work = c.get("work")
+                mine = [j for j, (li, _) in enumerate(rows) if li == newest]
+                if work is None:
+                    work = c["surf"].copy()
+                    c["work"] = work
+                elif mine:
+                    y0 = int(top + mine[0] * lh - size * 1.05 - size * 0.6)
+                    y1 = int(top + mine[-1] * lh - size * 1.05 + size * 1.9)
+                    band = pygame.Rect(0, y0, W, y1 - y0).clip(work.get_rect())
+                    work.blit(c["surf"], band, band)
+                rr = random.Random(len(lines))
+                tb = list(c["boxes"])
+                bb = None
+                k = n
+                for j, (li, row) in enumerate(rows):
+                    if li != newest or k <= 0:
+                        continue
+                    part = row[:k]
+                    k -= len(row) + 1
+                    bb = scrawl.draw_text(work, part, tx, top + j * lh - size * 1.05, size, ink, rr, 0.18, lw)
+                    tb.append(bb)
+                    if struck >= 1:
+                        scrawl.cross_out(work, bb, red, rr, max(3, int(4 * u)), mode="bar")
+                if bb is not None and k < 0 and blink:
+                    cx = min(bb.right + 6 * u, right)
+                    pygame.draw.line(work, ink, (cx, bb.top + 4 * u), (cx, bb.bottom - 4 * u), lw)
+                c["tkey"], c["tboxes"] = tkey, tb
+                if typed:
+                    c["full"] = (work, tb)
+            s, boxes = c["work"], c["tboxes"]
         else:
             s = c["surf"]
         a = int(255 * _clamp(amount * 1.2))
-        s.set_alpha(a)
+        s.set_alpha(a if a < 255 else None)        # an opaque card with alpha 255 blits ~20x slower
         x = int(self.TW * 0.5 - W / 2 + (self.TW * 0.18 if self.main is not None and self.main.cx < self.W * 0.45 else -self.TW * 0.12 if self.main is not None and self.main.cx > self.W * 0.55 else 0))
         y = int((self.TH - H) / 2)
         mx, my = int(math.ceil(self.TW * 0.05)), int(math.ceil(self.TH * 0.05))
@@ -1718,6 +1949,55 @@ class Visuals:
         self.reveal_rect = pygame.Rect(x, y, W, H)
         self.reveal_boxes = boxes                  # card-local text boxes (tests check they stay on the card)
         surface.blit(s, (x, y))
+
+    def _reveal_build(self, key, rv, header, label, lines, total, struck, dele, pal, W, H, u):
+        """Generator: draws the static card (everything but the newest line, which
+        types itself out per frame), yielding between rows; returns the cache."""
+        paper = tuple(int(c) for c in palettes.mix(pal[4], (236, 232, 222), 0.6))
+        ink = (26, 22, 24)
+        red = tuple(int(c) for c in palettes.mix(pal[3], (170, 30, 30), 0.6))
+        lw = max(2, int(3 * u))
+        tx = 130 * u
+        right = W - 40 * u                          # nothing is written past this
+        rr = random.Random(zlib.crc32(header.encode()))
+        size, lh, rows, top = self._reveal_layout(lines, len(dele), W, H, u)
+        s = pygame.Surface((W, H))
+        s.fill(paper)
+        boxes = []
+        # hand-ruled lines and a margin
+        y = top
+        while y < H - 30 * u:
+            pygame.draw.line(s, palettes.mix(paper, (120, 140, 170), 0.45), (30 * u, y + rr.uniform(-1, 1)),
+                             (W - 30 * u, y + rr.uniform(-2, 2)), max(1, int(2 * u)))
+            y += lh
+        pygame.draw.line(s, red, (110 * u, 20 * u), (112 * u + rr.uniform(-2, 2), H - 20 * u), max(1, int(2 * u)))
+        count = "%d/%d" % (len(lines), max(total, len(lines)))
+        csize = scrawl.fit_size(count, 40 * u, 240 * u)
+        cx = right - scrawl.text_width(count, csize) * 1.06
+        boxes.append(scrawl.draw_text(s, header, tx, 22 * u, scrawl.fit_size(header, 48 * u, (cx - 30 * u - tx) * 0.93),
+                                      ink, rr, 0.15, max(3, int(4 * u))))
+        yield
+        if label:
+            boxes.append(scrawl.draw_text(s, label, tx, 84 * u, scrawl.fit_size(label, 26 * u, (right - tx) * 0.93),
+                                          red, rr, 0.15, lw))
+            yield
+        n_struck_from = len(lines) - struck          # lines at or after this index are struck
+        newest = len(lines) - 1
+        for j, (li, row) in enumerate(rows):
+            if li == newest:
+                continue                             # typed in per frame
+            bb = scrawl.draw_text(s, row, tx, top + j * lh - size * 1.05, size, ink, rr, 0.18, lw)
+            boxes.append(bb)
+            if struck and li >= n_struck_from:
+                scrawl.cross_out(s, bb, red, rr, max(3, int(4 * u)), mode="bar")
+            yield
+        for j, ln in enumerate(dele):
+            ds = scrawl.fit_size(ln, 28 * u, (right - tx) * 0.93)
+            boxes.append(scrawl.draw_text(s, ln, tx, H - 30 * u - (len(dele) - j) * 48 * u, ds, red, rr, 0.2, lw))
+            yield
+        boxes.append(scrawl.draw_text(s, count, cx, 44 * u, csize, red, rr, 0.12, lw))
+        return dict(key=key, surf=s, rv=rv, t_last=self.t, last=lines[-1] if lines else "",
+                    layout=(size, lh, rows, top), boxes=boxes, lines=lines, struck=struck, red=red)
 
     def _load_bank(self, path):
         """Optional overnight images (bank/<hook>/ and its derived/ versions):

@@ -68,60 +68,107 @@ def build_ground(W, H, spec, tooth=None):
     horizon = spec.get("horizon", 0.7)
     busy = spec.get("busy", 0.5)
     hz = int(H * horizon)
+    fine = W * H >= brush.FINE_PX     # big grounds: more, smaller steps (smaller ones as v2)
     X = np.arange(W, dtype=np.float32)[:, None] / W
     Y = np.arange(H, dtype=np.float32)[None, :] / H
     field = pal[2].copy()
     if kind == "deep":
         field = pal[2] * 0.55 + pal[1] * 0.45
-    arr = np.empty((W, H, 3), np.float32)
-    arr[:] = field
+    # The field is worked as three colour planes [W, H] (contiguous, in place):
+    # the same arithmetic as on an [W, H, 3] array, without the 3.3 MB
+    # temporaries per step that made scene changes hitch.
+    planes = [np.full((W, H), field[c], np.float32) for c in range(3)]
+    floor = None
     if kind == "room":
         floor = pal[1] * 0.55 + pal[2] * 0.45
-        arr[:, hz:] = floor
         # the floor darkens toward the viewer a little, a painted perspective
-        arr[:, hz:] *= (1.0 - 0.18 * ((Y[:, hz:] - horizon) / max(1e-3, 1 - horizon)))[..., None]
+        fl = (1.0 - 0.18 * ((Y[:, hz:] - horizon) / max(1e-3, 1 - horizon)))
+        for c in range(3):
+            planes[c][:, hz:] = floor[c]
+            planes[c][:, hz:] *= fl
     elif kind == "column":
         floor = pal[1] * 0.7 + pal[2] * 0.3
-        arr[:, hz:] = floor
+        for c in range(3):
+            planes[c][:, hz:] = floor[c]
     yield
     # hand-painted flatness: a slow value wobble and brush drag in the paint
     lo = _noise(W, H, 48, rng)
-    arr *= (0.95 + 0.1 * lo)[..., None]
+    lo *= 0.1
+    lo += 0.95
+    for c in range(3):
+        planes[c] *= lo
     yield
     st = _streaks(W, H, rng, horizontal=kind != "wall", length=28)
-    arr *= (1 + 0.04 * st)[..., None]
+    if fine:
+        yield
+    st *= 0.04
+    st += 1
+    for c in range(3):
+        planes[c] *= st
     yield
     # hue drift across the field: one side a little warmer, the other cooler
     warm = np.array([1.04, 1.0, 0.95], np.float32)
     cool = np.array([0.96, 0.99, 1.05], np.float32)
-    k = _noise(W, H, 90, rng)[..., None]
+    k = _noise(W, H, 90, rng)
     yield
-    arr *= warm * k + cool * (1 - k)
+    tmp = np.empty((W, H), np.float32)
+    for c in range(3):
+        np.multiply(k, warm[c] - cool[c], out=tmp)
+        tmp += cool[c]
+        planes[c] *= tmp
     yield
     # light: a pool where the figure stands, falling off toward the edges into
     # a darker, *more* saturated version of the ground rather than black
     lx, ly, lr = spec.get("light", (0.5, 0.45, 0.6))
     d2 = ((X - lx) / lr) ** 2 + ((Y - ly) / (lr * 0.9)) ** 2
-    fall = np.exp(-d2 * 0.9)[..., None]
+    fall = np.exp(-d2 * 0.9)
     yield
-    dark = arr * np.array([0.72, 0.62, 0.66], np.float32) + pal[1] * 0.12
     if kind == "column":
         cx = spec.get("light", (0.5,))[0]
-        col = np.exp(-((X - cx) / 0.16) ** 2)[..., None]
-        arr = arr * (0.5 + 0.75 * col) + pal[3] * 0.15 * col
+        col = np.exp(-((X - cx) / 0.16) ** 2)            # (W, 1)
+        for c in range(3):
+            planes[c] *= (0.5 + 0.75 * col)
+            planes[c] += pal[3][c] * 0.15 * col
     else:
-        arr = dark + (arr * 1.06 - dark) * (0.35 + 0.65 * fall)
+        # dark = arr * m + p;  arr = dark + (arr * 1.06 - dark) * F
+        #      = arr * (m + (1.06 - m) F) + p (1 - F)
+        mul = np.array([0.72, 0.62, 0.66], np.float32)
+        F = fall
+        F *= 0.65
+        F += 0.35
+        for c in range(3):
+            p = pal[1][c] * 0.12
+            np.multiply(F, 1.06 - mul[c], out=tmp)
+            tmp += mul[c]
+            planes[c] *= tmp
+            np.multiply(F, -p, out=tmp)
+            tmp += p
+            planes[c] += tmp
     sh = spec.get("shadow")
     if sh:
         yield
         sx, sy, srx, sry = sh
-        d = ((X - sx) / srx) ** 2 + ((Y - sy) / sry) ** 2
-        pool = np.clip(1.25 - d, 0, 1)[..., None] ** 0.8
-        shade = pal[0] * 0.5 + pal[1] * 0.5
-        arr = arr * (1 - 0.62 * pool) + shade * 0.62 * pool
+        # the pool is zero outside the ellipse d < 1.25: work only on its box
+        e = math.sqrt(1.25)
+        bx0 = max(0, int((sx - srx * e) * W) - 1); bx1 = min(W, int((sx + srx * e) * W) + 2)
+        by0 = max(0, int((sy - sry * e) * H) - 1); by1 = min(H, int((sy + sry * e) * H) + 2)
+        if bx1 > bx0 and by1 > by0:
+            d = ((X[bx0:bx1] - sx) / srx) ** 2 + ((Y[:, by0:by1] - sy) / sry) ** 2
+            pool = np.clip(1.25 - d, 0, 1) ** 0.8
+            shade = pal[0] * 0.5 + pal[1] * 0.5
+            keep = 1 - 0.62 * pool
+            pool *= 0.62
+            for c in range(3):
+                planes[c][bx0:bx1, by0:by1] *= keep
+                planes[c][bx0:bx1, by0:by1] += shade[c] * pool
     yield
-    rgb = np.clip(arr, 0, 255).astype(np.uint8)
-    tooth = tooth if tooth is not None and tooth.shape == (W, H) else brush.make_tooth(W, H, spec.get("seed", 0) + 5)
+    rgb = np.empty((W, H, 3), np.uint8)
+    for c in range(3):
+        np.clip(planes[c], 0, 255, out=planes[c])
+        rgb[..., c] = planes[c]
+    del planes, tmp
+    if tooth is None or tooth.shape != (W, H):
+        tooth = yield from brush.make_tooth_steps(W, H, spec.get("seed", 0) + 5)
     yield
     # big visible strokes across the field: same paint, a shade off
     nb = int(6 + 14 * busy)
@@ -148,6 +195,8 @@ def build_ground(W, H, spec, tooth=None):
         y = hz + rng.uniform(-2, 2)
         ctrl = np.array([[[-10, y], [W * 0.35, y + rng.uniform(-3, 3)], [W * 0.7, y + rng.uniform(-3, 3)], [W + 10, y + rng.uniform(-2, 2)]]], np.float32)
         brush.strokes(rgb, None, ctrl, [4], [pal[1] * 0.6 + pal[2] * 0.2], "loaded", rng, tooth, opacity=0.7)
+        if fine:
+            yield
         # floor strokes, flatter and darker
         n = int(4 + 6 * busy)
         x0 = rng.uniform(-0.1, 0.8, n) * W
@@ -165,6 +214,9 @@ def build_ground(W, H, spec, tooth=None):
             ctrl = np.array([[[x, y], [x + math.cos(a) * L, y + math.sin(a) * L]]], np.float32)
             c = pal[rng.choice([3, 4, 4, 1, 2])] * rng.uniform(0.9, 1.05)
             brush.strokes(rgb, None, ctrl, [rng.uniform(20, 70)], [c], "knife", rng, tooth, opacity=rng.uniform(0.5, 0.9))
+            if i % 3 == 2:
+                if fine:
+                    yield
         yield
     if sh:
         # the shadow is painted, not airbrushed: scrubbed dark strokes over the pool
@@ -206,7 +258,18 @@ def panel_rects(W, H, panels):
 
 # ------------------------------------------------------------------ props
 def build_prop(kind, w, h, pal, seed=0):
-    """A painted prop as an SRCALPHA sprite of size (w, h):
+    """build_prop_steps, all at once: returns the sprite."""
+    gen = build_prop_steps(kind, w, h, pal, seed)
+    try:
+        while True:
+            next(gen)
+    except StopIteration as e:
+        return e.value
+
+
+def build_prop_steps(kind, w, h, pal, seed=0):
+    """Generator (yields between stages, returns the sprite).
+    A painted prop as an SRCALPHA sprite of size (w, h):
       'dais'   a round low platform seen from above, lit rim
       'plinth' a box pedestal
       'bench'  a long low bed / bench with a mattress edge
@@ -215,9 +278,12 @@ def build_prop(kind, w, h, pal, seed=0):
     """
     rng = np.random.default_rng(seed)
     w, h = max(8, int(w)), max(8, int(h))
+    fine = w * h >= brush.FINE_PX
     rgb = np.zeros((w, h, 3), np.uint8)
     a = np.zeros((w, h), np.uint8)
-    tooth = brush.make_tooth(w, h, seed + 1)
+    tooth = yield from brush.make_tooth_steps(w, h, seed + 1)
+    if fine:
+        yield
     p = [np.array(c, np.float32) for c in pal]
     X = (np.arange(w, dtype=np.float32)[:, None] + 0.5) / w
     Y = (np.arange(h, dtype=np.float32)[None, :] + 0.5) / h
@@ -295,17 +361,41 @@ def light_pool(r, color, strength=1.0):
 
 
 def glaze(surf, hue_deg, sat=1.1):
+    """glaze_steps, all at once."""
+    gen = glaze_steps(surf, hue_deg, sat)
+    try:
+        while True:
+            next(gen)
+    except StopIteration as e:
+        return e.value
+
+
+def glaze_steps(surf, hue_deg, sat=1.1):
     """The same ground in a shifted hue, blended over it at a drifting alpha
     so the colour breathes slowly without re-painting."""
-    arr = pygame.surfarray.array3d(surf).astype(np.float32) / 255.0
+    src = pygame.surfarray.pixels3d(surf)
     # cheap hue rotation in YIQ space
     th = math.radians(hue_deg)
     c, s = math.cos(th), math.sin(th)
     T = np.array([[0.299, 0.587, 0.114], [0.596, -0.274, -0.322], [0.211, -0.523, 0.312]], np.float32)
     Ti = np.linalg.inv(T).astype(np.float32)
     R = np.array([[1, 0, 0], [0, c * sat, -s * sat], [0, s * sat, c * sat]], np.float32)
-    M = Ti @ R @ T
-    out = np.clip(arr @ M.T, 0, 1) * 255
+    M = (Ti @ R @ T) / np.float32(255.0)
+    # channel by channel (a 3x3 matmul over [W, H, 3] floats is slow and churns memory)
+    chans = [src[..., k].astype(np.float32) for k in range(3)]
+    del src
+    out = np.empty(surf.get_size() + (3,), np.uint8)
+    acc = np.empty_like(chans[0])
+    fine = acc.size >= brush.FINE_PX
+    for o in range(3):
+        if o and fine:
+            yield
+        np.multiply(chans[0], M[o, 0], out=acc)
+        acc += chans[1] * M[o, 1]
+        acc += chans[2] * M[o, 2]
+        np.clip(acc, 0, 1, out=acc)
+        acc *= 255
+        out[..., o] = acc
     g = pygame.Surface(surf.get_size())
-    pygame.surfarray.blit_array(g, out.astype(np.uint8))
+    pygame.surfarray.blit_array(g, out)
     return g
