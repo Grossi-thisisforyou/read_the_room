@@ -1,6 +1,6 @@
 # Infinite Jest: interface contract
 
-Version 1.3 (2026-11-13). Owner: the master-plan thread. Any change to this file
+Version 1.4 (2026-11-14). Owner: the master-plan thread. Any change to this file
 goes through a PR, and every module thread is told when it changes.
 
 This is the one place that says how the parts of *Infinite Jest* talk to each
@@ -90,7 +90,9 @@ Every message, on every transport, is one JSON object:
 
 - `type`: one of the types below. Unknown types are logged and ignored, never fatal.
 - `ts`: Unix time in seconds, float, set by the sender. The Pi's clock is the
-  reference; the engine adds `rx_ts` when it forwards a message.
+  reference; the engine adds `rx_ts` when it forwards a message. **The N900 has
+  no network time**, so never compare a phone `ts` with Pi times: use `rx_ts`
+  for timing, and a phone `ts` only for ordering its own messages.
 - `data`: an object. **Every field in `data` is optional.** A receiver uses a
   default when a field is missing and ignores fields it does not know.
 
@@ -131,7 +133,13 @@ handshake; they are treated as role `phone`.
 
 Events: `kind: "touch"` `{x, y, down}` with x, y 0..1; `kind: "choice"`
 `{prompt_id, option}` answering a `phone` prompt; `kind: "keys"` `{text}`
-typed on the N900 keyboard.
+typed on the N900 keyboard; `kind: "optout"` `{}` sent once when the visitor
+covers the proximity sensor for 3 s.
+
+**Opt-out.** After `optout`, every `kind: "phone"` reading carries
+`optout: true` and only `held`, nothing else, and the phone sends no `frame`,
+until the next `wipe`. The engine and profiler stop reading that visitor and
+show it on the wall (visuals may treat it as `void`).
 
 ### `frame` (phone to engine; engine keeps it in memory for the profiler)
 
