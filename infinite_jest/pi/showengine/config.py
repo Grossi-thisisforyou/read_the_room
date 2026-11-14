@@ -35,6 +35,7 @@ DEFAULTS: dict[str, Any] = {
         "visuals": "infinite_jest.visuals",
         "audio": "infinite_jest.audio",
         "profiler": "infinite_jest.profiler",
+        "text": "infinite_jest.text",   # the voice of the room (corpus); [phone_lines] if missing
         "use_fallbacks": True,  # built-in look and sound if a module is missing
         "profiler_in_process": True,
     },

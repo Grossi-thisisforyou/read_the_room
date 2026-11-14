@@ -16,6 +16,7 @@ from .fallback_profile import FallbackProfiler
 from .frames import FrameAnalyzer
 from .presence import Presence, PresenceConfig
 from .tilt import Tilt
+from .voice import Voice, load_corpus
 from .visit import VisitConfig, VisitMachine
 
 log = logging.getLogger("showengine")
@@ -30,7 +31,7 @@ def _dataclass_kwargs(cls: type, raw: dict) -> dict:
 
 class Engine:
     def __init__(self, cfg: dict, emit: Emit | None = None, clock: Callable[[], float] = time.monotonic,
-                 visuals: Any = None, audio: Any = None, profiler: Any = None):
+                 visuals: Any = None, audio: Any = None, profiler: Any = None, corpus: Any = None):
         self.cfg = cfg
         self.emit: Emit = emit or (lambda msg, roles: None)
         self.clock = clock
@@ -43,6 +44,10 @@ class Engine:
         self.fallback = FallbackProfiler()
         self.frames = FrameAnalyzer()
         self.tilt = Tilt()
+        mods = cfg.get("modules", {})
+        if corpus is None:
+            corpus = load_corpus(mods.get("text"))
+        self.voice = Voice(corpus, cfg.get("phone_lines", {}))
         self.visuals, self.audio, self.profiler = visuals, audio, profiler
         self.sensor: dict[str, Any] = {}       # latest periodic reading (merged)
         self.blackout = False
@@ -208,6 +213,9 @@ class Engine:
                                           self.tilt.state(), round(self.tilt.shake, 3))
         self.state["steer"] = self.tilt.steer()
         self.state["mode"] = self.mode
+        for line in self.voice.tick(self.machine, now, self.state["steer"], self.machine.phase_t(now)):
+            self.emit(P.make(P.PHONE, line), {"phone"})
+        self.voice.apply(self.state, self.machine, now)
         plugins.call(self.visuals, "on_state", self.state)
         plugins.call(self.audio, "on_state", self.state)
         if changes or now - self._last_state_emit >= self._state_period:
@@ -238,9 +246,8 @@ class Engine:
             self.emit(P.make(P.VISIT, visit), {"profiler"})
             if self.profiler is not None:
                 self._from_profiler(plugins.call(self.profiler, "on_visit", visit, time.time()), now)
-        line = self.cfg.get("phone_lines", {}).get(new)
-        if isinstance(line, dict) and line:
-            self.emit(P.make(P.PHONE, dict(line)), {"phone"})
+        for line in self.voice.on_phase(new, m, now):
+            self.emit(P.make(P.PHONE, line), {"phone"})
         if new == "wipe":
             self._wipe_everything(m.last_wiped_id)
 

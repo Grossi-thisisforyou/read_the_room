@@ -37,13 +37,14 @@ profiling_timeout = 20.0
 confidence_to_hook = 0.5
 hook_min_dwell = 8.0
 max_visit = 180.0
-release_time = 6.0
-wipe_time = 4.0
+release_time = 50.0           # the confession, line by line
+wipe_time = 12.0              # the dossier struck out, last line held 2 s
 
 [modules]
 visuals = "infinite_jest.visuals"
 audio = "infinite_jest.audio"
 profiler = "infinite_jest.profiler"
+text = "infinite_jest.text"     # the voice of the room; [phone_lines] below are the fallback
 use_fallbacks = true          # built-in picture and sound if a module is missing
 profiler_in_process = true
 

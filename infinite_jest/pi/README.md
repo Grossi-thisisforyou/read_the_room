@@ -20,13 +20,24 @@ that hold them best, shows them what it guessed, and then deletes them.
 | `approach` | the room notices: scanning, "I see you." on the phone | 3 s |
 | `profiling` | the dossier builds; the profiler guesses OCEAN scores | 6 to 20 s |
 | `hook` | the scene that holds this person: `flesh`, `scrawl`, `inverted`, `mirror` or `void`, tuned to their scores | while they stay, max 180 s |
-| `release` | the reveal: what the machine thinks it learned | 6 s |
-| `wipe` | a visible erase; every module drops everything about the visitor | 4 s |
+| `release` | the confession, typed line by line: what the machine thinks it learned | 50 s |
+| `wipe` | the dossier struck out bottom to top; every module drops everything about the visitor | 12 s |
 
 In the default `handheld` mode, picking up the N900 starts a visit and putting
 it down for 8 s ends it (`mode = "fixed"` lets the camera and mic start visits
 instead). A visitor who covers the phone's proximity sensor opts out; the room
 goes quiet. All of this is in [`config/default.toml`](config/default.toml).
+
+## The voice
+
+With the text corpus in `infinite_jest/text/` (dramaturgy in `text/ARC.md`),
+`showengine/voice.py` picks every line on the wall and the phone, one corpus
+visit per visitor so nothing repeats: attract lines in idle, the consent on the
+phone, hook-flavoured log lines, `lock`, `stillness`, `shake`, `flip`, and the
+hinge once about 100 to 120 s into the hook (one line, then 4 s near black).
+Extra state fields: `big_line` (one large line), `hinge` (true during the
+dark), `reveal` (`lines` typed so far, `total`, and in `wipe` also `struck`
+and the `wipe` lines). Without the corpus, `[phone_lines]` in the config are used.
 
 ## Tilt
 
@@ -133,6 +144,7 @@ showengine/
   visit.py           the per-visitor state machine (pure logic)
   presence.py        is someone there? (hysteresis; handheld or fixed)
   tilt.py            phone tilt -> smooth steering, flip, shake, stillness
+  voice.py           which words go on the wall and the phone, and when
   director.py        phase + profile -> scene, intensity, palette, tempo
   fallback_profile.py crude OCEAN guess when no profiler runs
   frames.py          N900 camera frames -> motion, light, faces

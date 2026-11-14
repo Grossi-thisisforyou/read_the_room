@@ -33,8 +33,8 @@ class VisitConfig:
     confidence_to_hook: float = 0.5
     hook_min_dwell: float = 8.0       # minimum seconds before a hook may change
     max_visit: float = 180.0          # nobody keeps the room forever
-    release_time: float = 6.0         # the reveal / afterimage
-    wipe_time: float = 4.0            # the visible erase, then idle
+    release_time: float = 50.0        # the confession, typed line by line (text/ARC.md)
+    wipe_time: float = 12.0           # the dossier struck out line by line, then idle
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Visit:
     reveal: dict[str, Any] | None = None
     answers: list[str] = field(default_factory=list)
     opted_out: bool = False
+    profile_extra: dict[str, Any] = field(default_factory=dict)   # evidence tuples etc. for the reveal
     oracle_words: list[str] = field(default_factory=list)
     dossier: list[str] = field(default_factory=list)
 
@@ -111,6 +112,9 @@ class VisitMachine:
             return True
         if self.visit.opted_out:
             return False
+        for k in ("evidence", "trait_confidence", "segment_pole", "scenes_tried", "choices"):
+            if k in data:
+                self.visit.profile_extra[k] = data[k]
         ev = clean_words(data.get("evidence")) or clean_words(data.get("words"))
         line = self.visit.hook_params.get("line")
         if isinstance(line, str) and line:
@@ -243,6 +247,7 @@ class VisitMachine:
                 lst[i] = ""
             lst.clear()
         v.hook_params.clear()
+        v.profile_extra.clear()
         if v.ocean:
             v.ocean.clear()
         self.visit = Visit()
