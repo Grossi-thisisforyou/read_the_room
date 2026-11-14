@@ -140,4 +140,5 @@ async def main():
     print('FAILED' if check.failed else 'ALL PASSED')
     sys.exit(1 if check.failed else 0)
 
-asyncio.run(main())
+if __name__ == "__main__":  # a script, not a pytest module (it exits with a status)
+    asyncio.run(main())
