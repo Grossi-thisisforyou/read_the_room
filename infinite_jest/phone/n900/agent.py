@@ -302,7 +302,10 @@ class Agent(object):
         else:
             self.near_since = None
         if self.opted_out:
-            return {'kind': 'phone', 'optout': True}
+            # Only "is the phone still in someone's hand": without it the Pi
+            # thinks the visitor left, wipes, and the agent starts reading the
+            # same person again a few seconds later.
+            return {'kind': 'phone', 'optout': True, 'held': bool(r.get('held'))}
         return r
 
     def opt_out(self):
