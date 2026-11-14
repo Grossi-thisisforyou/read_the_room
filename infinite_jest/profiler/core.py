@@ -34,7 +34,10 @@ DEFAULTS = {
     "optout_cover_seconds": 3.0,  # cover the phone's sensor this long = opt out
     "seed": None,               # set for reproducible simulations
     "mode": "handheld",         # contract default; state.mode overrides
-    "prompts_file": os.path.join(HERE, "prompts.json"),
+    # The text corpus (infinite_jest/text) has the full prompt set; ours is the fallback.
+    "prompts_file": (os.path.join(os.path.dirname(HERE), "text", "corpus", "prompts.json")
+                     if os.path.exists(os.path.join(os.path.dirname(HERE), "text", "corpus", "prompts.json"))
+                     else os.path.join(HERE, "prompts.json")),
 }
 
 
@@ -226,8 +229,11 @@ class Profiler:
     def _reveal(self, ts):
         ocean, conf, overall, evidence = self._estimate()
         self.bandit.finish(ts)
-        r = rv.build(ocean, conf, overall, evidence, self.bandit.history,
-                     self.bandit.ranking(), ts - self.visit_start)
+        r = _corpus_reveal(ocean, conf, overall, evidence, self.bandit, self.features,
+                           ts - self.visit_start, self.visitor_id)
+        if r is None:
+            r = rv.build(ocean, conf, overall, evidence, self.bandit.history,
+                         self.bandit.ranking(), ts - self.visit_start)
         self.revealed = True
         self.phase = "reveal"
         r.update({"visitor_id": self.visitor_id, "ocean": ocean, "confidence": overall,
@@ -245,6 +251,29 @@ class Profiler:
         return [msg("profile", ts, {"visitor_id": vid, "phase": "opted_out",
                                     "hook": "void", "confidence": 0.0,
                                     "wiped": True})]
+
+
+def _corpus_reveal(ocean, conf, overall, evidence, bandit, features, seconds, vid):
+    """Use the shared text corpus (infinite_jest/text) for the reveal if present."""
+    try:
+        from infinite_jest.text import Corpus
+    except ImportError:
+        return None
+    try:
+        label, t, s = oc.segment(ocean, conf)
+        ranking = bandit.ranking()
+        out = Corpus.load().visit().reveal({
+            "evidence": evidence, "ocean": ocean, "trait_confidence": conf,
+            "confidence": overall, "segment_pole": t + ("+" if s > 0 else "-"),
+            "hook": ranking[0] if ranking else bandit.current,
+            "scenes_tried": len(set(h[0] for h in bandit.history)) or 1,
+            "seconds": seconds,
+            "choices": {c[0]: c[1] for c in features.choices}, "vid": vid,
+        })
+    except Exception:  # never let text break the show; fall back to templates
+        return None
+    lines = ([out["header"]] if out.get("header") else []) + out.get("lines", []) + out.get("wipe", [])
+    return {"label": out.get("label") or label, "lines": lines, "seconds": round(seconds, 1)}
 
 
 def _last(msgs):

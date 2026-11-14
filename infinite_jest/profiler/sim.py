@@ -13,16 +13,16 @@ import random
 ARCHETYPES = {
     # name: behaviour knobs, hidden favourite hook
     "performer": dict(pace=0.30, close=0.65, motion=0.55, gaze=0.8, voice=0.45,
-                      loud=0.5, touch=10, explore=0.8, choices=["look closer", "the scream", "seen", "upside down", "tell"],
+                      loud=0.5, touch=10, explore=0.8, choices=["look closer", "the noise", "seen", "upside down", "tell"],
                       latency=1.0, hold=0.4, tilt=60, favourite="scrawl"),
     "lurker":    dict(pace=0.06, close=0.15, motion=0.08, gaze=0.15, voice=0.0,
                       loud=0.0, touch=0, explore=0.1, choices=["look away", "the silence", "forgotten", "right way up", "keep"],
                       latency=4.5, hold=0.0, tilt=0, favourite="void"),
     "nerve":     dict(pace=0.15, close=0.25, motion=0.35, gaze=0.3, voice=0.05,
-                      loud=0.2, touch=4, explore=0.3, choices=["look away", "the scream", "forgotten", "upside down", "keep"],
+                      loud=0.2, touch=4, explore=0.3, choices=["look away", "the noise", "forgotten", "upside down", "keep"],
                       latency=1.2, burst=True, hold=0.3, tilt=25, favourite="flesh"),
     "seeker":    dict(pace=0.10, close=0.5, motion=0.25, gaze=0.6, voice=0.1,
-                      loud=0.25, touch=6, explore=0.9, choices=["look closer", "the scream", "seen", "upside down", "tell"],
+                      loud=0.25, touch=6, explore=0.9, choices=["look closer", "the noise", "seen", "upside down", "tell"],
                       latency=2.5, hold=0.5, tilt=80, favourite="inverted"),
 }
 
