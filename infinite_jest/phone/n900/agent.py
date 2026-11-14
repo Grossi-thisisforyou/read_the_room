@@ -250,6 +250,11 @@ class Agent(object):
             if data.get('text'):
                 kw['text'] = data['text']
                 kw['text_t'] = time.time()
+            elif data.get('ask') and len(data.get('options') or []) < 2:
+                # an open question (the engine's "What do you never tell anyone?"):
+                # show it as words; the visitor answers on the slide-out keyboard
+                kw['text'] = data['ask']
+                kw['text_t'] = time.time()
             if data.get('ask') and len(data.get('options') or []) >= 2:
                 kw['prompt'] = {'prompt_id': data.get('prompt_id'), 'ask': data['ask'],
                                 'options': list(data['options'])[:2], 't': time.time()}

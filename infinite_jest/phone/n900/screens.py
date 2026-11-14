@@ -324,8 +324,6 @@ def draw_live(cr, w, h, snap, local, t, rnd):
     else:
         smear(cr, fx - h * 0.15, fy + h * 0.1, h * 0.3, cols[min(1, len(cols) - 1)], t, rnd, inten)
         face(cr, fx, fy, h * (0.2 + 0.05 * kick), t, loud, motion, rnd, cols[0])
-        if hook in ('scrawl', 'inverted', ''):
-            tally(cr, fx - h * 0.12, fy - h * 0.28, h * 0.24, rnd)
     # words the engine wants scrawled: some crossed out, some upside down
     words = st.get('words') or []
     wr = random.Random(len(words) * 7 + int(t / 3))
