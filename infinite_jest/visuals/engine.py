@@ -134,12 +134,18 @@ class Visuals:
 
     def on_sensor(self, data):
         """Optional: raw phone sensor dict (contract kind "phone")."""
-        if isinstance(data, dict):
-            self._read_tilt(data)
+        if not isinstance(data, dict):
+            return
+        if getattr(self, "steer_t", None) is not None and time.monotonic() - self.steer_t < 1.0:
+            # the engine's state.steer (smoothed, +-45 deg range) is driving; the raw degrees
+            # (/60) arriving in between made the target jump between two scales every frame
+            data = {k: data[k] for k in ("shake", "tilt_energy") if k in data}
+        self._read_tilt(data)
 
     def _read_tilt(self, d):
         st = d.get("steer")  # contract 1.3: {x, y, flip, shake}
         if isinstance(st, dict):
+            self.steer_t = time.monotonic()
             self.tilt_in = [_clamp(float(st.get("x", 0)), -1, 1), _clamp(float(st.get("y", 0)), -1, 1)]
             self.steer_flip = bool(st.get("flip", False))
             try:
