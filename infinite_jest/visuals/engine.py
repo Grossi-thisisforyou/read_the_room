@@ -173,6 +173,10 @@ class Visuals:
     def on_wipe(self):
         """Drop everything held about the visitor and paint the room over."""
         self.fig.wipe()
+        # the stroke canvas and the last figure are painted from the visitor's camera frames
+        self.paint.fill((0, 0, 0, 0))
+        self.fig_surf.fill((0, 0, 0, 0))
+        self._fig_cache = None
         self.extra_words = []
         self.wipe_t = self.t
         if time.monotonic() - self.bank_loaded > 600:  # pick up new overnight images
