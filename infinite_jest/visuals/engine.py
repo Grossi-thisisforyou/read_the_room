@@ -49,6 +49,7 @@ LEX_COLD = ["DATA", "PROFILE", "SUBJECT", "HARVEST", "SCORE", "PREDICTED", "CONS
             "INVENTORY", "RAW MATERIAL", "PROPERTY OF", "MONETIZE", "NO NAME", "BEHAVIOUR"]
 LEX_JEST = ["INFINITE", "JEST", "ENTERTAINMENT", "LOOP", "MORE", "AGAIN", "ONE MORE",
             "THE ENTERTAINMENT", "DONT LOOK AWAY", "PLEASURE"]
+LEX_OPTOUT = ["NOT READING YOU", "NOTHING KEPT", "EYE CLOSED"]
 LEX_IDLE = ["NOBODY", "WAITING", "EMPTY ROOM", "NEXT", "COME IN", "WE ARE READY"]
 LEX_DATA = ["DWELL", "GRIP", "TILT", "MOTION", "HESITATION", "RETURN RATE", "FACE 1",
             "NO MATCH", "LOGGED", "FLAGGED", "REVIEW", "RETAIN 30D", "ANOMALY", "STILL"]
@@ -1300,6 +1301,9 @@ class Visuals:
             sw = [sw]
         if not isinstance(sw, (list, tuple)):
             sw = []
+        if s.get("opted_out"):
+            # the visitor covered the eye: no tailored or reactive lines, only the fact
+            return list(LEX_OPTOUT)
         words = [w for w in (_text(x, 60) for x in sw) if w.strip()] + self.extra_words
         oc = self.oc
         tone = "tender" if oc["A"] >= 0.5 else "cold"
