@@ -207,7 +207,7 @@ def draw(cr, w, h, snap, local, t):
     cr.set_source_rgb(BG[0], BG[1], BG[2])
     cr.paint()
     if snap.get('optout'):
-        draw_optout(cr, w, h, t, rnd)
+        draw_optout(cr, w, h, t, rnd, snap.get('optout_text') or 'the eye is closed until you leave.')
     elif snap.get('screen') == 'live':
         draw_live(cr, w, h, snap, local, t, rnd)
     else:
@@ -250,27 +250,34 @@ def draw_consent(cr, w, h, snap, t, rnd):
     strike(cr, m, y + size2 * 0.05, rec_w, size2 * 0.6, rnd, BLOOD, 0.75, 1)
     # plain statement, no cleverness
     y += h * 0.10
-    for line in CONSENT_LINES:
-        fit(cr, line, w * 0.62, h * 0.045, False)
+    lines = [txt(l) for l in (snap.get('consent') or CONSENT_LINES)]
+    enter = 'TOUCH TO ENTER'
+    if len(lines) > 1 and lines[-1].lower().startswith('touch'):
+        enter = lines[-1].rstrip('.').upper()
+        lines = lines[:-1]
+    # fit however many lines the text has between the headline and the button
+    step = min(h * 0.058, (h * 0.84 - y) / max(1, len(lines)))
+    for line in lines:
+        fit(cr, line, w * 0.62, min(h * 0.045, step * 0.8), False)
         show(cr, line, m, y, INK, 0.92)
-        y += h * 0.058
+        y += step
     # enter
     blink = 0.55 + 0.45 * math.sin(t * 3.0)
-    fit(cr, 'TOUCH TO ENTER', w * 0.3, h * 0.07)
-    tw = text_w(cr, 'TOUCH TO ENTER')
-    show(cr, 'TOUCH TO ENTER', w - m - tw, h * 0.92, BONE, blink)
+    fit(cr, enter, w * 0.3, h * 0.07)
+    tw = text_w(cr, enter)
+    show(cr, enter, w - m - tw, h * 0.92, BONE, blink)
     jitter_line(cr, [(w - m - tw - 50, h * 0.90), (w - m - tw - 12, h * 0.90),
                      (w - m - tw - 24, h * 0.87), (w - m - tw - 12, h * 0.90),
                      (w - m - tw - 24, h * 0.93)], rnd, 1.2, 3, BONE, blink)
 
 
-def draw_optout(cr, w, h, t, rnd):
+def draw_optout(cr, w, h, t, rnd, sub='the eye is closed until you leave.'):
     """The visitor covered the eye for 3 s: nothing about them is read now."""
     s = 'YOU ARE NOT BEING READ'
     size = fit(cr, s, w * 0.86, h * 0.12)
     show(cr, s, (w - text_w(cr, s)) / 2, h * 0.5, INK, 0.9)
-    fit(cr, 'the eye is closed until you leave', w * 0.6, h * 0.045, False)
-    sub = 'the eye is closed until you leave'
+    sub = txt(sub)
+    fit(cr, sub, w * 0.6, h * 0.045, False)
     show(cr, sub, (w - text_w(cr, sub)) / 2, h * 0.62, INK, 0.5)
     # a closed eye: one heavy lid line
     jitter_line(cr, [(w * 0.42, h * 0.25), (w * 0.5, h * 0.28), (w * 0.58, h * 0.25)],

@@ -39,6 +39,10 @@ screen), and `wipe` (everything cleared, back to the first screen).
 - The first screen says plainly: *This room is recording you. The camera,
   microphone and motion of this phone feed a performance made only for you.
   Nothing leaves this room. Everything is erased when you leave.*
+- The consent text and opt-out lines come from `infinite_jest/text/corpus/`
+  (one of three written versions per visitor); the built-in text above is the
+  fallback. The either/or prompts come from the same folder, then the
+  profiler's `prompts.json`.
 - **Opt-out**: covering the proximity sensor ("the eye", top left of the
   screen) for 3 seconds stops all reading of that visitor until the next wipe.
   The screen says *you are not being read*.

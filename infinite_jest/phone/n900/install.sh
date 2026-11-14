@@ -38,6 +38,9 @@ cp "$SRC"/*.py "$DST"/
 for p in "$SRC/../../profiler/prompts.json" "$SRC/prompts.json"; do
     [ -f "$p" ] && cp "$p" "$DST/profiler_prompts.json" && break
 done
+# the written phone text (consent versions, opt-out lines, prompts), if present
+[ -f "$SRC/../../text/corpus/lines.json" ] && cp "$SRC/../../text/corpus/lines.json" "$DST/text_lines.json"
+[ -f "$SRC/../../text/corpus/prompts.json" ] && cp "$SRC/../../text/corpus/prompts.json" "$DST/text_prompts.json"
 [ -f /home/user/.ij-phone.conf ] || cp "$SRC/ij-phone.conf.example" /home/user/.ij-phone.conf
 chown user:users /home/user/.ij-phone.conf 2>/dev/null || true
 cp "$SRC/infinite-jest-phone.upstart" "$JOB"
