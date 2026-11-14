@@ -160,6 +160,7 @@ class Agent(object):
         self.opted_out = False
         self.held_t = 0.0           # last time the phone was held (local only, never sent)
         self.optout_t = 0.0
+        self.reading_t = 0.0
         self.lock = threading.Lock()
         self.listeners = []
         self.prompts = load_prompts()
@@ -269,7 +270,7 @@ class Agent(object):
                 self.events.get_nowait()
             except Exception:
                 break
-        if self.opted_out and time.time() - self.held_t < float(self.conf['optout_release_s']):
+        if self.opted_out and self.reading_t - self.held_t < float(self.conf['optout_release_s']):
             # The engine ends the visit once the opted-out phone stops reporting presence,
             # but the same person may still be holding it: stay opted out until it is put down.
             self.ui_update(text='', prompt=None, state={}, reading={}, wiped_t=time.time())
@@ -309,6 +310,7 @@ class Agent(object):
                 self.opt_out(t)
         else:
             self.near_since = None
+        self.reading_t = t
         if r.get('held'):
             self.held_t = t
         if self.opted_out:
