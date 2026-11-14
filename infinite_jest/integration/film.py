@@ -452,7 +452,9 @@ class Rig:
         """script: list of Visitor. Renders `seconds` of show to out.mp4 (+ explained, + json)."""
         tmp = tempfile.mkdtemp(prefix="ij-film-")
         wav = os.path.join(tmp, "sound.wav")
-        n_frames = int(seconds * FPS)
+        # seconds=None: run until the room has wiped and sat idle for 4 s after the last visitor
+        n_frames = int(seconds * FPS) if seconds else int((script[-1].end + 240) * FPS)
+        idle_since = None
         ff_clean = _ffmpeg(out + ".mp4.video.mp4")
         ff_expl = _ffmpeg(out + "_explained.mp4.video.mp4") if self.phone else None
         font = pygame.font.Font(None, 34)
@@ -461,10 +463,15 @@ class Rig:
         last_seq = -1
         dt = 1.0 / FPS
         wall0 = time.time()
-        for i in range(n_frames):
+        i = -1
+        while i + 1 < n_frames:
+            i += 1
             t = i * dt
             self.vt.t = t
-            v = next((x for x in script if x.start - 6 <= t < x.end + 30), None)
+            v = None
+            for x in script:                       # the latest visitor who has arrived
+                if x.start - 6 <= t:
+                    v = x
             hook = self.engine.state.get("hook")
             pose = v.pose(t, hook) if v else None
             # hardware
@@ -517,6 +524,10 @@ class Rig:
                 ff_expl.stdin.write(pygame.image.tostring(self.screen, "RGB"))
             # sound, sample-exact with the picture
             self.audio.render_until(int(round((i + 1) * self.audio.SR / FPS)))
+            if not seconds and t > script[-1].end:
+                idle_since = (idle_since or t) if st["phase"] == "idle" else None
+                if idle_since is not None and t - idle_since >= 4.0:
+                    n_frames = i + 1
             if i % (FPS * 10) == 0:
                 print("  %5.0fs  %-9s hook %-8s  (%.1fx realtime)" % (
                     t, st["phase"], st.get("hook") or "-", (t + dt) / max(1e-6, time.time() - wall0)),
@@ -532,7 +543,7 @@ class Rig:
         shutil.copy(wav, out + ".wav") if os.environ.get("IJ_KEEP_WAV") else None
         shutil.rmtree(tmp, ignore_errors=True)
         report = {
-            "title": title, "seconds": seconds, "fps": FPS, "size": [W, H],
+            "title": title, "seconds": round(n_frames / FPS, 2), "fps": FPS, "size": [W, H],
             "visitors": [{"persona": x.name, "label": x.p["label"], "picks_up_at": x.start,
                           "puts_down_at": x.end, "favourite_hook": x.p["favourite"]} for x in script],
             "messages": self.msgs, "engine_counts": self.engine.stats,
@@ -628,8 +639,8 @@ def build_script(names, gap=14.0, first=6.0, seed=0):
     for i, n in enumerate(names):
         v = Visitor(n, t, seed=seed + i)
         out.append(v)
-        # put down -> 8 s presence hold -> 6 s release -> 4 s wipe, then a breath of idle
-        t = v.end + 8 + 6 + 4 + gap
+        # put down -> ~10 s presence hold -> release (the confession, up to ~50 s) -> wipe (~12 s)
+        t = v.end + 10 + 55 + 14 + gap
     return out, t - gap + 4
 
 
@@ -644,12 +655,12 @@ def main(argv=None):
     ap.add_argument("--seconds", type=float, help="override the length")
     a = ap.parse_args(argv)
     names = ["lurker", "performer", "refuser", "nerve", "seeker"] if a.show else (a.persona or ["performer"])
-    script, length = build_script(names, seed=a.seed)
+    script, _length = build_script(names, seed=a.seed)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     rig = Rig(seed=a.seed, llm_url=a.llm_url, explained=not a.no_explained)
     title = "INFINITE JEST  simulated show" if a.show else "INFINITE JEST  simulated visit"
     try:
-        rep = rig.run(script, a.out, a.seconds or length, title)
+        rep = rig.run(script, a.out, a.seconds, title)
     finally:
         rig.close()
     print(json.dumps({k: rep[k] for k in ("seconds", "messages", "engine_counts", "render_ms", "wall_seconds")}))
