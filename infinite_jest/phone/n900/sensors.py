@@ -96,6 +96,7 @@ class Sensors(object):
                 # Lying still face-up OR face-down (proximity covered by the
                 # plinth) is "resting"; only handling or holding it at an
                 # angle counts as held.
+                was_flat = self.flat
                 self.flat = (abs(beta) < 12 or abs(beta) > 168) and abs(gamma) < 12
                 shake = clamp(math.sqrt(self.jerk(abs(d))) * 2.2)
                 out['shake'] = round(shake, 3)
@@ -111,7 +112,9 @@ class Sensors(object):
                 if drift:
                     self.ref = (x, y, z)
                     self.drift_t = t
-                if v > 0.00015 or shake > 0.25:
+                # A slow, smooth lift barely changes |a| (it is mostly a turn),
+                # so leaving the flat also counts as a pick-up.
+                if v > 0.00015 or shake > 0.25 or (was_flat and not self.flat):
                     self.latched = True
                     self.move_t = t
                     self.drift_t = t

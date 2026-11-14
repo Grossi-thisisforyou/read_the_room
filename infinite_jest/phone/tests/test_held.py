@@ -42,6 +42,20 @@ def test_still_holder_stays_held():
     assert out['held'] is True
 
 
+def test_slow_smooth_lift_counts_as_pick_up():
+    # a gentle visitor turns the phone up to 25 degrees over two seconds,
+    # with no tremor the 18 mg steps can show: |a| never changes
+    root, s = setup()
+    t, out = run(root, s, 0.0, [FLAT], 2)
+    import math
+    steps = ['%d %d %d' % (0, -round(1000 * math.sin(math.radians(25 * k / 40.0))),
+                           -round(1000 * math.cos(math.radians(25 * k / 40.0)))) for k in range(41)]
+    for v in steps:
+        t, out = run(root, s, t, [v], 0.05)
+    t, out = run(root, s, t, [TILT], 10)
+    assert out['held'] is True
+
+
 def test_put_down_flat_ends_held():
     root, s = setup()
     t, out = run(root, s, 0.0, LIFT, 0.5)
