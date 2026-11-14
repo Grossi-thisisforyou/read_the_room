@@ -1,0 +1,103 @@
+{
+ "_about": "Visitor-facing names. Segment keys are trait poles as in profiler/ocean.py LABELS. 'label' is what the profiler shows now; 'alt' are replacements Baby can choose; 'audience' is the one-line ad-platform description the dossier may show under the label. Changed after review: Lurker, Pleaser and Exposed Nerve moved to alternatives because they can read as insults; Neuroticism is shown as REACTIVITY. The profiler's ocean.py LABELS should follow this file.",
+ "scenes": {
+  "flesh": "the meat",
+  "scrawl": "the writing",
+  "inverted": "the fall",
+  "mirror": "the mirror",
+  "void": "the dark"
+ },
+ "traits": {
+  "O": "OPENNESS",
+  "C": "CONSCIENTIOUSNESS",
+  "E": "EXTRAVERSION",
+  "A": "AGREEABLENESS",
+  "N": "REACTIVITY"
+ },
+ "traits_alt": {
+  "N": "NEUROTICISM (the model's own word)",
+  "A": "COMPLIANCE",
+  "C": "ORDER"
+ },
+ "segments": {
+  "E+": {
+   "label": "The Performer",
+   "alt": [
+    "The Broadcast",
+    "The Live Feed"
+   ],
+   "audience": "responds to an audience. dwell rises when watched."
+  },
+  "E-": {
+   "label": "The Observer",
+   "alt": [
+    "The Lurker",
+    "The Quiet Room"
+   ],
+   "audience": "watches more than it acts. long dwell, low input."
+  },
+  "O+": {
+   "label": "The Seeker",
+   "alt": [
+    "The Early Adopter",
+    "The Explorer"
+   ],
+   "audience": "rewards novelty. high response to change."
+  },
+  "O-": {
+   "label": "The Literalist",
+   "alt": [
+    "The Regular",
+    "The Loyalist"
+   ],
+   "audience": "prefers the familiar. low response to change."
+  },
+  "C+": {
+   "label": "The Auditor",
+   "alt": [
+    "The Planner",
+    "The Completist"
+   ],
+   "audience": "follows the sequence. predictable timing."
+  },
+  "C-": {
+   "label": "The Drifter",
+   "alt": [
+    "The Browser",
+    "The Skipper"
+   ],
+   "audience": "skips steps. high exit risk, high return."
+  },
+  "A+": {
+   "label": "The Opt-In",
+   "alt": [
+    "The Pleaser",
+    "The Agreeable"
+   ],
+   "audience": "complies with prompts. high completion rate."
+  },
+  "A-": {
+   "label": "The Contrarian",
+   "alt": [
+    "The Holdout",
+    "The Opt-Out"
+   ],
+   "audience": "rejects the default. responds to dares."
+  },
+  "N+": {
+   "label": "The Live Wire",
+   "alt": [
+    "The Exposed Nerve",
+    "The Sensitive Signal"
+   ],
+   "audience": "responds to reassurance. retention rises under comfort."
+  },
+  "N-": {
+   "label": "The Cold Surface",
+   "alt": [
+    "The Steady Hand"
+   ],
+   "audience": "ignores comfort. responds to intensity."
+  }
+ }
+}

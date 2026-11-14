@@ -1,0 +1,334 @@
+# WALL: what the projection says outside the confession.
+# Format: "@ key=value ..." sets the tags for the lines below it.
+# register: log (UPPERCASE, 1-4 words) | whisper (lowercase, i) | confession (lowercase, we)
+# tone: cold | tender. lang: en (default) | de. Placeholders in {braces} are filled
+# from the profiler's features or the engine's counters; a line whose value is
+# missing is skipped.
+
+@ surface=wall phase=idle beat=attract register=log tone=cold
+THIS ROOM IS EMPTY
+STILL LISTENING
+NO SUBJECT
+WAITING FOR A HAND
+SIGNAL: NONE
+STANDBY
+THE FEED IS OPEN
+EYE OPEN
+DEVICE ON PLINTH
+NEXT SUBJECT: UNKNOWN
+SEGMENT: UNASSIGNED
+NOTHING TO READ YET
+LISTENING. LEVEL ONLY.
+FILES KEPT: 0
+VISITS TODAY: {visits_today}
+AVERAGE STAY {avg_stay:.0f} S
+LONGEST STAY {max_stay:.0f} S
+FILES DELETED: {visits_today}
+
+@ surface=wall phase=idle beat=attract register=whisper tone=tender
+pick it up. it's warm.
+someone held this before you.
+there is a version of this for you.
+it was made for whoever comes next.
+nothing happens until you pick it up.
+come closer. look.
+i wake up in a hand.
+i don't mind waiting. it's what i'm for.
+you can watch from there. i'll wait.
+everything in here is listening for you.
+pick it up. it gets better.
+it's only a phone. go on.
+
+@ surface=wall phase=idle beat=attract register=confession tone=cold
+we keep nothing. we would not know you.
+have we met. we would not know.
+every visitor gets a different room.
+we delete every file. it's in the terms.
+
+@ surface=wall phase=idle beat=attract.long register=log tone=cold
+STILL HERE
+NOBODY FOR {empty_min:.0f} MINUTES
+PLAYING TO NO ONE
+IDLE. NOT OFF.
+STILL RENDERING
+
+@ surface=wall phase=idle beat=attract.long register=whisper tone=tender
+the room keeps playing to no one.
+i keep the picture warm for you.
+it is easier when someone is here.
+i made something. nobody came.
+i'll start again when you do.
+
+@ surface=wall phase=idle beat=attract register=log tone=cold lang=de
+AKTE LEER
+KEIN VORGANG
+BEREIT
+
+@ surface=wall phase=approach beat=lift register=log tone=cold
+DEVICE LIFTED
+SUBJECT ACQUIRED
+CONTACT
+HAND DETECTED
+SESSION OPEN
+FILE OPENED
+NEW SUBJECT
+READING STARTS NOW
+00:00
+TRACKING
+SUBJECT {vid}
+
+@ surface=wall phase=approach beat=lift register=log tone=cold lang=de
+VORGANG ERÖFFNET
+
+@ surface=wall phase=approach beat=lift register=whisper tone=tender
+there you are.
+hello, you.
+i felt that.
+finally, a hand.
+good. hold on.
+
+@ surface=wall phase=profiling beat=calibration register=log tone=cold
+GRIP {handled:.0%}
+TILT {tilt_range:.0f}°
+TURN RATE {tilt_speed:.0f}°/S
+DISTANCE {closeness:.0%}
+APPROACH {approach_time:.0f} S
+TOUCHES {touch_rate:.1f}/MIN
+SURFACE {touch_variety:.0%}
+LINGER {hold_ratio:.0%}
+VOICE {voice:.0%}
+LEVEL {loudness:.0%}
+SHAKE {shake:.2f} G
+MOTION {motion:.0%}
+BURSTS {burstiness:.2f}
+ROAMING {roaming:.0%}
+LOOKS AT LENS {gaze:.0%}
+ANSWER TIME {choice_speed:.1f} S
+KEYS {typing:.0f}
+DWELL {clock}
+CALIBRATING
+READING GRIP
+READING TILT
+READING DISTANCE
+MEASURING HESITATION
+BUILDING PROFILE
+EVIDENCE: SCARCE
+EVIDENCE: GROWING
+CONFIDENCE RISING
+MATCHING AUDIENCE
+LOOKALIKE SEARCH
+SCORING
+FIVE TRAITS. ONE MINUTE.
+ANSWER RECORDED
+CHOICE LOGGED
+SPEED LOGGED
+LEFT OR RIGHT: LOGGED
+HESITATION LOGGED
+
+@ surface=wall phase=profiling beat=calibration register=whisper tone=tender
+just a few questions.
+there are no wrong answers.
+answer fast. don't think.
+this helps me make it for you.
+it's only a game.
+pick one. either is fine.
+
+@ surface=wall phase=profiling beat=no_answer register=log tone=cold
+NO ANSWER
+SILENCE LOGGED
+SILENCE IS DATA
+DECLINED. NOTED.
+SKIPPED. COUNTED.
+NO CHOICE. COUNTED.
+
+# ---- the hook: one block per scene. Visitor-facing names only:
+# the meat (flesh), the writing (scrawl), the fall (inverted), the mirror, the dark (void).
+
+@ surface=wall phase=hook beat=testing hook=flesh register=log tone=cold
+THE MEAT
+RAW FEED
+MEAT, NOT MEANING
+UNSORTED
+WARM INPUT
+PINK NOISE
+HELD IN PLACE
+CUT TO FIT
+RETAINED
+TURN {tilt_speed:.0f}°/S
+
+@ surface=wall phase=hook beat=testing hook=flesh register=whisper tone=tender
+look at it. it's only meat.
+i made it raw for you.
+closer. it doesn't bite.
+stay with it. it stays with you.
+it moves when you move.
+tilt. it follows your hand.
+
+@ surface=wall phase=hook beat=testing hook=flesh register=whisper tone=cold
+don't look away yet.
+this is what holding on looks like.
+keep it in your hands.
+
+@ surface=wall phase=hook beat=testing hook=scrawl register=log tone=cold
+THE WRITING
+CROSSED OUT
+OVERWRITTEN
+ILLEGIBLE
+REDACTED
+NOTES ON SUBJECT
+SEE MARGIN
+STRIKE THROUGH
+DRAFT ONE
+WRONG GUESS
+CORRECTED
+UNREADABLE BY DESIGN
+
+@ surface=wall phase=hook beat=testing hook=scrawl register=whisper tone=tender
+read it before it's gone.
+it's writing about you.
+some of this is true.
+tilt. the words follow you.
+the crossed out words were guesses.
+
+@ surface=wall phase=hook beat=testing hook=scrawl register=whisper tone=cold
+i crossed out the wrong guesses.
+you read the crossed out parts first.
+it writes faster when you move.
+
+@ surface=wall phase=hook beat=testing hook=inverted register=log tone=cold
+THE FALL
+UPSIDE DOWN
+GRAVITY OFF
+WRONG WAY UP
+FLIP DETECTED
+ORIENTATION: NONE
+DOWN IS UP
+TURN IT BACK
+180°
+
+@ surface=wall phase=hook beat=testing hook=inverted register=whisper tone=tender
+turn me over.
+it's the right way up for you.
+everything falls toward you here.
+let it fall.
+you can turn the whole room.
+
+@ surface=wall phase=hook beat=testing hook=inverted register=whisper tone=cold
+hold me wrong. it likes that.
+nothing lands in here.
+nothing here is the right way up.
+
+@ surface=wall phase=hook beat=testing hook=mirror register=log tone=cold
+THE MIRROR
+SUBJECT IN FRAME
+PLAYBACK
+RETURN SIGNAL
+DELAYED COPY
+COPY ONE
+ECHO
+OUTLINE ONLY
+NOT A FACE. A SHAPE.
+LIVE
+
+@ surface=wall phase=hook beat=testing hook=mirror register=whisper tone=tender
+that's you, mostly.
+it follows your outline.
+move. it follows.
+this is how i see you.
+an outline is enough.
+stand still and it softens.
+
+@ surface=wall phase=hook beat=testing hook=mirror register=whisper tone=cold
+don't fix it. it's better wrong.
+it's a little late. it catches up.
+it copies the hand, not the person.
+everyone looks like this to me.
+
+@ surface=wall phase=hook beat=testing hook=void register=log tone=cold
+THE DARK
+NOTHING SHOWING
+SIGNAL LOW
+ONE PULSE
+QUIET MODE
+DARK FRAME
+NEAR ZERO
+SUB ONLY
+LOW LIGHT
+NO PICTURE. ON PURPOSE.
+WAITING
+
+@ surface=wall phase=hook beat=testing hook=void register=whisper tone=tender
+there's nothing here. stay anyway.
+this is the quiet one.
+you don't have to look at anything.
+i turned it down for you.
+listen under the kick.
+
+@ surface=wall phase=hook beat=testing hook=void register=whisper tone=cold
+it's darker for you.
+nothing to see. you stayed.
+the less i show, the longer you stay.
+i saved the dark for you.
+
+@ surface=wall phase=hook beat=lock register=log tone=cold
+RETENTION RISING
+THIS ONE HOLDS
+MATCH FOUND
+LOCKED
+ENGAGEMENT UP
+HOOK SET
+KEEP SERVING
+A/B: WINNER
+TAILORED
+DON'T CHANGE A THING
+{SCENE} HOLDS
+{SCENE}: BEST PERFORMER
+SERVING {SCENE}
+
+@ surface=wall phase=hook beat=lock register=whisper tone=tender
+this was made from you.
+this is the one.
+i'll keep this one on.
+you stayed longer here.
+stay. it gets better.
+
+@ surface=wall phase=hook beat=lock register=whisper tone=cold
+i knew it would be this one.
+it was always going to be this.
+you don't need the others.
+
+@ surface=wall phase=hook beat=deepening register=whisper tone=tender
+nobody else gets this one.
+i kept this one for you.
+this part is only for you.
+one more minute.
+you can stay as long as you like.
+it's better now that i know you.
+
+@ surface=wall phase=hook beat=deepening register=whisper tone=cold
+you could leave. you haven't.
+it only gets more like you.
+the others got something else.
+you watched this one longest.
+
+@ surface=wall phase=hook beat=stillness register=whisper tone=tender
+there. like that.
+stay like that.
+that's the one.
+hold it.
+good. now don't move.
+i can see you better now.
+don't move. it's listening.
+
+@ surface=wall phase=hook beat=stillness register=whisper tone=cold
+this is the version i keep.
+that's the one i'll remember.
+
+@ surface=wall phase=release beat=afterimage register=confession tone=cold
+now look what we saw.
+
+@ surface=wall phase=idle beat=afterimage register=confession tone=cold
+nothing about you was kept.
+the room is empty again.
+gone.
+next.
