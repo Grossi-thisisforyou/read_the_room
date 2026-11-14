@@ -503,7 +503,7 @@ class Visuals:
         self.next_mark = self.t + 7.0
         self.marks = []
         w = random.choice(self._words())
-        size = 14 * self.k
+        size = scrawl.fit_size(w, 14 * self.k, self.TW * 0.9)
         x = (self.TW - scrawl.text_width(w, size)) / 2
         scrawl.draw_text(self.text, w, x, self.TH * 0.82, size, tuple(self.pal[4]) + (255,), random, 0.1, self._lw(2))
         self._dirty = pygame.Rect(0, int(self.TH * 0.82 - size), self.TW, int(size * 3))
@@ -551,6 +551,7 @@ class Visuals:
             return
         word = rng.choice(self._words())
         size = rng.uniform(14, 22 + 26 * oc["E"]) * (1.25 if self.hook == "scrawl" else 1.0) * k
+        size = scrawl.fit_size(word, size, W - 12 * k)
         tw = scrawl.text_width(word, size)
         for _ in range(6):
             if oc["C"] > 0.65:  # orderly visitor: words line up on a grid
