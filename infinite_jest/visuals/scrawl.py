@@ -92,10 +92,6 @@ def draw_text(surf, text, x, y, size, color, rng=None, jitter=0.35, width=2, sla
         if ch == " ":
             cx += size * 0.7
             continue
-        if ch == "©":
-            draw_copyright(surf, cx + size * 0.4, y + size * 0.45, size * 0.45, color, rng, width)
-            cx += size * 1.0
-            continue
         glyph = _G.get(ch)
         if glyph is None:
             cx += size * 0.6

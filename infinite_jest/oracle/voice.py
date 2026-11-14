@@ -93,7 +93,7 @@ _FORBIDDEN = re.compile(
     r"black|white|asian|latin\w*|jew\w*|muslim|christian|religio\w*|race|racial|ethnic\w*|"
     r"disab\w*|illness|sick|depress\w*|disorder|fat|thin|weight|kill|die|dead|suicid\w*|"
     r"hurt you|sad|happy|angry|afraid|scared|lonely|"
-    r"bacon|basquiat|baselitz|francis|crowns?|painter|painting|(neo-?)?expressionis\w*)\b", re.I)
+    r"bacon|basquiat|baselitz|francis|crowns?|samo|skulls?|kings?|painter|painting|(neo-?)?expressionis\w*)\b", re.I)
 
 
 def _split(text, max_words):
@@ -103,7 +103,7 @@ def _split(text, max_words):
         line = re.sub(r"^(line \d+:?\s*)", "", line, flags=re.I)
         if not line:
             continue
-        if _FORBIDDEN.search(line) or len(line.split()) > max_words:
+        if _FORBIDDEN.search(line) or "\u00a9" in line or "(c)" in line.lower() or len(line.split()) > max_words:
             return None
         lines.append(line)
     return lines or None

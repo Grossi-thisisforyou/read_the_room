@@ -146,7 +146,7 @@ function handle(m){
     if(Array.isArray(d.palette)&&d.palette.length)S.palette=d.palette.slice(0,8);
     if(typeof d.tempo==="number"&&d.tempo>20&&d.tempo<300)S.tempo=d.tempo;
     if(typeof d.intensity==="number")S.intensity=clamp(d.intensity);
-    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=d.hook}
+    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=(HOOK_NAMES[d.hook]||"")}
     S.phase=d.phase||S.phase;S.scene=d.scene||S.scene;
     $("st-sens").textContent=(S.scene||S.phase||"").toString().slice(0,24);
   }else if(m.type==="phone"){
@@ -355,16 +355,14 @@ $("enter").addEventListener("click",enter);
 /* ---------------- background: smear, crown, pulse ---------------- */
 var cv=$("bg"), cx=cv.getContext("2d"), W=0, H=0, DPR=1, seed=7;
 function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647}
+var HOOK_NAMES={flesh:"the meat",scrawl:"the writing",inverted:"the fall",mirror:"the mirror",void:"the dark"};
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cx.setTransform(DPR,0,0,DPR,0,0)}
 addEventListener("resize",resize);resize();
 
-function crown(x,y,s,col,j){
-  cx.strokeStyle=col;cx.lineWidth=Math.max(2,s*.05);cx.lineCap="round";cx.lineJoin="round";
-  cx.beginPath();
-  var pts=[[0,1],[0,.25],[.25,.65],[.5,0],[.75,.65],[1,.25],[1,1],[0,1]];
-  for(var i=0;i<pts.length;i++){var px=x+pts[i][0]*s+(rnd()-.5)*j, py=y+pts[i][1]*s*.7+(rnd()-.5)*j;i?cx.lineTo(px,py):cx.moveTo(px,py)}
-  cx.stroke();
-  for(i=0;i<3;i++){cx.beginPath();cx.arc(x+[0,.5,1][i]*s+(rnd()-.5)*j,y+[.25,0,.25][i]*s*.7-s*.1,s*.05,0,6.3);cx.stroke()}
+function tally(x,y,s,col,j){
+  cx.strokeStyle=col;cx.lineWidth=Math.max(2,s*.05);cx.lineCap="round";
+  for(var i=0;i<4;i++){cx.beginPath();var px=x+s*(.12+.22*i);cx.moveTo(px+(rnd()-.5)*j,y+s*.7);cx.lineTo(px+s*.04+(rnd()-.5)*j,y);cx.stroke()}
+  cx.beginPath();cx.moveTo(x,y+s*.55);cx.lineTo(x+s,y+s*.1);cx.stroke();
 }
 function scribble(x,y,w,h,col,n){
   cx.strokeStyle=col;cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x,y);
@@ -391,9 +389,9 @@ function draw(t){
   }
   // beat flash: whole-frame tint in the hottest palette colour
   if(S.running){cx.globalAlpha=pulse*.22;cx.fillStyle=pal[2%pal.length]||"#b3121b";cx.fillRect(0,0,W,H);cx.globalAlpha=1}
-  // Basquiat crown + scribbles
+  // tally + scribbles
   var cs=Math.min(W,H)*(S.running?.22:.3);
-  crown(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
+  tally(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
   scribble(W*.55,H*(S.running?.08:.3),W*.4,H*.07,"rgba(179,18,27,.5)",9);
   // grain
   cx.fillStyle="rgba(236,228,214,.05)";

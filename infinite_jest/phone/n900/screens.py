@@ -6,7 +6,7 @@ agent's UI snapshot and the UI's own typing state. No GTK in here, so the
 tests can render the screens to PNG files.
 
 Look: deep dark industrial. Near-black, film grain and scanlines; raw
-off-white condensed type; Basquiat crowns, crossed-out words and (c) marks;
+off-white condensed type; crossed-out words and tally marks;
 Baselitz's upside-down words; Bacon's smeared flesh pink and a face that
 won't hold its shape. Everything is drawn, so nothing has to be shipped.
 """
@@ -102,11 +102,12 @@ def strike(cr, x, y, w, size, rnd, rgb=BLOOD, a=0.9, n=2):
                          (x + w + 6, yy + rnd.uniform(-3, 3))], rnd, 1.5, size * 0.09, rgb, a)
 
 
-def crown(cr, x, y, s, rnd, rgb=BONE, a=1.0):
-    pts = [(x, y), (x + s * 0.15, y - s * 0.75), (x + s * 0.33, y - s * 0.2),
-           (x + s * 0.5, y - s), (x + s * 0.67, y - s * 0.2), (x + s * 0.85, y - s * 0.75),
-           (x + s, y), (x, y)]
-    jitter_line(cr, pts, rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
+def tally(cr, x, y, s, rnd, rgb=BONE, a=1.0):
+    """Four strokes and a slash: the room keeping count."""
+    for i in range(4):
+        xx = x + s * (0.12 + 0.22 * i)
+        jitter_line(cr, [(xx, y), (xx + s * 0.04, y - s * 0.8)], rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
+    jitter_line(cr, [(x, y - s * 0.15), (x + s, y - s * 0.65)], rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
 
 
 def grain(cr, w, h, rnd, n=180, a=0.10):
@@ -228,10 +229,10 @@ def draw_consent(cr, w, h, snap, t, rnd):
     smear(cr, w * 0.2, h * 0.78, h * 0.32, FLESH, t, rnd, 0.6 + 0.4 * math.sin(t * 0.6))
     # Baselitz: the title hangs upside down top-left
     upside_down(cr, 'INFINITE JEST', m, h * 0.05, h * 0.075, INK, 0.75)
-    # Basquiat crown, top right
-    crown(cr, w * 0.83, h * 0.17, h * 0.13, rnd)
+    # a tally, top right: the room keeps count
+    tally(cr, w * 0.83, h * 0.17, h * 0.13, rnd)
     font(cr, h * 0.035, False)
-    show(cr, u'DARK DATA \xa9', w * 0.80, h * 0.23, BONE, 0.8)
+    show(cr, u'DARK DATA', w * 0.80, h * 0.23, BONE, 0.8)
     # The headline. RECORDING is struck through and still legible.
     size = fit(cr, 'THIS ROOM IS', w * 0.62, h * 0.13)
     y = h * 0.33
@@ -324,7 +325,7 @@ def draw_live(cr, w, h, snap, local, t, rnd):
         smear(cr, fx - h * 0.15, fy + h * 0.1, h * 0.3, cols[min(1, len(cols) - 1)], t, rnd, inten)
         face(cr, fx, fy, h * (0.2 + 0.05 * kick), t, loud, motion, rnd, cols[0])
         if hook in ('scrawl', 'inverted', ''):
-            crown(cr, fx - h * 0.12, fy - h * 0.28, h * 0.24, rnd)
+            tally(cr, fx - h * 0.12, fy - h * 0.28, h * 0.24, rnd)
     # words the engine wants scrawled: some crossed out, some upside down
     words = st.get('words') or []
     wr = random.Random(len(words) * 7 + int(t / 3))
