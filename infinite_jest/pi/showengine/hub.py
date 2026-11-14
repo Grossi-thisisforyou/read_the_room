@@ -33,16 +33,6 @@ MAX_JPEG_BUFFER = 1024 * 1024
 # roles that can change what the wall shows or end a visit; only granted to these peers
 PRIVILEGED_ROLES = {"control", "oracle", "profiler"}
 MAX_PENDING = 64   # unsent messages queued for one client before we skip it (a stuck reader)
-THERMAL = Path("/sys/class/thermal/thermal_zone0/temp")
-
-
-def cpu_temp(path: Path = THERMAL) -> float | None:
-    """SoC temperature in C, or None. A Pi 5 throttles from 80 C (hard at 85 C):
-    a failed Active Cooler shows up here before the picture starts to stutter."""
-    try:
-        return round(int(path.read_text().strip()) / 1000.0, 1)
-    except (OSError, ValueError):
-        return None
 
 
 class Hub:
@@ -54,6 +44,7 @@ class Hub:
         self.dropped = 0
         self.started = time.monotonic()
         self.fps = 0.0
+        self.last_frame_ts: float | None = None   # wall clock of the last finished frame loop pass
         self._runner: web.AppRunner | None = None
         self._udp = None
         self._tcp: asyncio.base_events.Server | None = None
@@ -195,8 +186,9 @@ class Hub:
         for r in self.clients.values():
             roles[r] = roles.get(r, 0) + 1
         st = self.engine.status()
-        st.update({"clients": roles, "fps": round(self.fps, 1), "uptime_s": round(time.monotonic() - self.started),
-                   "udp": dict(self.udp_seq), "dropped": self.dropped, "cpu_temp_c": cpu_temp()})
+        st.update({"clients": roles, "fps": round(self.fps, 1), "last_frame_ts": self.last_frame_ts,
+                   "uptime_s": round(time.monotonic() - self.started),
+                   "udp": dict(self.udp_seq), "dropped": self.dropped})
         return web.json_response(st)
 
     async def get_control(self, request: web.Request) -> web.Response:

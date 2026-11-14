@@ -4,11 +4,12 @@
   python3 -m infinite_jest.visuals.demo --fullscreen
   python3 -m infinite_jest.visuals.demo --image me.jpg  # use a photo as the "camera"
   python3 -m infinite_jest.visuals.demo --webcam        # laptop webcam (needs opencv-python)
-  python3 -m infinite_jest.visuals.demo --stills out/   # save PNG stills of every hook, no window
+  python3 -m infinite_jest.visuals.demo --stills out/   # JPEG stills of every scene variant, no window
   python3 -m infinite_jest.visuals.demo --capture a.mp4 --seconds 70 --with-audio   # picture + sound in sync
 
 Keys: 1-5 hooks (flesh scrawl inverted mirror void), P cycle phase, W wipe,
-O C E A N raise a trait (shift lowers), V new visitor, F fullscreen, Esc quit.
+O C E A N raise a trait (shift lowers), V new visitor, S shake, U upside down,
+F fullscreen, Esc quit.
 The mouse stands in for the phone's tilt (left/right leans and smears, up/down zooms).
 """
 import argparse
@@ -21,7 +22,12 @@ import time
 import numpy as np
 
 HOOKS = ["flesh", "scrawl", "inverted", "mirror", "void"]
-PHASES = [("idle", 6), ("approach", 4), ("profiling", 10), ("hook", 40), ("release", 6), ("wipe", 3)]
+# shortened from the show's timings (hook longer, release 50 s) so a 70 s demo tours everything
+PHASES = [("idle", 5), ("approach", 4), ("profiling", 10), ("hook", 30), ("release", 9), ("wipe", 12)]
+
+REVEAL = ["ARRIVED 21:04, ALONE", "STOOD LEFT OF CENTRE", "LOOKED AWAY 3X",
+          "SMILED ONCE, THEN STOPPED", "STAYED 41 SECONDS", "HELD THE PHONE IN THE LEFT HAND",
+          "LEANED IN WHEN IT GOT LOUD", "DID NOT READ THE WALL", "WILL BE FORGOTTEN"]
 
 
 class FakeShow:
@@ -34,6 +40,8 @@ class FakeShow:
         self.pi = 0
         self.pt = 0.0
         self.mouse = None  # in the window demo, the mouse stands in for phone tilt
+        self.flip = False  # U key: phone held upside down
+        self.shake_t = -1.0  # S key: a shake, for a moment
 
     def new_visitor(self):
         r = self.rng
@@ -56,11 +64,26 @@ class FakeShow:
     def state(self):
         name = PHASES[self.pi][0]
         inten = {"idle": 0.15, "approach": 0.4, "profiling": 0.55, "hook": 0.85, "release": 0.4, "wipe": 0.1}[name]
-        return {"visitor_id": self.vid, "phase": name, "phase_t": self.pt,
-                "hook": self.fixed_hook or self.hook, "scene": self.fixed_hook or self.hook,
-                "intensity": inten, "ocean": dict(self.ocean), "tempo": 124 + 16 * self.ocean["E"],
-                "words": ["LINGERED %dS" % int(self.pt + 4), "LEFT HAND", "LOOKED AWAY 3X"],
-                "steer": self.steer()}
+        st = {"visitor_id": self.vid, "phase": name, "phase_t": self.pt,
+              "hook": self.fixed_hook or self.hook, "scene": self.fixed_hook or self.hook,
+              "intensity": inten, "ocean": dict(self.ocean), "tempo": 124 + 16 * self.ocean["E"],
+              "words": ["LINGERED %dS" % int(self.pt + 4), "LEFT HAND", "LOOKED AWAY 3X"],
+              "steer": self.steer()}
+        dur = PHASES[self.pi][1]
+        if name == "hook" and 15 < self.pt < 21:
+            st["big_line"] = "YOU STAYED FOR THIS"
+        if name == "hook" and self.pt > dur - 4:
+            st["hinge"] = True
+            st["big_line"] = "NOW IT GOES"
+        if name in ("release", "wipe"):
+            n = len(REVEAL) if name == "wipe" else min(len(REVEAL), 1 + int(self.pt / dur * len(REVEAL)))
+            rv = {"header": "VISITOR %s" % self.vid.upper(), "label": "WHAT THE ROOM KEPT",
+                  "lines": REVEAL[:n], "total": len(REVEAL)}
+            if name == "wipe":
+                rv["struck"] = min(len(REVEAL), int(self.pt * 1.3))
+                rv["wipe"] = ["DELETED", "NOTHING KEPT"][: 1 + int(self.pt > 5)]
+            st["reveal"] = rv
+        return st
 
     def steer(self):
         """A visitor slowly tilting the phone, with the odd shake."""
@@ -70,7 +93,9 @@ class FakeShow:
         if self.mouse is not None:
             x, y = self.mouse
         shake = 1.0 if (PHASES[self.pi][0] == "hook" and int(t) % 17 == 0 and t % 1 < 0.1) else 0.0
-        return {"x": x, "y": y, "flip": False, "shake": shake}
+        if 0 <= self.pt - self.shake_t < 0.3:
+            shake = 1.0
+        return {"x": x, "y": y, "flip": self.flip, "shake": shake}
 
 
 def camera_source(args):
@@ -94,7 +119,8 @@ def camera_source(args):
             ok, fr = cap.read()
             return cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY) if ok else None
         return grab
-    return lambda t, present: ghost_body(120, 160, t, seed=5, present=present)
+    # the show's default camera is the visitor's handheld phone: close and moving
+    return lambda t, present: ghost_body(120, 160, t, seed=5, present=present, close=True, cam_shake=1.0)
 
 
 def run_window(args):
@@ -105,7 +131,7 @@ def run_window(args):
     size = (0, 0) if args.fullscreen else (1280, 720)
     screen = pygame.display.set_mode(size, flags)
     pygame.display.set_caption("INFINITE JEST visuals demo")
-    vis = create(screen.get_size(), {})
+    vis = create(screen.get_size(), {"busy_file": None})
     show = FakeShow(args.hook, args.seed)
     cam = camera_source(args)
     clock = pygame.time.Clock()
@@ -128,6 +154,10 @@ def run_window(args):
                     vis.on_wipe(); show.new_visitor()
                 elif ch == "v":
                     show.new_visitor()
+                elif ch == "s":
+                    show.shake_t = show.pt
+                elif ch == "u":
+                    show.flip = not show.flip
                 elif ch == "f":
                     pygame.display.toggle_fullscreen()
                 elif ch and ch in "ocean":
@@ -157,10 +187,12 @@ def run_window(args):
 
 
 def render_stills(args):
-    """Headless: render each hook for a few visitors and save PNGs."""
+    """Headless: render every scene variant of every hook, plus the profiling,
+    hinge and reveal moments, and save JPEG stills with timings."""
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     import pygame
-    from . import create
+    from . import create, scenes
+    from .figure import ghost_body
     pygame.display.init(); pygame.font.init()  # not pygame.init(): keep ALSA free for the audio
     out = args.stills
     os.makedirs(out, exist_ok=True)
@@ -173,33 +205,86 @@ def render_stills(args):
     ]
     cam = camera_source(args)
     timings = []
-    for vname, oc in visitors:
-        for hook in HOOKS:
-            random.seed(hash((vname, hook)) & 0xffff)
-            vis = create((W, H), {})
+    per_hook = {}
+    hooks = [args.hook] if args.hook else HOOKS
+    saved = []
+    for hi, hook in enumerate(hooks):
+        for vi in range(len(scenes.VARIANTS[hook])):
+            vname, oc = visitors[(hi + vi) % len(visitors)]
+            random.seed(hash((vname, hook, vi)) & 0xffff)
+            vis = create((W, H), {"force_variant": vi, "busy_file": None})
             t = 0.0
             dt = 1 / 15
-            seq = [("idle", 1.0), ("approach", 3.0), ("profiling", 4.0), ("hook", 9.0)]
+            seq = [("idle", 1.0), ("approach", 3.0), ("profiling", 3.0), ("hook", 8.0)]
             for phase, dur in seq:
                 pt = 0.0
                 while pt < dur:
-                    st = {"visitor_id": vname, "phase": phase, "phase_t": pt, "hook": hook,
+                    st = {"visitor_id": "%s-%d" % (vname, vi), "phase": phase, "phase_t": pt, "hook": hook,
                           "intensity": 0.85 if phase == "hook" else 0.5, "ocean": oc,
-                          "words": ["LINGERED 41S", "LOOKED AWAY 3X", "LEFT EARLY"]}
+                          "words": ["LINGERED 41S", "LOOKED AWAY 3X", "LEFT EARLY"],
+                          "steer": {"x": 0.35 * math.sin(t * 0.5), "y": 0.2 * math.sin(t * 0.3), "flip": False, "shake": 0}}
                     vis.on_state(st)
                     if int(t * 4) != int((t - dt) * 4):
-                        vis.on_frame(cam(t, 0.0 if phase == "idle" else 1.0))
+                        pres = 0.0 if phase == "idle" else 1.0
+                        # half the stills from the handheld phone (close), half from a fixed camera
+                        vis.on_frame(cam(t, pres) if (args.image or args.webcam or vi % 2 == 0)
+                                     else ghost_body(120, 160, t, seed=5, present=pres))
                     t0 = time.perf_counter()
                     vis.render(target, dt)
-                    timings.append(time.perf_counter() - t0)
+                    ms = (time.perf_counter() - t0) * 1000
+                    if phase == "hook" and pt > 1:
+                        timings.append(ms)
+                        per_hook.setdefault(hook, []).append(ms)
                     t += dt; pt += dt
-                    if phase == "profiling" and abs(pt - 3.0) < dt / 2 and hook == "flesh":
-                        pygame.image.save(target, os.path.join(out, "%s_profiling.png" % vname))
-            pygame.image.save(target, os.path.join(out, "%s_%s.png" % (vname, hook)))
-            print("saved", vname, hook)
+                    if phase == "profiling" and abs(pt - 2.5) < dt / 2 and vi == 0 and hi == 0:
+                        fn = os.path.join(out, "profiling.jpg"); pygame.image.save(target, fn); saved.append(fn)
+            fn = os.path.join(out, "%s_%d_%s.jpg" % (hook, vi, vis.scene["name"].split("/")[-1]))
+            pygame.image.save(target, fn)
+            saved.append(fn)
+            print("saved", fn)
+    # the end of a visit: hinge, then the file typed out, then struck through
+    vis = create((W, H), {"busy_file": None})
+    oc = visitors[0][1]
+    t, dt = 0.0, 1 / 15
+    lines = ["PICKED UP AT 17:42:10", "TILTED LEFT 41 TIMES", "HELD STILL 9 S", "LOOKED AWAY 3X",
+             "RETURNED TO THE FACE", "CHOSE: STAY", "SEGMENT: LINGERER", "CONFIDENCE 0.81"]
+    script = [("hook", 6.0, {}), ("hook", 3.0, {"hinge": True, "big_line": "YOU STAYED FOR US"}),
+              ("hook", 2.0, {}), ("release", 12.0, "reveal"), ("wipe", 4.0, "wipe")]
+    for phase, dur, extra in script:
+        pt = 0.0
+        while pt < dur:
+            st = {"visitor_id": "end", "phase": phase, "phase_t": pt, "hook": "flesh", "intensity": 0.7,
+                  "ocean": oc, "words": lines[:3], "steer": {"x": 0.2 * math.sin(t), "y": 0.0}}
+            if isinstance(extra, dict):
+                st.update(extra)
+            elif extra == "reveal":
+                n = min(len(lines), 1 + int(pt / 1.3))
+                st["reveal"] = {"header": "FILE 0412", "label": "SUBJECT WHO STAYED", "lines": lines[:n], "total": len(lines)}
+            elif extra == "wipe":
+                st["reveal"] = {"header": "FILE 0412", "label": "SUBJECT WHO STAYED", "lines": lines, "total": len(lines),
+                                "struck": min(len(lines), int(pt * 3)), "wipe": ["DELETING 412", "NOTHING KEPT"]}
+            vis.on_state(st)
+            if int(t * 4) != int((t - dt) * 4):
+                vis.on_frame(cam(t, 1.0))
+            vis.render(target, dt)
+            t += dt; pt += dt
+            for name, ph, when in (("hinge", "hook", 1.8), ("reveal", "release", 9.0), ("wipe", "wipe", 1.6)):
+                if phase == ph and abs(pt - when) < dt / 2 and (name != "hinge" or (isinstance(extra, dict) and extra)):
+                    fn = os.path.join(out, "end_%s.jpg" % name); pygame.image.save(target, fn); saved.append(fn)
     timings.sort()
+    for hook, ts in per_hook.items():
+        ts.sort()
+        print("  %-9s median %.1f ms  p95 %.1f ms" % (hook, ts[len(ts) // 2], ts[int(len(ts) * 0.95)]))
     print("render ms: median %.1f  p95 %.1f (this machine, %dx%d out)" % (
-        timings[len(timings) // 2] * 1000, timings[int(len(timings) * 0.95)] * 1000, W, H))
+        timings[len(timings) // 2], timings[int(len(timings) * 0.95)], W, H))
+    # contact sheet
+    ims = [pygame.image.load(f) for f in saved]
+    cols = 5
+    tw, th = 384, 216
+    sheet = pygame.Surface((tw * cols, th * ((len(ims) + cols - 1) // cols)))
+    for i, im in enumerate(ims):
+        sheet.blit(pygame.transform.smoothscale(im, (tw, th)), ((i % cols) * tw, (i // cols) * th))
+    pygame.image.save(sheet, os.path.join(out, "_sheet.jpg"))
 
 
 def capture(args):
@@ -211,7 +296,7 @@ def capture(args):
     pygame.display.init(); pygame.font.init()  # not pygame.init(): keep ALSA free for the audio
     W, H, fps = 1920, 1080, 15
     target = pygame.Surface((W, H))
-    vis = create((W, H), {})
+    vis = create((W, H), {"busy_file": None})
     show = FakeShow(args.hook, args.seed)
     cam = camera_source(args)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -234,8 +319,8 @@ def capture(args):
     for i in range(int(args.seconds * fps)):
         show.step(dt)
         st = show.state()
-        if not args.hook and st["phase"] == "hook":  # tour all five hooks, 8 s each
-            st["hook"] = st["scene"] = HOOKS[int(st["phase_t"] // 8) % 5]
+        if not args.hook and st["phase"] == "hook":  # tour all five hooks, 6 s each
+            st["hook"] = st["scene"] = HOOKS[int(st["phase_t"] // 6) % 5]
         vis.on_state(st)
         if i % (fps // 4) == 0:
             present = 1.0 if st["phase"] in ("approach", "profiling", "hook", "release") else 0.0

@@ -1,0 +1,4 @@
+{
+  "_about": "Line ids (from lines.json) or prompt ids that the show must not use. Baby marks cuts on the score page; paste its export here, or edit by hand. Cut lines stay in the sources until someone deletes them for good.",
+  "cut": []
+}

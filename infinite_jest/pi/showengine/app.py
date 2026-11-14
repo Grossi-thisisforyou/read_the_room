@@ -220,6 +220,7 @@ class Runner:
                     except pygame.error as e:
                         self._lost_display(str(e))
                 frames += 1
+                hub.last_frame_ts = time.time()
                 if now - fps_t >= 2.0:
                     hub.fps, frames, fps_t = frames / (now - fps_t), 0, now
                 if now - dog_t >= 2.0:

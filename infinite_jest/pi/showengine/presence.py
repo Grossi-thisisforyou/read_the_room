@@ -35,19 +35,15 @@ class Presence:
     _raw: float = 0.0
 
     def score_of(self, d: dict) -> float:
-        if not self.cfg.handheld:
-            return self.raw_score(d)
-        # handheld: the camera and the mic alone only half-count; holding the phone counts.
-        # That includes the phone's own "presence" guess: the N900 agent mixes voice (0.7)
-        # and camera motion into it, so people chatting next to the plinth would otherwise
-        # start visit after visit with nobody holding the phone.
-        cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0,
-                  num(d.get("presence")))
-        # a covered proximity sensor is a hand only while the phone is held: lying
-        # face-down on the plinth it is just the plinth (same rule as the N900 agent)
-        keys = ("held", "shake", "kind", "proximity") if d.get("held") is True else ("held", "shake", "kind")
-        hand = Presence.raw_score({k: d[k] for k in keys if k in d})
-        return max(hand, min(cam, 0.4))
+        s = self.raw_score(d)
+        # handheld: when the N900 reports `held`, its own slow-falling `presence` is not used,
+        # so putting the phone down ends the visit in ~8 s, not ~16 s
+        if self.cfg.handheld and ("presence" not in d or "held" in d):
+            # handheld: the camera and the mic alone only half-count; holding the phone counts
+            cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0)
+            hand = Presence.raw_score({k: d[k] for k in ("held", "shake", "kind", "proximity") if k in d})
+            s = max(hand, min(cam, 0.4))
+        return s
 
     @staticmethod
     def _num_motion(d: dict) -> float:

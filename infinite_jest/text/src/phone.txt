@@ -1,0 +1,123 @@
+# PHONE: what the N900 screen says. Short. Lowercase. The phone is the whisper.
+# At release the phone switches to the confession register (we).
+
+@ surface=phone phase=idle beat=attract register=whisper tone=tender
+pick me up
+pick me up.
+hold me
+lift me
+i'm for you
+pick me up. it gets better.
+i'm warm. pick me up.
+go on.
+
+@ surface=phone phase=approach beat=lift register=whisper tone=tender
+there you are.
+hello, you.
+i felt that.
+finally.
+good.
+you. yes, you.
+careful. it's live.
+
+# The consent screen: one sequence per version, shown line by line, then "touch to enter".
+# Plain on purpose: this is the part that has to be understood by everyone.
+@ surface=phone phase=approach beat=consent register=confession tone=cold kind=sequence
+this phone is the eye of the room.
+it reads your grip, your distance, how loud it gets.
+its camera looks at you. no picture is kept.
+it never records your voice. only the level.
+it keeps nothing. it forgets you when you leave.
+cover the top edge to make it stop.
+touch to enter.
+---
+before you start:
+this room watches how you hold the phone.
+its camera looks at you. no picture is kept.
+it listens to the level of sound, never the words.
+nothing is saved. it is all deleted at the end.
+cover the top edge for three seconds to stop it.
+touch to enter.
+---
+terms and conditions:
+we read your hands, distance, timing and outline.
+we never record you. we never keep a picture.
+we guess who you are, and we tell you how badly.
+we delete it all at the end.
+cover the top edge to opt out.
+touch to accept.
+
+@ surface=phone phase=profiling beat=calibration register=whisper tone=tender
+just a few questions.
+no wrong answers.
+fast. don't think.
+last one. promise.
+one more.
+
+# After an answer: one short acknowledgement.
+@ surface=phone phase=profiling beat=answered register=whisper tone=tender
+noted.
+good.
+okay.
+thank you.
+
+@ surface=phone phase=profiling beat=answered register=whisper tone=cold
+of course.
+i thought so.
+i knew you would.
+as expected.
+
+# Teaching the interaction, early in the hook.
+@ surface=phone phase=hook beat=teach register=whisper tone=tender
+tilt me left.
+tilt me right.
+tip me forward.
+turn me upside down.
+shake me once.
+hold me still.
+tilt me. watch the wall.
+the wall follows your hands.
+
+@ surface=phone phase=hook beat=testing register=whisper tone=tender
+stay. it gets better.
+closer.
+don't put me down yet.
+slower.
+again.
+that was for you.
+keep going.
+see what you did.
+one more minute.
+
+@ surface=phone phase=hook beat=deepening register=whisper tone=tender
+nobody else gets this one.
+i made this one for you.
+the wall is listening to your hands.
+you can stay.
+this is yours.
+
+@ surface=phone phase=release beat=confession register=confession tone=cold
+put it down. it's over.
+that's enough.
+thank you for your data.
+look at the wall.
+read what we saw.
+now look up.
+we're done. thank you.
+
+@ surface=phone phase=wipe beat=deletion register=confession tone=cold
+deleted.
+nothing was kept.
+gone.
+all of it. gone.
+you were never here.
+
+@ surface=phone phase=wipe beat=deletion register=confession tone=cold lang=de
+gelöscht.
+nichts gespeichert.
+
+@ surface=phone phase=hook beat=optout register=confession tone=tender
+you are not being read.
+the eye is closed until you leave.
+unread.
+stay as long as you like. unread.

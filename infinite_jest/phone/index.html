@@ -146,12 +146,9 @@ function handle(m){
     if(Array.isArray(d.palette)&&d.palette.length)S.palette=d.palette.slice(0,8);
     if(typeof d.tempo==="number"&&d.tempo>20&&d.tempo<300)S.tempo=d.tempo;
     if(typeof d.intensity==="number")S.intensity=clamp(d.intensity);
-    // hook and scene names are internal: never shown. The strip shows the
-    // engine's visitor-safe words instead.
-    if(typeof d.hook==="string")S.hook=d.hook;
-    if(Array.isArray(d.words))$("hook").textContent=d.words.length?String(d.words[0]).slice(0,40):"";
+    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=(HOOK_NAMES[d.hook]||"")}
     S.phase=d.phase||S.phase;S.scene=d.scene||S.scene;
-    $("st-sens").textContent=(S.phase||"").toString().slice(0,24);
+    $("st-sens").textContent=(S.scene||S.phase||"").toString().slice(0,24);
   }else if(m.type==="phone"){
     if(typeof d.text==="string")$("msg").textContent=d.text;
     if(d.ask&&Array.isArray(d.options)&&d.options.length>=2)showChoice(d);
@@ -355,20 +352,19 @@ function wipe(){
 }
 $("enter").addEventListener("click",enter);
 
-/* ---------------- background: smear, reticle, pulse ---------------- */
+/* ---------------- background: smear, mark, pulse ---------------- */
 var cv=$("bg"), cx=cv.getContext("2d"), W=0, H=0, DPR=1, seed=7;
 function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647}
+var HOOK_NAMES={flesh:"the meat",scrawl:"the writing",inverted:"the fall",mirror:"the mirror",void:"the dark"};
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cx.setTransform(DPR,0,0,DPR,0,0)}
 addEventListener("resize",resize);resize();
 
-function reticle(x,y,s,col,j){   // targeting ring (no crowns: the sources stay hidden)
-  var cxm=x+s/2, cym=y+s/2, r=s*.38;
-  cx.strokeStyle=col;cx.lineWidth=Math.max(1.5,s*.02);cx.lineCap="round";cx.lineJoin="round";
-  cx.beginPath();
-  for(var i=0;i<=18;i++){var a=i/18*6.283, rr=r*(1+(rnd()-.5)*.1);i?cx.lineTo(cxm+Math.cos(a)*rr,cym+Math.sin(a)*rr):cx.moveTo(cxm+Math.cos(a)*rr,cym+Math.sin(a)*rr)}
-  cx.stroke();
-  for(i=0;i<4;i++){var b=i*1.5708;cx.beginPath();cx.moveTo(cxm+Math.cos(b)*r*.55,cym+Math.sin(b)*r*.55);
-    cx.lineTo(cxm+Math.cos(b)*r*1.35+(rnd()-.5)*j,cym+Math.sin(b)*r*1.35+(rnd()-.5)*j);cx.stroke()}
+function mark(x,y,s,col,j){
+  // Baby's mark, J R A, scrawled with hand-drawn jitter
+  cx.fillStyle=col;cx.strokeStyle=col;cx.font="bold "+Math.round(s*.45)+"px 'Arial Narrow',Impact,sans-serif";
+  var L="JRA";
+  for(var i=0;i<3;i++){cx.save();cx.translate(x+i*s*.34+(rnd()-.5)*j,y+s*.5+(rnd()-.5)*j);cx.rotate((rnd()-.5)*.25);cx.fillText(L[i],0,0);cx.restore()}
+  cx.lineWidth=Math.max(2,s*.03);cx.beginPath();cx.moveTo(x-(s*.05),y+s*.58);cx.lineTo(x+s*1.05+(rnd()-.5)*j,y+s*.55);cx.stroke();
 }
 function scribble(x,y,w,h,col,n){
   cx.strokeStyle=col;cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x,y);
@@ -395,9 +391,9 @@ function draw(t){
   }
   // beat flash: whole-frame tint in the hottest palette colour
   if(S.running){cx.globalAlpha=pulse*.22;cx.fillStyle=pal[2%pal.length]||"#b3121b";cx.fillRect(0,0,W,H);cx.globalAlpha=1}
-  // targeting ring + scribbles
+  // J R A mark + scribbles
   var cs=Math.min(W,H)*(S.running?.22:.3);
-  reticle(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
+  mark(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
   scribble(W*.55,H*(S.running?.08:.3),W*.4,H*.07,"rgba(179,18,27,.5)",9);
   // grain
   cx.fillStyle="rgba(236,228,214,.05)";

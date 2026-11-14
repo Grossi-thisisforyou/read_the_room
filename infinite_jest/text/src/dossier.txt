@@ -1,0 +1,131 @@
+# DOSSIER: the confession's evidence lines, typed one every 3 s at release.
+# observe: what the room saw, per profiler feature (keys match reveal.DESCRIBE).
+# infer:   what that is said to predict, per trait pole.
+# The engine/profiler joins them: "<observe>. <infer>"
+
+@ surface=wall phase=release beat=header register=log tone=cold
+FILE
+FILE {vid}
+SUBJECT {vid}
+DOSSIER
+PROFILE
+@ surface=wall phase=release beat=header register=log tone=cold lang=de
+AKTE
+AKTE / FILE
+AKTE {vid}
+
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=pace
+you came in at {pace:.2f} widths of the frame per second
+you crossed the frame at {pace:.2f} widths a second
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=closeness
+you came {closeness:.0%} of the way to the lens
+you filled {closeness:.0%} of the lens
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=approach_time
+you took {approach_time:.0f} seconds to come close
+{approach_time:.0f} seconds passed before you came close
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=motion
+your movement reached {motion:.0%} of what we can measure
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=burstiness
+you moved in bursts, then stopped, then moved again
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=roaming
+you covered {roaming:.0%} of the room's width
+you carried the phone across {roaming:.0%} of the room
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=gaze
+you looked at the lens {gaze:.0%} of the time
+you faced the lens {gaze:.0%} of the time
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=dwell
+you stayed {dwell:.0f} seconds
+you gave us {dwell:.0f} seconds
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=voice
+the phone heard something like a voice {voice:.0%} of the time
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=loudness
+the room reached {loudness:.0%} of full level
+sound peaked at {loudness:.0%} of what the phone can hear
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=touch_rate
+you touched the screen {touch_rate:.1f} times a minute
+your thumb came down {touch_rate:.1f} times a minute
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=touch_variety
+you explored {touch_variety:.0%} of the surface
+your touches covered {touch_variety:.0%} of the screen
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=hold_ratio
+{hold_ratio:.0%} of your touches lingered
+your thumb rested on {hold_ratio:.0%} of your touches
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=choice_speed
+you answered in {choice_speed:.1f} seconds on average
+each answer took you {choice_speed:.1f} seconds
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=handled
+you held the phone {handled:.0%} of the time
+the phone was in your hands {handled:.0%} of the time
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=tilt_range
+you turned it through {tilt_range:.0f} degrees
+you tilted it as far as {tilt_range:.0f} degrees
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=tilt_speed
+you turned it at {tilt_speed:.0f} degrees a second
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=typing
+you typed {typing:.0f} characters. we kept only the count
+you typed {typing:.0f} characters. we never read them
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=option
+you chose: {option}
+asked to choose, you chose {option}
+@ surface=wall phase=release beat=observe register=confession tone=cold needs=silent
+you did not answer. that counted too
+
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=E+
+people who do that score higher on extraversion.
+a model reads that as extraversion.
+in the data, that goes with extraversion.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=E-
+people who do that score lower on extraversion.
+a model reads that as introversion.
+in the data, that goes with keeping to yourself.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=O+
+people who do that score higher on openness.
+a model reads that as openness to experience.
+in the data, that goes with liking the strange.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=O-
+people who do that score lower on openness.
+a model reads that as a taste for the familiar.
+in the data, that goes with liking things plain.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=C+
+people who do that score higher on conscientiousness.
+a model reads that as conscientiousness.
+in the data, that goes with order and plans.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=C-
+people who do that score lower on conscientiousness.
+a model reads that as spontaneity.
+in the data, that goes with skipping the plan.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=A+
+people who do that score higher on agreeableness.
+a model reads that as agreeableness.
+in the data, that goes with going along.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=A-
+people who do that score lower on agreeableness.
+a model reads that as independence.
+in the data, that goes with pushing back.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=N+
+people who do that score higher on reactivity.
+a model reads that as sensitivity.
+in the data, that goes with reacting strongly.
+@ surface=wall phase=release beat=infer register=confession tone=cold pole=N-
+people who do that score lower on reactivity.
+a model reads that as steadiness.
+in the data, that goes with staying level.
+
+# The five numbers. {TRAIT} is the visitor-facing trait name in capitals.
+@ surface=wall phase=release beat=traits register=log tone=cold needs=trait
+{TRAIT} {value:.2f}   CONFIDENCE {conf:.0%}
+
+@ surface=wall phase=release beat=segment register=log tone=cold needs=segment
+SEGMENT: {SEGMENT}
+AUDIENCE: {SEGMENT}
+FILED AS {SEGMENT}
+AUDIENCE SIZE: 1
+
+@ surface=wall phase=release beat=scene register=confession tone=cold needs=scene
+we tried {n_scenes} scenes on you. {scene} held you best.
+{n_scenes} scenes were tested on you. {scene} won.
+you were shown {n_scenes} scenes. you stayed longest with {scene}.
+@ surface=wall phase=release beat=why register=confession tone=cold
+we chose it because it worked, not because it was true.
+it was chosen because it held you, not because it fits you.
+it won on attention. that was the only test.

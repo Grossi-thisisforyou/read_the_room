@@ -10,8 +10,8 @@
     },
     {
       "id": "scream",
-      "ask": "which one is you",
-      "options": ["the scream", "the silence"],
+      "ask": "the noise or the silence",
+      "options": ["the noise", "the silence"],
       "traits": [{"O": 0.2, "N": 0.2, "E": 0.2}, {"C": 0.2, "E": -0.3}],
       "counterpart": "a 'like' on a page: taste as a proxy for personality"
     },

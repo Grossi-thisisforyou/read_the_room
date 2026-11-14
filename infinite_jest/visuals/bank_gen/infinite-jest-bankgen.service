@@ -24,8 +24,10 @@ User=pi
 Group=pi
 WorkingDirectory=/home/pi/read_the_room/infinite_jest/visuals/bank_gen
 Environment=PYTHONUNBUFFERED=1
-# Add options at the end, e.g. --hours 23-7  or  --state-file /tmp/infinite_jest_state.json
-ExecStart=/usr/bin/python3 /home/pi/read_the_room/infinite_jest/visuals/bank_gen/generate.py
+# --theme auto: a different theme each night, so a night's images belong together.
+# Add options at the end, e.g. --hours 23-7, --postprocess,
+# or --state-file /tmp/infinite_jest_state.json
+ExecStart=/usr/bin/python3 /home/pi/read_the_room/infinite_jest/visuals/bank_gen/generate.py --theme auto
 
 # Stay out of the way of the renderer and audio.
 Nice=15

@@ -20,7 +20,7 @@ import uuid
 
 from . import ocean as oc
 from . import reveal as rv
-from .features import Features
+from .features import Features, num
 from .hooks import HOOKS, HookBandit, affinity, params
 from .vision import Vision
 
@@ -34,7 +34,10 @@ DEFAULTS = {
     "optout_cover_seconds": 3.0,  # cover the phone's sensor this long = opt out
     "seed": None,               # set for reproducible simulations
     "mode": "handheld",         # contract default; state.mode overrides
-    "prompts_file": os.path.join(HERE, "prompts.json"),
+    # The text corpus (infinite_jest/text) has the full prompt set; ours is the fallback.
+    "prompts_file": (os.path.join(os.path.dirname(HERE), "text", "corpus", "prompts.json")
+                     if os.path.exists(os.path.join(os.path.dirname(HERE), "text", "corpus", "prompts.json"))
+                     else os.path.join(HERE, "prompts.json")),
 }
 
 
@@ -94,10 +97,14 @@ class Profiler:
     def handle(self, message):
         """Dispatch one contract message {type, ts, data}; return replies."""
         t = message.get("type")
-        # the engine's receive time when it forwarded the message: the N900's own clock
-        # (message "ts") can be years off and would mix with the engine's visit times
-        ts = float(message.get("rx_ts") or message.get("ts") or 0.0)
-        data = message.get("data") or {}
+        # Prefer the engine's receive time: the N900's own clock ("ts") can be
+        # years off and would mix with the engine's visit times.
+        ts = num(message.get("rx_ts"), None)
+        if ts is None:
+            ts = num(message.get("ts"), 0.0)
+        data = message.get("data")
+        if not isinstance(data, dict):
+            data = {}
         if t == "sensor":
             return self._sensor(data, ts)
         if t == "answer":  # engine's name for a forwarded prompt answer
@@ -115,8 +122,6 @@ class Profiler:
         return []
 
     def _frame(self, data, ts):
-        if self.opted_out:
-            return []  # an opted-out visitor's frames are not even looked at
         v = self.vision.frame(data)
         return self._sensor(v, ts) if v else []
 
@@ -145,7 +150,10 @@ class Profiler:
         if not isinstance(data, dict):
             return []
         kind = data.get("kind")
-        if kind == "optout" or data.get("opt_out"):
+        # the N900 sends kind "optout" once, then {"kind": "phone", "optout": true} until the wipe
+        if kind == "optout" or data.get("opt_out") or data.get("optout"):
+            if self.opted_out:
+                return []
             if self.visitor_id is None:
                 self._start(ts)
             return self._opt_out(ts)
@@ -192,7 +200,7 @@ class Profiler:
             if data.get("held") is True:
                 return True
             p = data.get("presence")
-            return bool(p) and (p is True or float(p) > 0.5)
+            return p is True or num(p) > 0.5
         if kind in ("touch", "choice", "keys"):
             return True
         return False
@@ -222,6 +230,7 @@ class Profiler:
             "features": {f: round(v[2], 3) for f, v in self.features.summary().items()},
             "evidence": ["{} -> {}{}".format(f, t, "+" if s > 0 else "-")
                          for _c, t, f, _r, s in evidence[:5]],
+            "words": wall_words(evidence[:5]),
             "seconds": round(ts - self.visit_start, 1),
         }
         self.last_profile = data
@@ -230,8 +239,11 @@ class Profiler:
     def _reveal(self, ts):
         ocean, conf, overall, evidence = self._estimate()
         self.bandit.finish(ts)
-        r = rv.build(ocean, conf, overall, evidence, self.bandit.history,
-                     self.bandit.ranking(), ts - self.visit_start)
+        r = _corpus_reveal(ocean, conf, overall, evidence, self.bandit, self.features,
+                           ts - self.visit_start, self.visitor_id)
+        if r is None:
+            r = rv.build(ocean, conf, overall, evidence, self.bandit.history,
+                         self.bandit.ranking(), ts - self.visit_start)
         self.revealed = True
         self.phase = "reveal"
         r.update({"visitor_id": self.visitor_id, "ocean": ocean, "confidence": overall,
@@ -250,6 +262,44 @@ class Profiler:
         return [msg("profile", ts, {"visitor_id": vid, "phase": "opted_out",
                                     "hook": "void", "confidence": 0.0,
                                     "wiped": True})]
+
+
+def wall_words(evidence):
+    """The evidence as lines for the wall: what you did, and the trait it moved.
+    e.g. "YOU TURNED IT THROUGH 140 DEGREES  O+". The engine scrawls these
+    when the local model has nothing to say."""
+    out, seen = [], set()
+    for _c, trait, feat, raw, sign in evidence:
+        line = rv._describe(feat, raw)
+        line = line.split(" (")[0].upper()
+        if line in seen:
+            continue
+        seen.add(line)
+        out.append("{}  {}{}".format(line, trait, "+" if sign > 0 else "-")[:60])
+    return out
+
+
+def _corpus_reveal(ocean, conf, overall, evidence, bandit, features, seconds, vid):
+    """Use the shared text corpus (infinite_jest/text) for the reveal if present."""
+    try:
+        from infinite_jest.text import Corpus
+    except ImportError:
+        return None
+    try:
+        label, t, s = oc.segment(ocean, conf)
+        ranking = bandit.ranking()
+        out = Corpus.load().visit().reveal({
+            "evidence": evidence, "ocean": ocean, "trait_confidence": conf,
+            "confidence": overall, "segment_pole": t + ("+" if s > 0 else "-"),
+            "hook": ranking[0] if ranking else bandit.current,
+            "scenes_tried": len(set(h[0] for h in bandit.history)) or 1,
+            "seconds": seconds,
+            "choices": {c[0]: c[1] for c in features.choices}, "vid": vid,
+        })
+    except Exception:  # never let text break the show; fall back to templates
+        return None
+    lines = ([out["header"]] if out.get("header") else []) + out.get("lines", []) + out.get("wipe", [])
+    return {"label": out.get("label") or label, "lines": lines, "seconds": round(seconds, 1)}
 
 
 def _last(msgs):

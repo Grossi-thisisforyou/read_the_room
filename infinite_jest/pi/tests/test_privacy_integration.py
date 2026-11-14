@@ -54,6 +54,11 @@ PROMPTS = {"closer": "look closer", "upside": "upside down", "seen": "forgotten"
 
 LLAMA_ANSWER = "stay a little longer\nHOLDS DEVICE CLOSE\nTILTS OFTEN\nLINGERS NEAR"
 
+# Put down -> ~8 s until presence drops -> release (the confession, 50 s) -> wipe (12 s) -> idle.
+# Seconds of "put down" a visit needs to reach idle, with a margin.
+_VC = engine_mod.VisitConfig()
+UNTIL_IDLE = 10.0 + _VC.release_time + _VC.wipe_time + 8.0
+
 
 # ------------------------------------------------------------------ fakes
 class FakeClock:
@@ -418,14 +423,16 @@ def test_oracle_error_path_does_not_leak_the_prompt(rig, logs, capfd):
     assert rig.oracle_errors, "the model should have been asked and failed"
     for e in rig.oracle_errors:
         assert "Observed" not in e and "Visitor profile" not in e and "OPENNESS" not in e.upper(), e
+        assert "Scores:" not in e and "Seen:" not in e, e     # the current prompt's markers
     out, err = capfd.readouterr()
-    assert "Visitor profile" not in "\n".join(logs.lines) + out + err
+    text = "\n".join(logs.lines) + out + err
+    assert "Visitor profile" not in text and "Scores:" not in text and "Seen:" not in text
 
 
 # ================================================================== 2. the wipe
 def test_wipe_leaves_no_sentinel_frame_or_visitor_id_in_memory(rig):
     keys = sentinel()
-    rig.visit(keys, after=30.0)       # put down long enough for release -> wipe -> idle
+    rig.visit(keys, after=UNTIL_IDLE)  # put down long enough for release -> wipe -> idle
     assert rig.engine.machine.phase == "idle"
     for _ in range(40):               # the wall keeps drawing in idle
         rig.step()
@@ -441,7 +448,8 @@ def test_wipe_leaves_no_sentinel_frame_or_visitor_id_in_memory(rig):
 
 
 def test_wipe_clears_each_module(rig):
-    rig.visit(sentinel(), after=30.0)
+    rig.visit(sentinel(), after=UNTIL_IDLE)
+    assert rig.engine.machine.phase == "idle"
     for _ in range(40):
         rig.step()
     e, p, v, o, s = rig.engine, rig.profiler, rig.visuals, rig.oracle, rig.synth
@@ -451,27 +459,35 @@ def test_wipe_clears_each_module(rig):
         and p.features.keys_chars == 0 and p.vision.prev is None and p.bandit.history == []
     # the figure may hold the procedural stand-in body again, never the camera's pixels
     tile_vals = np.array(sorted(set(TILE)), np.float32)
-    for name in ("gray", "bg", "trail"):
-        a = getattr(v.fig, name)
+    for name in ("gray", "bg", "trail", "trail_rgb", "g2", "prev_gray"):   # v1 and v2 figure names
+        a = getattr(v.fig, name, None)
         if a is not None:
             assert np.isin(a, tile_vals).mean() < 0.3, "visuals.fig.%s still holds the camera frame" % name
     assert o.visitor_id is None and o.profile is None and o.result == {}
     assert not s.visitor
     # the visitor's painted body strokes must not linger for the next visitor
-    assert pygame.mask.from_surface(v.paint, 8).count() == 0, "paint layer still holds strokes"
+    for layer in ("paint", "over", "under"):                                # v1: paint; v2: over/under
+        if hasattr(v, layer):
+            assert pygame.mask.from_surface(getattr(v, layer), 8).count() == 0, "%s layer still holds strokes" % layer
     assert pygame.mask.from_surface(v.fig_surf, 8).count() == 0, "last figure still held"
 
 
 def test_wall_and_phone_show_nothing_visitor_derived_after_wipe(rig):
-    rig.visit(sentinel(), after=30.0)
+    rig.visit(sentinel(), after=UNTIL_IDLE)
+    assert rig.engine.machine.phase == "idle"
     rig.sent.clear()
     for _ in range(30):
         rig.step()
+    # idle shows the room's own lines (an attract line, the last struck-out line for a few
+    # seconds): fixed corpus text with nothing filled in. Anything else would be about the visitor.
+    corpus = json.loads((plugins.REPO_ROOT / "infinite_jest" / "text" / "corpus" / "lines.json").read_text())
+    fixed = {t for ln in corpus["lines"] if not ln.get("needs")
+             for t in ([ln["text"]] if "text" in ln else ln.get("lines", []))}
     for m, _roles in rig.sent:
         d = m["data"]
         if m["type"] == P.STATE:
-            assert d["visitor_id"] == "" and d["ocean"] is None and d["words"] == [] \
-                and d["dossier"] == [] and d["reveal"] is None
+            assert d["visitor_id"] == "" and d["ocean"] is None and d["dossier"] == [] and d["reveal"] is None
+            assert all(w in fixed for w in d["words"]), d["words"]
 
 
 # ================================================================== 3. opt-out
@@ -564,7 +580,15 @@ def test_model_never_receives_frames_typed_text_or_ids(rig):
     for k in keys:
         rig.visit(k, seconds=60.0)
     assert len(rig.llama.bodies) >= 6
-    allowed_roles = {"system", "user"}
+    allowed_roles = {"system", "user", "assistant"}
+    # 'assistant' turns are the fixed few-shot examples from text/corpus/oracle.json: written
+    # once, invented, the same for every visitor. Everything before the last user message must
+    # be that fixed text, so nothing of a visitor can ride in a model or example turn.
+    corpus = json.loads((plugins.REPO_ROOT / "infinite_jest" / "text" / "corpus" / "oracle.json").read_text())
+    fixed = {corpus["system"]}
+    for task in ("words", "dossier"):
+        for ex in corpus[task]["examples"]:
+            fixed.update((ex["user"], ex["assistant"]))
     for raw in rig.llama.bodies:
         body = raw.decode()
         for k in keys:
@@ -575,11 +599,14 @@ def test_model_never_receives_frames_typed_text_or_ids(rig):
         req = json.loads(body)
         assert set(req) == {"model", "messages", "max_tokens", "temperature", "stream"}
         assert {m["role"] for m in req["messages"]} <= allowed_roles
+        assert req["messages"][-1]["role"] == "user"
+        for m in req["messages"][:-1]:
+            assert m["content"] in fixed, "non-fixed %s turn sent to the model: %r" % (m["role"], m["content"][:200])
         user = req["messages"][-1]["content"]
         # long runs of base64-looking characters would mean image data
         import re
         assert not re.search(r"[A-Za-z0-9+/]{60,}", user), user
-        assert "Visitor profile:" in user or "Observed:" in user
+        assert "Scores:" in user or "Seen:" in user    # the corpus prompt (text/oracle_prompt.py)
         # choice answers reach it only as the question asked, never the visitor's words
         assert "SENTINEL" not in user
 
@@ -607,7 +634,7 @@ def test_visuals_drop_the_painted_body_at_the_wipe(rig):
     """The stroke canvas is painted from the visitor's camera figure; it must not wait to fade out
     (a next visitor arriving right after the wipe would see it)."""
     rig.visit(sentinel(), seconds=50.0, after=0.0)
-    for _ in range(400):
+    for _ in range(int(UNTIL_IDLE * 10)):   # ~8 s to release, then the 50 s confession
         rig.phone({"kind": "phone", "held": False, "presence": 0.0})
         rig.step()
         if rig.engine.machine.phase == "wipe":

@@ -39,6 +39,10 @@ screen), and `wipe` (everything cleared, back to the first screen).
 - The first screen says plainly: *This room is recording you. The camera,
   microphone and motion of this phone feed a performance made only for you.
   Nothing leaves this room. Everything is erased when you leave.*
+- The consent text and opt-out lines come from `infinite_jest/text/corpus/`
+  (one of three written versions per visitor); the built-in text above is the
+  fallback. The either/or prompts come from the same folder, then the
+  profiler's `prompts.json`.
 - **Opt-out**: covering the proximity sensor ("the eye", top left of the
   screen) for 3 seconds stops all reading of that visitor until the phone has
   been out of anyone's hands for 8 seconds (`optout_release_s`, judged from
@@ -57,8 +61,8 @@ screen), and `wipe` (everything cleared, back to the first screen).
 
 Rendered previews (800x480, the N900's screen) come from
 `python3 tests/render_screens.py OUTDIR`. Near-black, grain and scanlines,
-raw off-white condensed type; Basquiat crowns and crossed-out words, Baselitz's
-upside-down title and words, a Bacon head that won't hold its shape (the mouth
+raw off-white condensed type, crossed-out words, an upside-down title and
+words, the J R A mark, and a smeared head that won't hold its shape (the mouth
 opens with the room's loudness, motion tears it, tilt moves it). A "dark data"
 readout keeps telling the visitor what it is collecting: tilt, voice, how
 often they deleted what they typed, how sure it is they are there.

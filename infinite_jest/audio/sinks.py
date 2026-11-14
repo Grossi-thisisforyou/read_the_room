@@ -31,13 +31,13 @@ class NullSink:
 class AplaySink:
     name = "aplay"
 
-    def __init__(self, device="default", latency_ms=150):
+    def __init__(self, device="default", latency_ms=80):
         cmd = ["aplay", "-q", "-D", str(device), "-f", "S16_LE", "-r", str(SR), "-c", "2",
                "-t", "raw", "-B", str(int(latency_ms * 1000))]
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        try:   # shrink the pipe so it adds ~40 ms, not ~340 ms, of latency
+        try:   # shrink the pipe so it adds ~21 ms, not ~340 ms, of latency
             import fcntl
-            fcntl.fcntl(self.p.stdin.fileno(), 1031, 8192)   # F_SETPIPE_SZ
+            fcntl.fcntl(self.p.stdin.fileno(), 1031, 4096)   # F_SETPIPE_SZ (one page = ~21 ms)
         except Exception:
             pass
 
@@ -60,7 +60,7 @@ class AplaySink:
 class SoundDeviceSink:
     name = "sounddevice"
 
-    def __init__(self, device="default", latency_ms=150, block=1024):
+    def __init__(self, device="default", latency_ms=80, block=1024):
         import sounddevice as sd
         dev = None if device in (None, "", "default") else device
         self.s = sd.RawOutputStream(samplerate=SR, channels=2, dtype="int16", device=dev,
@@ -78,21 +78,25 @@ class SoundDeviceSink:
             pass
 
 
-def open_sink(config, block=1024):
+def open_sink(config, block=1024, quiet=False):
+    """Open the configured output; falls back to a paced NullSink (never raises)."""
     kind = str(config.get("audio_sink", "auto")).lower()
     dev = config.get("audio_device", "default") or "default"
-    lat = float(config.get("audio_latency_ms", 150))
+    lat = float(config.get("audio_latency_ms", 80))
     if kind == "null":
         return NullSink(block)
     if kind in ("auto", "aplay") and shutil.which("aplay"):
         try:
             return AplaySink(dev, lat)
         except Exception as e:
-            print("[audio] aplay failed: %s" % e, file=sys.stderr)
+            if not quiet:
+                print("[audio] aplay failed: %s" % e, file=sys.stderr)
     if kind in ("auto", "sounddevice", "aplay"):
         try:
             return SoundDeviceSink(dev, lat, block)
         except Exception as e:
-            print("[audio] sounddevice unavailable: %s" % e, file=sys.stderr)
-    print("[audio] no audio output found; running silent (null sink)", file=sys.stderr)
+            if not quiet:
+                print("[audio] sounddevice unavailable: %s" % e, file=sys.stderr)
+    if not quiet:
+        print("[audio] no audio output found; running silent and retrying", file=sys.stderr)
     return NullSink(block)

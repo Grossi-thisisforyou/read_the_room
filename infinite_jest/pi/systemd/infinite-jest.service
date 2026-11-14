@@ -7,7 +7,7 @@ Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+Type=notify
 User=@USER@
 Group=@USER@
 SupplementaryGroups=video render input audio
