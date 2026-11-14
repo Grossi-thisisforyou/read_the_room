@@ -323,7 +323,7 @@ class Engine:
                 visit["reveal"] = True
             self.emit(P.make(P.VISIT, visit), {"profiler"})
             if self.profiler is not None:
-                self._from_profiler(plugins.call(self.profiler, "on_visit", visit, time.time()), now)
+                self._from_profiler(plugins.call(self.profiler, "on_visit", visit, now), now)   # one clock for every profiler call
         for line in self.voice.on_phase(new, m, now):
             self.emit(P.make(P.PHONE, line), {"phone"})
         if new == "wipe":
