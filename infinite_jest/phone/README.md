@@ -52,8 +52,8 @@ screen), and `wipe` (everything cleared, back to the first screen).
 
 Rendered previews (800x480, the N900's screen) come from
 `python3 tests/render_screens.py OUTDIR`. Near-black, grain and scanlines,
-raw off-white condensed type; Basquiat crowns and crossed-out words, Baselitz's
-upside-down title and words, a Bacon head that won't hold its shape (the mouth
+raw off-white condensed type, crossed-out words, an upside-down title and
+words, the J R A mark, and a smeared head that won't hold its shape (the mouth
 opens with the room's loudness, motion tears it, tilt moves it). A "dark data"
 readout keeps telling the visitor what it is collecting: tilt, voice, how
 often they deleted what they typed, how sure it is they are there.

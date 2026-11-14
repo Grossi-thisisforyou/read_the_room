@@ -352,19 +352,18 @@ function wipe(){
 }
 $("enter").addEventListener("click",enter);
 
-/* ---------------- background: smear, crown, pulse ---------------- */
+/* ---------------- background: smear, mark, pulse ---------------- */
 var cv=$("bg"), cx=cv.getContext("2d"), W=0, H=0, DPR=1, seed=7;
 function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647}
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cx.setTransform(DPR,0,0,DPR,0,0)}
 addEventListener("resize",resize);resize();
 
-function crown(x,y,s,col,j){
-  cx.strokeStyle=col;cx.lineWidth=Math.max(2,s*.05);cx.lineCap="round";cx.lineJoin="round";
-  cx.beginPath();
-  var pts=[[0,1],[0,.25],[.25,.65],[.5,0],[.75,.65],[1,.25],[1,1],[0,1]];
-  for(var i=0;i<pts.length;i++){var px=x+pts[i][0]*s+(rnd()-.5)*j, py=y+pts[i][1]*s*.7+(rnd()-.5)*j;i?cx.lineTo(px,py):cx.moveTo(px,py)}
-  cx.stroke();
-  for(i=0;i<3;i++){cx.beginPath();cx.arc(x+[0,.5,1][i]*s+(rnd()-.5)*j,y+[.25,0,.25][i]*s*.7-s*.1,s*.05,0,6.3);cx.stroke()}
+function mark(x,y,s,col,j){
+  // Baby's mark, J R A, scrawled with hand-drawn jitter
+  cx.fillStyle=col;cx.strokeStyle=col;cx.font="bold "+Math.round(s*.45)+"px 'Arial Narrow',Impact,sans-serif";
+  var L="JRA";
+  for(var i=0;i<3;i++){cx.save();cx.translate(x+i*s*.34+(rnd()-.5)*j,y+s*.5+(rnd()-.5)*j);cx.rotate((rnd()-.5)*.25);cx.fillText(L[i],0,0);cx.restore()}
+  cx.lineWidth=Math.max(2,s*.03);cx.beginPath();cx.moveTo(x-(s*.05),y+s*.58);cx.lineTo(x+s*1.05+(rnd()-.5)*j,y+s*.55);cx.stroke();
 }
 function scribble(x,y,w,h,col,n){
   cx.strokeStyle=col;cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x,y);
@@ -383,7 +382,7 @@ function draw(t){
   cx.fillStyle="#070605";cx.fillRect(0,0,W,H);
   var base=pal[0]||"#0a0807";
   cx.globalAlpha=S.running?.55+.25*S.intensity:.25;cx.fillStyle=base;cx.fillRect(0,0,W,H);cx.globalAlpha=1;
-  // Bacon-ish smears from the palette
+  // smears from the palette
   var k=S.running?3+Math.round(S.intensity*3):2;
   for(var i=0;i<k;i++){
     var c=pal[(i+1)%pal.length]||"#b3121b";
@@ -391,9 +390,9 @@ function draw(t){
   }
   // beat flash: whole-frame tint in the hottest palette colour
   if(S.running){cx.globalAlpha=pulse*.22;cx.fillStyle=pal[2%pal.length]||"#b3121b";cx.fillRect(0,0,W,H);cx.globalAlpha=1}
-  // Basquiat crown + scribbles
+  // J R A mark + scribbles
   var cs=Math.min(W,H)*(S.running?.22:.3);
-  crown(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
+  mark(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
   scribble(W*.55,H*(S.running?.08:.3),W*.4,H*.07,"rgba(179,18,27,.5)",9);
   // grain
   cx.fillStyle="rgba(236,228,214,.05)";

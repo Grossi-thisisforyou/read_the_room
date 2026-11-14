@@ -6,9 +6,10 @@ agent's UI snapshot and the UI's own typing state. No GTK in here, so the
 tests can render the screens to PNG files.
 
 Look: deep dark industrial. Near-black, film grain and scanlines; raw
-off-white condensed type; Basquiat crowns, crossed-out words and (c) marks;
-Baselitz's upside-down words; Bacon's smeared flesh pink and a face that
-won't hold its shape. Everything is drawn, so nothing has to be shipped.
+off-white condensed type; crossed-out words and the J R A mark;
+upside-down words; smeared flesh pink and a face that won't hold its shape.
+(The visual references stay private: no artist names, no
+giveaway marks anywhere a visitor or a reader of this repo looks.) Everything is drawn, so nothing has to be shipped.
 """
 
 import math
@@ -22,7 +23,7 @@ FONT = 'Nokia Sans Cn'      # the N900's own condensed face; cairo falls back if
 FONT_FALLBACK = 'Sans'
 
 INK = (0.93, 0.90, 0.84)       # raw off-white
-BONE = (0.91, 0.85, 0.66)      # crown yellow-bone
+BONE = (0.91, 0.85, 0.66)      # yellow-bone
 BLOOD = (0.70, 0.05, 0.04)
 FLESH = (0.86, 0.47, 0.42)
 BG = (0.035, 0.03, 0.028)
@@ -95,18 +96,23 @@ def jitter_line(cr, pts, rnd, amp, width, rgb, a=1.0):
 
 
 def strike(cr, x, y, w, size, rnd, rgb=BLOOD, a=0.9, n=2):
-    """Basquiat cross-out: rough strokes through a word (it stays legible)."""
+    """Cross-out: rough strokes through a word (it stays legible)."""
     for k in range(n):
         yy = y - size * (0.28 + 0.12 * k)
         jitter_line(cr, [(x - 6, yy + rnd.uniform(-3, 3)), (x + w * 0.5, yy + rnd.uniform(-4, 4)),
                          (x + w + 6, yy + rnd.uniform(-3, 3))], rnd, 1.5, size * 0.09, rgb, a)
 
 
-def crown(cr, x, y, s, rnd, rgb=BONE, a=1.0):
-    pts = [(x, y), (x + s * 0.15, y - s * 0.75), (x + s * 0.33, y - s * 0.2),
-           (x + s * 0.5, y - s), (x + s * 0.67, y - s * 0.2), (x + s * 0.85, y - s * 0.75),
-           (x + s, y), (x, y)]
-    jitter_line(cr, pts, rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
+def mark(cr, x, y, s, rnd, rgb=BONE, a=1.0):
+    """Baby's mark, J R A, scrawled: letters jitter like they were drawn by hand."""
+    font(cr, s)
+    for i, ch in enumerate('JRA'):
+        cr.save()
+        cr.translate(x + i * s * 0.75 + rnd.uniform(-2, 2), y + rnd.uniform(-3, 3))
+        cr.rotate(rnd.uniform(-0.12, 0.12))
+        show(cr, ch, 0, 0, rgb, a)
+        cr.restore()
+    jitter_line(cr, [(x - s * 0.1, y + s * 0.15), (x + s * 2.3, y + s * 0.1)], rnd, 2, max(2.0, s * 0.06), rgb, a * 0.8)
 
 
 def grain(cr, w, h, rnd, n=180, a=0.10):
@@ -129,7 +135,7 @@ def scanlines(cr, w, h, t):
 
 
 def smear(cr, cx, cy, r, rgb, t, rnd, strength=1.0):
-    """Bacon: a body that is mostly a wound, dragged sideways."""
+    """A body that is mostly a wound, dragged sideways."""
     for i in range(9):
         dy = (i - 4.5) * r * 0.17
         drag = (math.sin(t * 0.9 + i * 0.7) * 0.5 + 0.5) * r * 1.4 * strength
@@ -184,7 +190,7 @@ def face(cr, cx, cy, r, t, loud, motion, rnd, rgb=FLESH):
 
 
 def upside_down(cr, s, x, y, size, rgb=INK, a=1.0):
-    """Baselitz: the word hangs upside down, anchored at (x, y)."""
+    """The word hangs upside down, anchored at (x, y)."""
     cr.save()
     cr.translate(x, y)
     cr.rotate(math.pi)
@@ -224,14 +230,14 @@ def link_dot(cr, w, link, t):
 
 def draw_consent(cr, w, h, snap, t, rnd):
     m = w * 0.05
-    # Bacon smear bottom-left, breathing
+    # flesh smear bottom-left, breathing
     smear(cr, w * 0.2, h * 0.78, h * 0.32, FLESH, t, rnd, 0.6 + 0.4 * math.sin(t * 0.6))
-    # Baselitz: the title hangs upside down top-left
+    # the title hangs upside down top-left
     upside_down(cr, 'INFINITE JEST', m, h * 0.05, h * 0.075, INK, 0.75)
-    # Basquiat crown, top right
-    crown(cr, w * 0.83, h * 0.17, h * 0.13, rnd)
+    # J R A mark and DARK DATA, top right
+    mark(cr, w * 0.80, h * 0.15, h * 0.09, rnd)
     font(cr, h * 0.035, False)
-    show(cr, u'DARK DATA \xa9', w * 0.80, h * 0.23, BONE, 0.8)
+    show(cr, 'DARK DATA', w * 0.80, h * 0.23, BONE, 0.8)
     # The headline. RECORDING is struck through and still legible.
     size = fit(cr, 'THIS ROOM IS', w * 0.62, h * 0.13)
     y = h * 0.33
@@ -323,8 +329,6 @@ def draw_live(cr, w, h, snap, local, t, rnd):
     else:
         smear(cr, fx - h * 0.15, fy + h * 0.1, h * 0.3, cols[min(1, len(cols) - 1)], t, rnd, inten)
         face(cr, fx, fy, h * (0.2 + 0.05 * kick), t, loud, motion, rnd, cols[0])
-        if hook in ('scrawl', 'inverted', ''):
-            crown(cr, fx - h * 0.12, fy - h * 0.28, h * 0.24, rnd)
     # words the engine wants scrawled: some crossed out, some upside down
     words = st.get('words') or []
     wr = random.Random(len(words) * 7 + int(t / 3))
