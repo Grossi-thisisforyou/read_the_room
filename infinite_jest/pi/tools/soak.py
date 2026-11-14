@@ -194,7 +194,9 @@ class Phone:
 # ============================================================== checks
 LEGAL = {("idle", "approach"), ("approach", "profiling"), ("approach", "wipe"),
          ("profiling", "hook"), ("profiling", "release"), ("hook", "release"),
-         ("release", "wipe"), ("wipe", "idle")}
+         ("release", "wipe"), ("wipe", "idle"),
+         # an opted-out visitor who leaves goes straight to the wipe: nothing to reveal
+         ("profiling", "wipe"), ("hook", "wipe")}
 
 
 class PhaseChecker:
@@ -377,6 +379,15 @@ def soak_cfg(out: Path, mode_cfg: dict | None = None) -> dict:
     cfg["visuals"] = dict(cfg.get("visuals", {}), bank_dir=str(out / "bank"),
                           busy_file=str(out / "busy"))
     return cfg
+
+
+def bank_size(bank) -> int:
+    """Images the visuals hold: v1 kept a dict hook -> list, v2 a Bank with .under/.cuts."""
+    if bank is None:
+        return 0
+    if isinstance(bank, dict):
+        return sum(len(v) for v in bank.values())
+    return sum(len(v) for d in (getattr(bank, "under", {}), getattr(bank, "cuts", {})) for v in d.values())
 
 
 def make_bank(path: Path, per_hook: int = 12) -> None:
@@ -653,7 +664,10 @@ def run_accel(a) -> dict:
                         oracle_stats["audio_nan"] += 1
                     audio_skip += 0
                 else:
-                    jump = 47 * synth.B          # whole blocks: the ring buffer slices assume it
+                    # whole internal blocks (v2 renders IB = 2 x B at a time): the ring slices assume it
+                    jump = 24 * getattr(synth, "IB", synth.B)
+                    if getattr(synth, "_pending", None):
+                        synth._pending.clear()
                     synth.pos += jump
                     synth.next_step_at += jump
             if t >= next_bank_add:
@@ -670,7 +684,7 @@ def run_accel(a) -> dict:
                     "visits": checker.visits, "phase_errors": len(checker.errors),
                     "tick_ms": pcts(tick_ms), "handle_ms": pcts(handle_ms),
                     "render_ms": pcts(render_ms), "audio_block_ms": pcts(audio_ms),
-                    "vis_marks": len(vis.marks), "bank_imgs": sum(len(v) for v in vis.bank.values()),
+                    "vis_marks": len(vis.marks), "bank_imgs": bank_size(vis.bank),
                     "synth_stutters": len(synth.stutters), "synth_pos": synth.pos,
                     "oracle": dict(oracle_stats), "pending_oracle": len(pending),
                     "engine_stats": dict(eng.stats)}, deep=warm)
@@ -882,7 +896,7 @@ async def run_realtime_async(a) -> dict:
                     "scenes": {k: pcts(v) for k, v in by_scene.items()},
                     "tasks": len(asyncio.all_tasks()), "clients": len(hub.clients),
                     "audio": audio.poll(), "engine_stats": dict(engine.stats),
-                    "vis_marks": len(vis.marks), "bank_imgs": sum(len(v) for v in vis.bank.values()),
+                    "vis_marks": len(vis.marks), "bank_imgs": bank_size(vis.bank),
                     "children": {k: proc_status(p.pid) for k, p in procs.items()},
                 }
                 if audio.pid:
