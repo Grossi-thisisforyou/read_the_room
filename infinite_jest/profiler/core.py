@@ -20,7 +20,7 @@ import uuid
 
 from . import ocean as oc
 from . import reveal as rv
-from .features import Features
+from .features import Features, num
 from .hooks import HOOKS, HookBandit, affinity, params
 from .vision import Vision
 
@@ -97,8 +97,14 @@ class Profiler:
     def handle(self, message):
         """Dispatch one contract message {type, ts, data}; return replies."""
         t = message.get("type")
-        ts = float(message.get("ts") or 0.0)
-        data = message.get("data") or {}
+        # Prefer the engine's receive time: the N900's own clock ("ts") can be
+        # years off and would mix with the engine's visit times.
+        ts = num(message.get("rx_ts"), None)
+        if ts is None:
+            ts = num(message.get("ts"), 0.0)
+        data = message.get("data")
+        if not isinstance(data, dict):
+            data = {}
         if t == "sensor":
             return self._sensor(data, ts)
         if t == "answer":  # engine's name for a forwarded prompt answer
@@ -191,7 +197,7 @@ class Profiler:
             if data.get("held") is True:
                 return True
             p = data.get("presence")
-            return bool(p) and (p is True or float(p) > 0.5)
+            return p is True or num(p) > 0.5
         if kind in ("touch", "choice", "keys"):
             return True
         return False

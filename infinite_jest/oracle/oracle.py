@@ -33,11 +33,20 @@ try:  # the shared text corpus has the reviewed prompts and a stricter guard
     from infinite_jest.text import oracle_prompt as _tp
     from infinite_jest.text import style as _ts
 
+    def _both_words(text):
+        # Both guards must pass: voice.py's allowlist (hostile-tested) and text's style rules.
+        a = _fallback_voice.clean_words(text)
+        return a if a and _ts.clean_words(text) else None
+
+    def _both_dossier(text):
+        a = _fallback_voice.clean_dossier(text)
+        return a if a and _ts.clean_dossier(text) else None
+
     class voice:  # noqa: N801 - same surface as oracle/voice.py
         words_messages = staticmethod(_tp.words_messages)
         dossier_messages = staticmethod(_tp.dossier_messages)
-        clean_words = staticmethod(_ts.clean_words)
-        clean_dossier = staticmethod(_ts.clean_dossier)
+        clean_words = staticmethod(_both_words)
+        clean_dossier = staticmethod(_both_dossier)
 except ImportError:
     voice = _fallback_voice
 

@@ -39,6 +39,17 @@ NORMS = {
 }
 
 
+def num(x, default=0.0):
+    """float(x) for junk input: None, dicts, strings, NaN and inf give default."""
+    if isinstance(x, bool):
+        return 1.0 if x else 0.0
+    try:
+        v = float(x)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return v if math.isfinite(v) else default
+
+
 def clamp(x, lo=-1.0, hi=1.0):
     return max(lo, min(hi, x))
 
@@ -129,7 +140,7 @@ class Features:
             self.prev_cx = None
             return
         self.present_time += dt
-        motion = float(d.get("motion") or 0.0)
+        motion = num(d.get("motion"))
         self.motion_sum += motion
         self.motion_sq += motion * motion
         self.motion_n += 1
@@ -137,8 +148,8 @@ class Features:
         if d.get("cx") is None:  # phone fallback: presence and motion only
             return
         self.vision_n += 1
-        cx = float(d.get("cx", 0.5))
-        size = float(d.get("size") or 0.0)
+        cx = clamp(num(d.get("cx", 0.5), 0.5), 0.0, 1.0)
+        size = clamp(num(d.get("size")), 0.0, 1.0)
         face = d.get("face")
         if face is not None:
             self.face_seen_n += 1
@@ -160,8 +171,8 @@ class Features:
 
     def _on_audio(self, d, ts, dt):
         self.audio_n += 1
-        level = float(d.get("level", 0.0))
-        voiced = float(d.get("voiced", 0.0))
+        level = num(d.get("level", 0.0))
+        voiced = num(d.get("voiced", 0.0))
         self.voiced_sum += voiced
         self.loud_sum += level * voiced
         self.loud_w += voiced
@@ -170,7 +181,7 @@ class Features:
     def _on_touch(self, d, ts, dt):
         # Contract shape: {x, y, down}. A down/up pair becomes one touch with
         # a duration; {gesture, duration_ms} events are accepted as well.
-        x, y = float(d.get("x", 0.5)), float(d.get("y", 0.5))
+        x, y = num(d.get("x", 0.5)), num(d.get("y", 0.5))
         if "down" in d and "gesture" not in d:
             if d["down"]:
                 self.touch_down = (ts, x, y)
@@ -185,7 +196,7 @@ class Features:
             x, y = x0, y0
         else:
             gesture = d.get("gesture", "tap")
-            dur = float(d.get("duration_ms", 100))
+            dur = num(d.get("duration_ms", 100))
         if len(self.touches) < 200:
             self.touches.append((ts, gesture, x, y, dur))
         self.recent_touch_t.append(ts)
@@ -193,11 +204,11 @@ class Features:
     def _on_choice(self, d, ts, dt):
         if len(self.choices) < 50:
             lat = d.get("latency_ms")
-            self.choices.append((str(d.get("prompt_id")), str(d.get("option")),
-                                 None if lat is None else float(lat)))
+            self.choices.append((str(d.get("prompt_id"))[:40], str(d.get("option"))[:40],
+                                 num(lat, None)))
 
     def _on_accel(self, d, ts, dt):
-        x, y, zz = (float(d.get(k, 0.0)) for k in ("x", "y", "z"))
+        x, y, zz = (num(d.get(k, 0.0)) for k in ("x", "y", "z"))
         mag = math.sqrt(x * x + y * y + zz * zz)
         self.accel_n += 1
         self.shake_sum += abs(mag - 1.0)
@@ -207,8 +218,8 @@ class Features:
         # If no camera frames are arriving, fall back to the phone's own
         # presence/motion estimate (no position or distance then).
         if (self.last_vision_ts is None or ts - self.last_vision_ts > 2.0) and "presence" in d:
-            self._on_vision({"present": float(d.get("presence") or 0) > 0.5,
-                             "motion": float(d.get("motion") or 0.0),
+            self._on_vision({"present": num(d.get("presence")) > 0.5,
+                             "motion": num(d.get("motion")),
                              "cx": None, "size": None, "face": None}, ts, dt, fallback=True)
         if isinstance(d.get("audio"), dict):
             self._on_audio(d["audio"], ts, dt)
@@ -222,7 +233,7 @@ class Features:
             self._on_accel(d["accel"], ts, dt)
         tilt = d.get("tilt")
         if held and isinstance(tilt, dict):
-            b, g = float(tilt.get("beta") or 0.0), float(tilt.get("gamma") or 0.0)
+            b, g = num(tilt.get("beta") or 0.0), num(tilt.get("gamma") or 0.0)
             self.tilt_min = [min(self.tilt_min[0], b), min(self.tilt_min[1], g)]
             self.tilt_max = [max(self.tilt_max[0], b), max(self.tilt_max[1], g)]
             if self.prev_tilt is not None and 0 < ts - self.prev_tilt[2] < 2.0:

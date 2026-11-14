@@ -90,13 +90,17 @@ def _visitor_text():
     for name in sim.ARCHETYPES:
         _profiles, rv = sim.run(name, seed=3)
         out += rv["data"]["lines"] + [rv["data"]["label"]]
-    with open(os.path.join(ROOT, "pi", "config", "default.toml"), "rb") as f:
-        for line in tomllib.load(f).get("phone_lines", {}).values():
-            out += [v for v in line.values() if isinstance(v, str)]
-            out += [o for o in line.get("options", [])]
+    cfg = os.path.join(ROOT, "pi", "config", "default.toml")
+    if os.path.exists(cfg):  # engine (another PR) may not be merged yet
+        with open(cfg, "rb") as f:
+            for line in tomllib.load(f).get("phone_lines", {}).values():
+                out += [v for v in line.values() if isinstance(v, str)]
+                out += [o for o in line.get("options", [])]
     for rel, names in (("visuals/engine.py", ("LEX_TENDER", "LEX_COLD", "LEX_JEST", "LEX_IDLE")),
                        ("pi/showengine/outputs/fallback_visuals.py", ("WORDS",)),
                        ("phone/n900/screens.py", ("CONSENT_LINES",))):
+        if not os.path.exists(os.path.join(ROOT, rel)):
+            continue  # that module lives in another PR
         with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
             tree = ast.parse(f.read())
         for node in ast.walk(tree):
