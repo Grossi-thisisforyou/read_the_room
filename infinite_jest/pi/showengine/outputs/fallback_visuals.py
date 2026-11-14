@@ -483,7 +483,7 @@ class Visuals:
         decay = 0.86 - 0.1 * self.intensity
         self._accum *= decay
         self._accum += field * (1 - decay)
-        v = self._accum * (0.8 + 0.4 * self._streaks) + 0.12 * np.sin(gy * 40 + gx * 6 + self.t)
+        v = self._accum * (0.8 + 0.4 * self._streaks) + 0.12 * np.sin(gy * 40 + gx * 6 + self.t % (2 * math.pi))
         self._field_to(surf, v, 0.3, 5.5)
         # cage: a perspective box drawn over the figure, slightly unsteady
         j = 1 + 4 * self.intensity
@@ -641,9 +641,10 @@ class Visuals:
         d = np.sqrt(dxa * dxa + dy * dy)
         ang = np.arctan2(dy, dxa)
         sp = 1.5 + 5 * self.intensity
-        v = (np.sin(d * (18 + 50 * motion) - self.t * sp)
-             + 0.7 * np.sin(ang * (3 + int(6 * loud)) + alpha + self.t * 0.5)
-             + 0.4 * np.sin(gx * 9 + gy * 5 + self.t * 0.8))
+        tau = 2 * math.pi   # gx/gy are float32: reduce time phases in float64 (days of uptime)
+        v = (np.sin(d * (18 + 50 * motion) - (self.t * sp) % tau)
+             + 0.7 * np.sin(ang * (3 + int(6 * loud)) + (alpha + self.t * 0.5) % tau)
+             + 0.4 * np.sin(gx * 9 + gy * 5 + (self.t * 0.8) % tau))
         v = v * (0.6 + 0.6 * self.pulse * self.intensity)
         sx = int(round(_clamp(gamma / 30, -2, 2)))
         sy = int(round(_clamp(beta / 45, -2, 2)))

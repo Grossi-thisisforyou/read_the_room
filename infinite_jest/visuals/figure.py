@@ -140,9 +140,14 @@ class Figure:
         src = self.gray * (1 - trail_mix) + self.trail * trail_mix
         msk = self.mask
         # flow field: a dominant swipe direction bent by slow noise
+        # X, Y are float32: reduce the time phases in float64 first, or after a
+        # few days of uptime t*0.7 loses its fraction in float32 and the smear
+        # stutters (5 days: frame-to-frame motion alternates 0.006/0.014;
+        # 2 weeks: it freezes on every other frame)
+        tau = 2 * math.pi
         ang = (swipe_angle
-               + 0.9 * np.sin(X * 0.05 + t * 0.7) * np.cos(Y * 0.031 - t * 0.43)
-               + 0.6 * np.sin((X + Y) * 0.021 + t * 0.29))
+               + 0.9 * np.sin(X * 0.05 + (t * 0.7) % tau) * np.cos(Y * 0.031 - (t * 0.43) % tau)
+               + 0.6 * np.sin((X + Y) * 0.021 + (t * 0.29) % tau))
         dx = np.cos(ang) * smear
         dy = np.sin(ang) * smear * 0.55
         # twist around the face: the scream / turned head
