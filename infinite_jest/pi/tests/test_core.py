@@ -322,3 +322,47 @@ def test_visual_sources_never_reach_visitors():
     for m, _ in sent:
         if m["type"] == P.PHONE:
             assert not any(h in str(m["data"]).lower() for h in hooks)
+
+
+# ---------------------------------------------------------------- found by integration/live_test.py
+N900_HELD = {"kind": "phone", "held": True, "presence": 1.0, "tilt": {"beta": 20, "gamma": 0}}
+
+
+def test_n900_optout_quiets_visit_without_a_profiler_and_skips_the_reveal():
+    eng, clock, sent = make_engine(mode="handheld")
+    run(eng, clock, 25, N900_HELD)
+    assert eng.machine.phase == "hook"
+    eng.handle(P.make(P.SENSOR, {"kind": "optout"}), "phone")
+    assert eng.machine.visit.opted_out and eng.state["hook"] == "void" and eng.state["words"] == []
+    assert any(m["type"] == P.SENSOR and m["data"].get("kind") == "optout" for m, r in sent if r == {"profiler"})
+    n = len(sent)
+    run(eng, clock, 20, {"kind": "phone", "optout": True, "held": True})    # still holding: stays, quietly
+    assert eng.machine.phase == "hook"
+    assert not any(r == {"profiler"} and m["type"] == P.SENSOR for m, r in sent[n:])
+    run(eng, clock, 14, {"kind": "phone", "optout": True, "held": False})   # put down
+    ph = phases(sent[n:])
+    assert "release" not in ph and "wipe" in ph
+    assert not any(m["type"] == P.PHONE and "data" in str(m["data"].get("text")) for m, _ in sent[n:])
+    assert "optout" not in eng.sensor
+
+
+def test_n900_put_down_ends_visit_in_about_8s_despite_its_slow_presence():
+    eng, clock, sent = make_engine(mode="handheld")
+    run(eng, clock, 25, N900_HELD)
+    # the agent's presence is a peak that falls 0.12/s; held goes False when it lies flat
+    for i in range(150):
+        clock.t += 0.1
+        eng.handle(P.make(P.SENSOR, {"kind": "phone", "held": False, "presence": max(0.0, 1 - 0.012 * i)}), "phone")
+        if eng.machine.phase == "release":
+            break
+    assert 8.0 <= (i + 1) * 0.1 <= 11.0
+
+
+def test_profiles_for_someone_else_do_not_reach_the_oracle_and_reveal_lines_stay_whole():
+    eng, clock, sent = make_engine()
+    run(eng, clock, 25, BUSY)
+    eng.handle(P.make(P.PROFILE, {"visitor_id": "not-the-visitor", "confidence": 0.9}), "profiler")
+    assert not any(r == {"oracle"} for m, r in sent)
+    line = "you held the device 75% of the time. people like that score more on Openness."
+    eng.machine.on_reveal({"visitor_id": eng.state["visitor_id"], "lines": [line]})
+    assert eng.machine.visit.reveal["lines"] == [line]

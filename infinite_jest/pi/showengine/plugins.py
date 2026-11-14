@@ -25,7 +25,8 @@ def _ensure_path() -> None:
         sys.path.insert(0, root)
 
 
-def load(module_name: str | None) -> Any | None:
+def load(module_name: str | None, entry: str = "create") -> Any | None:
+    """Import a sibling module; `entry` is the attribute it must expose."""
     if not module_name:
         return None
     _ensure_path()
@@ -37,8 +38,8 @@ def load(module_name: str | None) -> Any | None:
     except Exception:
         log.exception("module %s failed to import", module_name)
         return None
-    if not hasattr(mod, "create"):
-        log.warning("module %s has no create(); ignoring", module_name)
+    if not hasattr(mod, entry):
+        log.warning("module %s has no %s; ignoring", module_name, entry)
         return None
     return mod
 

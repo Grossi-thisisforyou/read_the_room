@@ -105,8 +105,8 @@ class Engine:
             if role != "profiler":
                 return   # a profile decides the hook and the words on the wall
             self.stats["profile"] += 1
-            self._on_profile(d, now)
-            self.emit(self._fwd(msg), {"oracle"})
+            if self._on_profile(d, now):     # only the current visitor's, nothing after an opt-out
+                self.emit(self._fwd(msg), {"oracle"})
         elif t == P.ORACLE:
             if role in ("oracle", "profiler") and self.machine.on_oracle(d):
                 self.stats["oracle"] += 1
@@ -204,6 +204,7 @@ class Engine:
             self._on_profile({"visitor_id": vid, "phase": "opted_out", "wiped": True}, now)
             visit = {"visitor_id": vid, "phase": m.phase, "opt_out": True}
             self.emit(P.make(P.VISIT, visit), {"profiler"})
+            self._to_remote_profiler(P.make(P.SENSOR, {"kind": "optout"}))
             self.emit(P.make(P.PROFILE, {"visitor_id": vid, "phase": "opted_out", "wiped": True}), {"oracle"})
             plugins.call(self.profiler, "on_visit", visit, now)
 
@@ -216,17 +217,18 @@ class Engine:
             self.machine.on_reveal(result)
         else:
             self.stats["profile"] += 1
-            self._on_profile(result, now)
-            self.emit(P.make(P.PROFILE, {k: v for k, v in result.items() if k != "type"}), {"oracle"})
+            if self._on_profile(result, now):   # the oracle only hears about the current visitor
+                self.emit(P.make(P.PROFILE, {k: v for k, v in result.items() if k != "type"}), {"oracle"})
 
-    def _on_profile(self, d: dict, now: float) -> None:
+    def _on_profile(self, d: dict, now: float) -> bool:
         was_out = self.machine.visit.opted_out
-        self.machine.on_profile(d, now)
+        ok = self.machine.on_profile(d, now)
         if self.machine.visit.opted_out and not was_out:
             # covered the phone: the frames and the figure drawn from them go now, not at the end
             self.frames.reset()
             self.fallback.reset()
             plugins.call(self.visuals, "on_wipe")
+        return ok and not self.machine.visit.opted_out
 
     def _on_frame_msg(self, msg: dict, now: float) -> None:
         if self.blackout or self.machine.visit.opted_out:

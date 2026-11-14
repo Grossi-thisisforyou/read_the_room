@@ -37,7 +37,7 @@ HINGE_DARK_S = 4.0
 
 
 def load_corpus(module_name: str | None) -> Any | None:
-    mod = plugins.load(module_name) if module_name else None
+    mod = plugins.load(module_name, "Corpus") if module_name else None   # a corpus, not a create() plugin
     if mod is None:
         return None
     try:
@@ -76,6 +76,7 @@ class Voice:
         self._next_wall = 0.0
         self._next_phone = 0.0
         self.reveal: dict | None = None   # {"header","lines","wipe","label","n_data"}
+        self.opted_out = False            # left alone until the wipe: no lines, no reveal
         self.hook_started: float | None = None
         self.visit_started: float | None = None
 
@@ -125,6 +126,8 @@ class Voice:
             self.empty_since = None
             if self.corpus is not None:
                 self.v = self.corpus.visit(self.rng)
+        if self.opted_out and new in ("release", "wipe"):
+            return []
         if self.corpus is None:
             line = self.phone_lines.get(new)
             return [dict(line)] if isinstance(line, dict) and line else []
@@ -198,6 +201,10 @@ class Voice:
     def tick(self, m, now: float, steer: dict, phase_t: float) -> list[dict]:
         """Periodic beats. Returns phone messages to send."""
         phone: list[dict] = []
+        if m.visit.opted_out:
+            self.opted_out = True
+            self.wall, self.big, self.reveal = [], None, None
+            return phone
         if self.corpus is None:
             return phone
         p = m.phase

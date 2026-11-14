@@ -94,10 +94,10 @@ def visible_text(raw: Any, limit: int = 80) -> str:
     return t
 
 
-def clean_words(raw: Any, limit: int = 24) -> list[str]:
+def clean_words(raw: Any, limit: int = 24, width: int = 80) -> list[str]:
     if not isinstance(raw, list):
         return []
-    out = [visible_text(w) for w in raw]
+    out = [visible_text(w, width) for w in raw]
     return [w for w in out if w][:limit]
 
 
@@ -142,7 +142,7 @@ class VisitMachine:
         for k in ("evidence", "trait_confidence", "segment_pole", "scenes_tried", "choices"):
             if k in data:
                 self.visit.profile_extra[k] = data[k]
-        ev = clean_words(data.get("evidence")) or clean_words(data.get("words"))
+        ev = clean_words(data.get("words")) or clean_words(data.get("evidence"))   # readable lines first
         line = visible_text(self.visit.hook_params.get("line"))
         if line:
             ev = [line] + ev
@@ -161,7 +161,8 @@ class VisitMachine:
         if self.visit.opted_out:
             return False
         self.visit.reveal = {
-            "lines": clean_words(data.get("lines"), 12),
+            # whole sentences: don't cut them mid-word
+            "lines": clean_words(data.get("lines"), 12, 160),
             "label": visible_text(data.get("label", "")),
         }
         return True
@@ -213,14 +214,14 @@ class VisitMachine:
                 self._go("profiling", now)
         elif p == "profiling":
             if not self.present:
-                self._go("release", now)
+                self._go("wipe" if self.visit.opted_out else "release", now)   # opted out: nothing to reveal
             elif t >= c.min_profiling and self.visit.confidence >= c.confidence_to_hook:
                 self._go("hook", now)
             elif t >= c.profiling_timeout:
                 self._go("hook", now)
         elif p == "hook":
             if not self.present or self._visit_age(now) >= c.max_visit:
-                self._go("release", now)
+                self._go("wipe" if self.visit.opted_out else "release", now)
         elif p == "release":
             if t >= c.release_time:
                 self._go("wipe", now)
