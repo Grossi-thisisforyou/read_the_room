@@ -694,3 +694,14 @@ def test_optout_end_to_end_the_holder_is_not_read_again(rig):
     assert not later or rig.profiler.features.phone_n == 0, \
         "a new visit profiled the opted-out holder (%s, phase %s)" % (later, phases_with_new_ids)
     assert rig.profiler.last_profile is None
+
+
+@pytest.mark.xfail(strict=True, reason="engine forwards raw frames and typed text to any client that says "
+                                       "hello role 'profiler', even with the profiler in process (engine.py/hub.py)")
+def test_raw_frames_and_typed_text_stay_inside_the_engine_when_the_profiler_is_in_process(rig):
+    keys = sentinel()
+    rig.render = False
+    rig.visit(keys, seconds=20.0, after=0.0)
+    leaked = [m["type"] for m, roles in rig.sent
+              if m["type"] == P.FRAME or keys in P.encode(m)]
+    assert leaked == [], "%d raw frame/typed-text messages emitted to role 'profiler'" % len(leaked)
