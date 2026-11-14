@@ -43,7 +43,10 @@ class Presence:
         # start visit after visit with nobody holding the phone.
         cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0,
                   num(d.get("presence")))
-        hand = Presence.raw_score({k: d[k] for k in ("held", "shake", "kind", "proximity") if k in d})
+        # a covered proximity sensor is a hand only while the phone is held: lying
+        # face-down on the plinth it is just the plinth (same rule as the N900 agent)
+        keys = ("held", "shake", "kind", "proximity") if d.get("held") is True else ("held", "shake", "kind")
+        hand = Presence.raw_score({k: d[k] for k in keys if k in d})
         return max(hand, min(cam, 0.4))
 
     @staticmethod

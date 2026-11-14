@@ -9,7 +9,7 @@ A missing file just means that reading is left out of the message.
 import math
 import os
 
-from compat import clamp, atan2deg
+from compat import clamp, atan2deg, finite
 
 PATHS = {
     'accel': '/sys/class/i2c-adapter/i2c-3/3-001d/coord',          # "x y z" milli-g
@@ -68,6 +68,10 @@ class Sensors(object):
         if raw:
             try:
                 x, y, z = [float(v) / 1000.0 for v in raw.split()[:3]]
+                if not (finite(x) and finite(y) and finite(z)):
+                    raise ValueError('accel junk: %r' % raw)
+                if abs(x) > 8 or abs(y) > 8 or abs(z) > 8:
+                    raise ValueError('accel out of range: %r' % raw)  # chip is +-2 g / +-8 g
                 out['accel'] = {'x': round(x, 3), 'y': round(y, 3), 'z': round(z, 3)}
                 mag = math.sqrt(x * x + y * y + z * z)
                 if self.prev_mag is None:
@@ -84,7 +88,10 @@ class Sensors(object):
                 beta = atan2deg(-gy, -gz)     # front/back
                 gamma = atan2deg(gx, math.sqrt(gy * gy + gz * gz))  # left/right
                 out['tilt'] = {'alpha': 0, 'beta': round(beta, 1), 'gamma': round(gamma, 1)}
-                self.flat = abs(beta) < 12 and abs(gamma) < 12
+                # Lying still face-up OR face-down (proximity covered by the
+                # plinth) is "resting"; only handling or holding it at an
+                # angle counts as held.
+                self.flat = (abs(beta) < 12 or abs(beta) > 168) and abs(gamma) < 12
                 shake = clamp(math.sqrt(self.jerk(abs(d))) * 2.2)
                 out['shake'] = round(shake, 3)
                 if v > 0.0004 or shake > 0.25:
@@ -98,6 +105,8 @@ class Sensors(object):
         if lux:
             try:
                 l = float(lux)
+                if not finite(l) or l < 0:
+                    raise ValueError('lux junk')
                 out['light'] = round(self.light(clamp(math.log(1 + l) / math.log(1 + self.lux_max))), 3)
             except ValueError:
                 pass
@@ -115,7 +124,9 @@ class Sensors(object):
             b = _read(self.paths['battery'])
             if b:
                 try:
-                    self.battery = clamp(float(b) / 100.0)
+                    bv = float(b)
+                    if finite(bv):
+                        self.battery = clamp(bv / 100.0)
                 except ValueError:
                     pass
         if self.battery is not None:

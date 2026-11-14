@@ -19,8 +19,11 @@ critique.
   4 frames a second), a microphone level, the touchscreen, the keyboard, the
   motion sensor and the proximity sensor.
 - **Derived only:** position, size in frame, amount of movement, whether a face
-  is turned to the device, how much and how loudly someone speaks, touches,
-  answers to on-screen either/or questions, and how many characters they typed.
+  is turned to the device and how many faces are in view (if the optional face
+  *detector* is installed: it finds a box around a frontal face, and only the
+  count and the box's size are used, as a distance cue), how much and how
+  loudly someone speaks, touches, answers to on-screen either/or questions,
+  and how many characters they typed.
 
 ## What is never done
 

@@ -14,14 +14,14 @@ Nothing here stores anything: messages go straight into the engine.
 from __future__ import annotations
 
 import asyncio
-import json
+import ipaddress
 import logging
 import time
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-from . import protocol as P
+from . import plugins, protocol as P
 from .engine import Engine
 from .plugins import REPO_ROOT
 
@@ -30,6 +30,9 @@ log = logging.getLogger("showengine.hub")
 PHONE_DIR = REPO_ROOT / "infinite_jest" / "phone"
 CONTROL_PAGE = Path(__file__).with_name("control.html")
 MAX_JPEG_BUFFER = 1024 * 1024
+# roles that can change what the wall shows or end a visit; only granted to these peers
+PRIVILEGED_ROLES = {"control", "oracle", "profiler"}
+MAX_PENDING = 64   # unsent messages queued for one client before we skip it (a stuck reader)
 THERMAL = Path("/sys/class/thermal/thermal_zone0/temp")
 
 
@@ -47,32 +50,77 @@ class Hub:
         self.engine = engine
         self.cfg = cfg
         self.clients: dict[web.WebSocketResponse, str] = {}
-        self.started = time.time()
+        self._pending: dict[web.WebSocketResponse, int] = {}
+        self.dropped = 0
+        self.started = time.monotonic()
         self.fps = 0.0
         self._runner: web.AppRunner | None = None
         self._udp = None
         self._tcp: asyncio.base_events.Server | None = None
         self.udp_seq: dict[str, int] = {"received": 0, "lost": 0}
         self._last_seq: int | None = None
+        self.privileged = _networks(cfg["network"].get("privileged_from", ["127.0.0.1", "::1", "192.168.1.0/24"]))
         engine.emit = self.emit
+
+    def _grant(self, role: str, peer: str | None) -> str:
+        """The role a hello asked for, if this peer may have it; else plain 'phone'."""
+        if role not in P.ROLES:
+            return "phone"
+        if role in PRIVILEGED_ROLES and not _allowed(peer, self.privileged):
+            plugins.report(log, "role", f"{peer} asked for role {role}; not in network.privileged_from, "
+                           "treated as phone", exc_info=False, level=logging.WARNING)
+            return "phone"
+        return role
 
     # ----------------------------------------------------------- outgoing
     def emit(self, msg: dict, roles: set[str] | None) -> None:
         if not self.clients:
             return
-        text = P.encode(msg)
+        text = self._encode(msg)
+        if text is None:
+            return
         for ws, role in list(self.clients.items()):
             if roles is None or role in roles:
-                if ws.closed:
-                    self.clients.pop(ws, None)
-                    continue
-                asyncio.ensure_future(self._send(ws, text))
+                self._queue(ws, text)
+
+    def emit_to(self, ws: web.WebSocketResponse, msg: dict) -> None:
+        text = self._encode(msg)
+        if text is not None:
+            self._queue(ws, text)
+
+    def _encode(self, msg: dict) -> str | None:
+        try:
+            return P.encode(msg)
+        except (ValueError, TypeError, RecursionError):
+            plugins.report(log, "emit", f"could not encode a {str(msg.get('type'))[:20]!r} message; dropped")
+            return None
+
+    def _queue(self, ws: web.WebSocketResponse, text: str) -> None:
+        if ws.closed:
+            self.clients.pop(ws, None)
+            return
+        n = self._pending.get(ws, 0)
+        if n >= MAX_PENDING:          # it stopped reading: don't queue its messages forever
+            self.dropped += 1
+            return
+        self._pending[ws] = n + 1
+        asyncio.ensure_future(self._send(ws, text))
 
     async def _send(self, ws: web.WebSocketResponse, text: str) -> None:
         try:
             await ws.send_str(text)
         except Exception:
             self.clients.pop(ws, None)
+        finally:
+            if ws in self._pending:
+                self._pending[ws] -= 1
+
+    def _handle(self, msg: dict, role: str) -> None:
+        """Into the engine; a bug there costs one message, not the connection or the UDP lane."""
+        try:
+            self.engine.handle(msg, role)
+        except Exception:
+            plugins.report(log, "handle", f"engine failed on a {msg['type'][:20]!r} message")
 
     # ----------------------------------------------------------- http + ws
     def app(self) -> web.Application:
@@ -104,31 +152,31 @@ class Hub:
                     continue
                 if msg["type"] == P.HELLO:
                     role = str(msg["data"].get("role", "phone"))
-                    self.clients[ws] = role if role in P.ROLES else "phone"
+                    self.clients[ws] = self._grant(role, peer)
                     log.info("%s is %s", peer, self.clients[ws])
-                    await ws.send_str(P.encode(P.make(P.STATE, self.engine.state)))
+                    self.emit_to(ws, P.make(P.STATE, self.engine.state))
                     continue
-                self.engine.handle(msg, self.clients.get(ws, "phone"))
+                self._handle(msg, self.clients.get(ws, "phone"))
         finally:
             self.clients.pop(ws, None)
+            self._pending.pop(ws, None)
             log.info("client %s left", peer)
         return ws
 
     async def post_sensor(self, request: web.Request) -> web.Response:
         try:
-            body = await request.text()
-            parsed = json.loads(body)
+            parsed = P.loads(await request.read())
         except Exception:
             return web.json_response({"ok": False, "error": "not JSON"}, status=400)
         items = parsed if isinstance(parsed, list) else [parsed]
         n = 0
         for item in items[:100]:
             try:
-                msg = P.decode(json.dumps(item))
+                msg = P.check(item)
             except P.BadMessage:
                 continue
             if msg["type"] in (P.SENSOR, P.FRAME, P.ANSWER):
-                self.engine.handle(msg, "phone")
+                self._handle(msg, "phone")
                 n += 1
         return web.json_response({"ok": True, "accepted": n})
 
@@ -139,7 +187,7 @@ class Hub:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
         if msg["type"] != P.FRAME:
             return web.json_response({"ok": False, "error": "expected a frame"}, status=400)
-        self.engine.handle(msg, "phone")
+        self._handle(msg, "phone")
         return web.json_response({"ok": True})
 
     async def get_status(self, request: web.Request) -> web.Response:
@@ -147,8 +195,8 @@ class Hub:
         for r in self.clients.values():
             roles[r] = roles.get(r, 0) + 1
         st = self.engine.status()
-        st.update({"clients": roles, "fps": round(self.fps, 1), "uptime_s": round(time.time() - self.started),
-                   "udp": dict(self.udp_seq), "cpu_temp_c": cpu_temp()})
+        st.update({"clients": roles, "fps": round(self.fps, 1), "uptime_s": round(time.monotonic() - self.started),
+                   "udp": dict(self.udp_seq), "dropped": self.dropped, "cpu_temp_c": cpu_temp()})
         return web.json_response(st)
 
     async def get_control(self, request: web.Request) -> web.Response:
@@ -171,7 +219,7 @@ class Hub:
                 self.udp_seq["lost"] += seq - self._last_seq - 1
             self._last_seq = seq
         self.udp_seq["received"] += 1
-        self.engine.handle(msg, "phone")
+        self._handle(msg, "phone")
 
     # ----------------------------------------------------------- tcp jpeg
     async def on_jpeg_stream(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -185,7 +233,10 @@ class Hub:
                     break
                 buf += chunk
                 for jpeg in split_jpegs(buf):
-                    self.engine.on_jpeg(jpeg)
+                    try:
+                        self.engine.on_jpeg(jpeg)
+                    except Exception:
+                        plugins.report(log, "jpeg", "engine failed on a camera frame")
                 if len(buf) > MAX_JPEG_BUFFER:
                     del buf[:]   # garbage on the line; start over
         except (ConnectionError, asyncio.IncompleteReadError):
@@ -226,6 +277,26 @@ class Hub:
             self._tcp.close()
         if self._runner is not None:
             await self._runner.cleanup()
+
+
+def _networks(raw) -> list:
+    out = []
+    for item in raw if isinstance(raw, (list, tuple)) else [raw]:
+        try:
+            out.append(ipaddress.ip_network(str(item).strip(), strict=False))
+        except ValueError:
+            log.error("network.privileged_from: %r is not an address or network; ignored", item)
+    return out
+
+
+def _allowed(peer: str | None, nets: list) -> bool:
+    try:
+        ip = ipaddress.ip_address(peer or "")
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return any(ip in n for n in nets)
 
 
 def split_jpegs(buf: bytearray) -> list[bytes]:

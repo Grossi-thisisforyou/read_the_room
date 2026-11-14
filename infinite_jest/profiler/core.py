@@ -94,8 +94,8 @@ class Profiler:
     def handle(self, message):
         """Dispatch one contract message {type, ts, data}; return replies."""
         t = message.get("type")
-        # rx_ts is the Pi's clock (the engine adds it when forwarding); the
-        # sender's ts may come from a phone whose clock is minutes off
+        # the engine's receive time when it forwarded the message: the N900's own clock
+        # (message "ts") can be years off and would mix with the engine's visit times
         ts = float(message.get("rx_ts") or message.get("ts") or 0.0)
         data = message.get("data") or {}
         if t == "sensor":
@@ -115,6 +115,8 @@ class Profiler:
         return []
 
     def _frame(self, data, ts):
+        if self.opted_out:
+            return []  # an opted-out visitor's frames are not even looked at
         v = self.vision.frame(data)
         return self._sensor(v, ts) if v else []
 
@@ -242,6 +244,7 @@ class Profiler:
         self.features.reset()
         self.vision.reset()
         self.bandit.reset()
+        self.last_profile = None
         self.opted_out = True
         self.phase = "opted_out"
         return [msg("profile", ts, {"visitor_id": vid, "phase": "opted_out",

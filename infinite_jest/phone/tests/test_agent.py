@@ -13,7 +13,16 @@ sys.path.insert(0, os.path.join(HERE, '..', 'n900'))
 import websockets
 from agent import Agent, DEFAULTS
 
-PORT, UDP = 18765, 18766
+def _free(kind):
+    s = socket.socket(socket.AF_INET, kind)
+    s.bind(('127.0.0.1', 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+# free ports, so parallel runs (or a running engine) don't collide
+PORT, UDP = _free(socket.SOCK_STREAM), _free(socket.SOCK_DGRAM)
 got = {'types': [], 'sensor_kinds': [], 'frames': [], 'udp': [], 'choices': [], 'hello': None}
 clients = []
 
@@ -136,6 +145,13 @@ async def main():
     agent.stop()
     server.close()
     print('FAILED' if check.failed else 'ALL PASSED')
-    sys.exit(1 if check.failed else 0)
 
-asyncio.run(main())
+
+def test_agent_end_to_end():
+    asyncio.run(main())
+    assert not check.failed
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
+    sys.exit(1 if check.failed else 0)
