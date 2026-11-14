@@ -37,7 +37,7 @@ HINGE_DARK_S = 4.0
 
 
 def load_corpus(module_name: str | None) -> Any | None:
-    mod = plugins.load(module_name) if module_name else None
+    mod = plugins.load(module_name, "Corpus") if module_name else None   # a corpus, not a create() plugin
     if mod is None:
         return None
     try:
