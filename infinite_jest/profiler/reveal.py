@@ -32,7 +32,7 @@ DESCRIBE = {
 
 
 # What visitors read for each scene. Internal hook names stay in code only.
-SCENE_NAMES = {"flesh": "the meat", "scrawl": "the writing", "inverted": "the fall",
+SCENE_NAMES = {"flesh": "the wound", "scrawl": "the writing", "inverted": "the fall",
                "mirror": "the mirror", "void": "the dark"}
 
 

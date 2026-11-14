@@ -406,7 +406,7 @@ class Visuals:
             elif k == "like":
                 s = "affinity %-10s %.3f" % (r.choice(("loss", "flesh", "noise", "night", "tender", "control", "decay")), r.random())
             elif k == "pulse":
-                s = "arousal_est %.2f  conf %.2f" % (r.random(), r.random())
+                s = "attention_est %.2f  conf %.2f" % (r.random(), r.random())
             elif k == "match":
                 s = "lookalike cohort #%05d  n=%d" % (r.randrange(99999), r.randrange(40, 9000))
             else:
