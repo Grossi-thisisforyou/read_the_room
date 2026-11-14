@@ -109,6 +109,7 @@ def build_state(m: VisitMachine, now: float, sensor: dict[str, Any] | None = Non
         "reveal": dict(v.reveal) if v.reveal else None,
         "dossier": list(v.dossier),
         "blackout": blackout,
+        "opted_out": bool(v.opted_out),     # visuals: nothing that reads as reading them
         "tilt": tilt or {"alpha": 0.0, "beta": 0.0, "gamma": 0.0, "x": 0.0, "y": 0.0, "energy": 0.0},
         "shake": round(shake, 3),
         "sensor": {k: s[k] for k in ("motion", "loudness", "faces", "light", "touch", "held", "proximity") if k in s},
