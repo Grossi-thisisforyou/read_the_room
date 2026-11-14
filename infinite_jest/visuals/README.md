@@ -163,6 +163,10 @@ Config keys:
 | `figure_w`, `figure_h` | `160`, `180` | size of the figure buffer |
 | `bank_dir` | `visuals/bank` | the image library |
 | `bank_max_per_hook` | `40` | how many library pictures to load per hook |
+| `bank_reload_s` | `600` | at a wipe, re-read the library if it is older than this; done on a background thread, only new files are read, and the new set takes over at the next scene |
+| `hook_hold_s` | `6` | a new hook from the profiler takes over only after it has been asked for this long without a break ... |
+| `min_scene_s` | `20` | ... and the current scene has been up this long (a phase change, a new visitor, a shake or a phone flip cut at once) |
+| `hook_fade_s` | `2.5` | crossfade length from one hook's scene into another's |
 | `busy_file` | `/tmp/infinite_jest_busy` | tells the overnight generator a visitor is in; `None` turns it off |
 | `corpus_path` | none | a `lines.json` file, or a folder holding one, to use as the wall text |
 | `force_variant` | none | always use scene number N of the current hook (for testing) |
@@ -176,9 +180,10 @@ environment variable `IJ_VISUALS_STRICT=1` to see the error instead).
 Measured on the cloud machine it was built on (x86, one core, 1920x1080 output):
 about 11 ms per frame median, 13 to 16 ms at the 95th percentile. By hook: flesh 11,
 scrawl 11, inverted 11, mirror 10, void 8. About 4 ms of that is the final smooth
-upscale. A Pi 5 core is slower, so expect roughly 20 to 30 ms. **Not yet measured on
-the Pi.** If it is too slow, set `internal_size` to `(480, 270)` or `smooth_scale` to
-False. `python3 -m infinite_jest.visuals.bench` measures it.
+upscale. On a Pi 5 the hook frames measured 30 to 45 ms at 1080p (22 to 30 fps). The knobs,
+in order: first `smooth_scale` False (about 25% less), then also `internal_size`
+`(480, 270)`. `python3 -m infinite_jest.visuals.bench` measures both and prints
+the config to use.
 
 ## Privacy
 

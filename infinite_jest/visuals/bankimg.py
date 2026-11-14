@@ -16,6 +16,8 @@ Squares are never stretched to 16:9; they are cropped to fill.
 import json
 import os
 import random
+import threading
+import time
 
 import pygame
 
@@ -71,10 +73,19 @@ def crop_fill(img, size):
 
 
 class Bank:
-    def __init__(self, path, ground_size, max_per_hook=40, fig_h=360, seed=None):
+    """`cache` (optional, {path: (mtime, size, fitted surface, tags)}) lets a
+    reload reuse what an earlier one read: only new or changed files are read
+    and decoded. `pause` (seconds) is slept after each file read, so a
+    background reload leaves the CPU to the frame loop."""
+
+    def __init__(self, path, ground_size, max_per_hook=40, fig_h=360, seed=None, cache=None, pause=0.0):
         self.under = {}   # hook -> [(surface, tags)]
         self.cuts = {}    # hook -> [(surface, tags)]
         self.size = tuple(ground_size)
+        self.cache = {}   # what this bank holds, by path (pass it to the next reload)
+        self.read = 0     # files actually read and decoded by this load
+        self._old = cache if cache is not None else {}
+        self._pause = float(pause)
         rng = random.Random(seed)
         if not path or not os.path.isdir(path):
             return
@@ -95,9 +106,11 @@ class Bank:
                 if best is not None or None in v:
                     under.append(v.get(best) or v.get(None))
             cuts = [by_base[b]["cutout"] for b in bases if "cutout" in by_base[b]]
-            self.under[hook] = self._load(_sample(under, max_per_hook, rng), lambda im: crop_fill(im, self.size))
+            self.under[hook] = self._load(_sample(under, max_per_hook, rng), lambda im: crop_fill(im, self.size),
+                                          ("u",) + self.size)
             self.cuts[hook] = self._load(_sample(cuts, max(1, max_per_hook // 2), rng),
-                                         lambda im: self._fit_h(im, fig_h), alpha=True)
+                                         lambda im: self._fit_h(im, fig_h), ("c", fig_h), alpha=True)
+        self._old = None
 
     @staticmethod
     def _fit_h(im, h):
@@ -106,15 +119,26 @@ class Bank:
             return im
         return pygame.transform.smoothscale(im, (max(1, int(w0 * h / h0)), h))
 
-    @staticmethod
-    def _load(paths, fit, alpha=False):
+    def _load(self, paths, fit, how, alpha=False):
         out = []
         for p in paths:
             try:
-                im = pygame.image.load(p)
-                if alpha and not (im.get_flags() & pygame.SRCALPHA):
-                    continue  # a cutout without transparency would be a rectangle
-                out.append((fit(im), _tags(p)))
+                mt = os.path.getmtime(p)
+                hit = self._old.get(p)
+                if hit is not None and hit[0] == mt and hit[1] == how:
+                    surf, tags = hit[2], hit[3]
+                else:
+                    self.read += 1
+                    im = pygame.image.load(p)
+                    if self._pause:
+                        time.sleep(self._pause)
+                    if alpha and not (im.get_flags() & pygame.SRCALPHA):
+                        continue  # a cutout without transparency would be a rectangle
+                    surf, tags = fit(im), _tags(p)
+                    if self._pause:
+                        time.sleep(self._pause)
+                self.cache[p] = (mt, how, surf, tags)
+                out.append((surf, tags))
             except Exception:
                 pass
         return out
@@ -133,3 +157,55 @@ class Bank:
 
     def __bool__(self):
         return any(self.under.values()) or any(self.cuts.values())
+
+
+class Loader:
+    """Reload the bank on a background thread and hand the new Bank over.
+
+    Reading and decoding 200 images on the frame thread froze the picture for
+    ~2 s on x86 (about 5 s on a Pi). Here the thread does the file IO, decode
+    and scaling (pygame releases the GIL inside them), reuses every image the
+    current bank already holds, and pauses between files. The frame loop only
+    calls poll() (cheap) and swaps the finished Bank in at once.
+    """
+
+    def __init__(self):
+        self._thread = None
+        self._result = None
+        self._lock = threading.Lock()
+
+    @property
+    def busy(self):
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, path, ground_size, max_per_hook, fig_h, cache, pause=0.004):
+        if self.busy:
+            return False
+
+        def run():
+            try:   # lowest CPU priority for this thread only (Linux: per-thread nice)
+                os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 15)
+            except (AttributeError, OSError, ValueError):
+                pass
+            try:
+                bank = Bank(path, ground_size, max_per_hook, fig_h=fig_h, cache=dict(cache), pause=pause)
+            except Exception:
+                bank = None
+            with self._lock:
+                self._result = bank
+        self._thread = threading.Thread(target=run, name="ij-bank-load", daemon=True)
+        self._thread.start()
+        return True
+
+    def poll(self):
+        """The finished Bank, once, or None."""
+        if self._result is None:
+            return None
+        with self._lock:
+            bank, self._result = self._result, None
+        return bank
+
+    def wait(self, timeout=30.0):
+        if self._thread is not None:
+            self._thread.join(timeout)
+        return self.poll()
