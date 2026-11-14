@@ -54,6 +54,12 @@ class Engine:
         self._last_state_emit = -1e9
         self._last_frame_t = -1e9
         self._unknown_types: set[str] = set()
+        # One time base for the in-process profiler. The N900 has no network
+        # time (offline LAN), so its envelope `ts` can be minutes or days off
+        # the Pi's clock; mixing it with engine times broke the profiler's
+        # timers (instant auto-reveal). Everything the profiler gets is on
+        # the engine's clock instead.
+        self._wall_offset = time.time() - now
 
     # ------------------------------------------------------------------ input
     def handle(self, msg: dict, role: str = "phone") -> None:
@@ -95,9 +101,13 @@ class Engine:
             return
         self.tick(now)
 
+    def wall(self) -> float:
+        """Unix-like seconds on the engine's own clock (virtual in tests)."""
+        return self.clock() + self._wall_offset
+
     def _fwd(self, msg: dict) -> dict:
         out = dict(msg)
-        out["rx_ts"] = time.time()
+        out["rx_ts"] = self.wall()
         return out
 
     def _on_sensor(self, msg: dict, now: float) -> None:
@@ -122,7 +132,7 @@ class Engine:
         if self.machine.phase in ("approach", "profiling", "hook"):
             self.fallback.feed(d)
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, msg["ts"]), now)
+            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, self.wall()), now)
         self.emit(self._fwd(msg), {"profiler"})
 
     def _from_profiler(self, result: Any, now: float) -> None:
@@ -142,7 +152,7 @@ class Engine:
             return
         self.emit(self._fwd(msg), {"profiler"})
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], msg["ts"]), now)
+            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], self.wall()), now)
         rgb = self.frames.decode(msg["data"])
         if rgb is not None:
             self._use_frame(rgb, now)
@@ -237,7 +247,7 @@ class Engine:
                 visit["reveal"] = True
             self.emit(P.make(P.VISIT, visit), {"profiler"})
             if self.profiler is not None:
-                self._from_profiler(plugins.call(self.profiler, "on_visit", visit, time.time()), now)
+                self._from_profiler(plugins.call(self.profiler, "on_visit", visit, self.wall()), now)
         line = self.cfg.get("phone_lines", {}).get(new)
         if isinstance(line, dict) and line:
             self.emit(P.make(P.PHONE, dict(line)), {"phone"})
