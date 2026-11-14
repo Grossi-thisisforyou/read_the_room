@@ -522,6 +522,18 @@ def test_optout_clears_oracle_words_from_the_wall(rig):
             assert d["ocean"] is None and d["words"] == [] and d["dossier"] == [] and d["reveal"] is None
 
 
+def test_optout_wall_shows_no_tailored_lines(rig):
+    """After opt-out the visuals drew corpus lines picked by tone ("you hold me gently.")
+    in the film: they read as if the room were still reading the visitor."""
+    rig.visit(sentinel(), seconds=12.0, optout_at=11.0, after=0.0)
+    for _ in range(30):
+        rig.phone({"kind": "phone", "optout": True})
+        rig.step()
+    from infinite_jest.visuals.engine import LEX_OPTOUT
+    assert rig.visuals.state.get("opted_out") is True
+    assert set(rig.visuals._words()) <= set(LEX_OPTOUT)
+
+
 def test_optout_frames_after_cover_reach_no_one(rig):
     """If a frame still arrives after opt-out, the profiler must ignore it."""
     rig.visit(sentinel(), seconds=12.0, optout_at=11.0, after=0.0)
