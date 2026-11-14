@@ -17,7 +17,7 @@
     "assistant": "it changed while you looked.\nTURNED 170°\nCHOSE UPSIDE DOWN\nTURNS IT AGAIN"
    },
    {
-    "user": "Scores: O 0.50, C 0.46, E 0.48, A 0.44, N 0.69\nStrongest: high neuroticism (reassuring)\nScene: the meat\nSeen: your grip changed often; you answered in 3.1 seconds on average\nWrite 4 lines.\nLine 1: a whisper for the phone screen. lowercase, at most 8 words, says i, talks to you.\nLines 2 to 4: the wall log. UPPERCASE, 2 to 4 words each, no pronouns, a number if you have one.",
+    "user": "Scores: O 0.50, C 0.46, E 0.48, A 0.44, N 0.69\nStrongest: high neuroticism (reassuring)\nScene: the wound\nSeen: your grip changed often; you answered in 3.1 seconds on average\nWrite 4 lines.\nLine 1: a whisper for the phone screen. lowercase, at most 8 words, says i, talks to you.\nLines 2 to 4: the wall log. UPPERCASE, 2 to 4 words each, no pronouns, a number if you have one.",
     "assistant": "it's okay. stay a little.\nGRIP CHANGES OFTEN\nANSWERS IN 3.1 S\nSTILL HOLDING"
    }
   ],

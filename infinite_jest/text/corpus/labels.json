@@ -1,7 +1,7 @@
 {
  "_about": "Visitor-facing names. Segment keys are trait poles as in profiler/ocean.py LABELS. 'label' is what the profiler shows now; 'alt' are replacements Baby can choose; 'audience' is the one-line ad-platform description the dossier may show under the label. Changed after review: Lurker, Pleaser and Exposed Nerve moved to alternatives because they can read as insults; Neuroticism is shown as REACTIVITY. The profiler's ocean.py LABELS should follow this file.",
  "scenes": {
-  "flesh": "the meat",
+  "flesh": "the wound",
   "scrawl": "the writing",
   "inverted": "the fall",
   "mirror": "the mirror",

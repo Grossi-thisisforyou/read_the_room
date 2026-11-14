@@ -142,12 +142,12 @@ SKIPPED. COUNTED.
 NO CHOICE. COUNTED.
 
 # ---- the hook: one block per scene. Visitor-facing names only:
-# the meat (flesh), the writing (scrawl), the fall (inverted), the mirror, the dark (void).
+# the wound (flesh), the writing (scrawl), the fall (inverted), the mirror, the dark (void).
 
 @ surface=wall phase=hook beat=testing hook=flesh register=log tone=cold
-THE MEAT
+THE WOUND
 RAW FEED
-MEAT, NOT MEANING
+RAW, NOT MEANING
 UNSORTED
 WARM INPUT
 PINK NOISE
@@ -157,7 +157,7 @@ RETAINED
 TURN {tilt_speed:.0f}°/S
 
 @ surface=wall phase=hook beat=testing hook=flesh register=whisper tone=tender
-look at it. it's only meat.
+look at it. it is only light.
 i made it raw for you.
 closer. it doesn't bite.
 stay with it. it stays with you.

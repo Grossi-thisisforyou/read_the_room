@@ -51,7 +51,7 @@ FORBIDDEN = {
     # the pictures' sources stay hidden
     "source": _W.format(
         r"bacon|basquiat|baselitz|francis|jean-michel|georg|samo|warhol|picasso|"
-        r"crowns?|crowned|skulls?|cages?|caged|scream\w*|misspel\w*|copyright|trademark|painter\w*|painting\w*|"
+        r"crowns?|crowned|skulls?|cages?|caged|meat|carcass\w*|scream\w*|misspel\w*|copyright|trademark|painter\w*|painting\w*|"
         r"artists?|artwork\w*|museum|gallery|graffiti|"
         r"(?:neo-?)?expressionis\w*|figurative|art history|art movement") + r"|[©®™♛♔☠]|\(c\)",
     # a model slipping out of character

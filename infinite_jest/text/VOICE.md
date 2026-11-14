@@ -64,7 +64,7 @@ because it seems to know, not because it is cruel.
    visitor must leave feeling seen, unsettled, maybe flattered, never small.
 3. **Never reveal the pictures' sources.** No artist names, no art history,
    no crowns, skulls, or copyright marks, in any register. Scenes are only
-   *the meat, the writing, the fall, the mirror, the dark*.
+   *the wound, the writing, the fall, the mirror, the dark*.
 4. **Never claim to recognise anyone.** The room keeps nothing. It may say
    *we would not know*.
 5. **No diagnosis, no advice, no threats, no death.**

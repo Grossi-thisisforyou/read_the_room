@@ -1739,13 +1739,13 @@
    "register": "log",
    "tone": "cold",
    "lang": "en",
-   "text": "THE MEAT",
-   "chars": 8,
+   "text": "THE WOUND",
+   "chars": 9,
    "static": true,
    "scrawl": true,
    "needs": [],
    "source": "wall.txt",
-   "id": "w.testing.flesh.ba65fa"
+   "id": "w.testing.flesh.17a4d4"
   },
   {
    "surface": "wall",
@@ -1771,13 +1771,13 @@
    "register": "log",
    "tone": "cold",
    "lang": "en",
-   "text": "MEAT, NOT MEANING",
-   "chars": 17,
+   "text": "RAW, NOT MEANING",
+   "chars": 16,
    "static": true,
    "scrawl": true,
    "needs": [],
    "source": "wall.txt",
-   "id": "w.testing.flesh.5f0bb4"
+   "id": "w.testing.flesh.97db46"
   },
   {
    "surface": "wall",
@@ -1901,13 +1901,13 @@
    "register": "whisper",
    "tone": "tender",
    "lang": "en",
-   "text": "look at it. it's only meat.",
-   "chars": 27,
+   "text": "look at it. it is only light.",
+   "chars": 29,
    "static": true,
    "scrawl": false,
    "needs": [],
    "source": "wall.txt",
-   "id": "w.testing.flesh.6a9682"
+   "id": "w.testing.flesh.30c345"
   },
   {
    "surface": "wall",
