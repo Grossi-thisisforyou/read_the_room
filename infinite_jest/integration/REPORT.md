@@ -124,7 +124,7 @@ and the `/status` fps); if it is short, lower the visuals' `internal_size`.
 
 In `/mnt/project-files/infinite_jest/integration/films/` (not in git), stills in `../stills/`.
 
-- `infinite_jest_show_explained.mp4`: all five visits back to back (about 11 min), with the
+- `infinite_jest_show_explained.mp4`: all five visits back to back (13 min 24 s), with the
   phone's screen inset and a caption of phase, scene and the profiler's guess.
 - `visit_<persona>_projector.mp4`: exactly what the projector and speaker would put out,
   1920x1080, 30 fps, with the real techno. `visit_<persona>_timeline.json`: every phase,
