@@ -20,6 +20,8 @@ DEFAULTS: dict[str, Any] = {
         "port": 8765,          # HTTP + WebSocket (/ws), phone app at /phone/
         "udp_port": 8766,      # same JSON envelope, one per datagram (sensor only); 0 = off
         "tcp_port": 8767,      # raw back-to-back JPEGs from the N900 camera; 0 = off
+        # peers allowed the roles that can wipe the room or write on the wall (see hub.py)
+        "privileged_from": ["127.0.0.1", "::1", "192.168.1.0/24"],
     },
     "display": {
         "enabled": True,
@@ -28,6 +30,7 @@ DEFAULTS: dict[str, Any] = {
         "height": 1080,
         "fps": 30,
         "show_debug": False,   # overlay with phase / presence; also toggled with D
+        "retry_s": 5.0,        # no display (projector off): try again this often
     },
     "presence": {},            # see presence.PresenceConfig
     "visit": {},               # see visit.VisitConfig
@@ -35,6 +38,7 @@ DEFAULTS: dict[str, Any] = {
         "visuals": "infinite_jest.visuals",
         "audio": "infinite_jest.audio",
         "profiler": "infinite_jest.profiler",
+        "text": "infinite_jest.text",   # the voice of the room (corpus); [phone_lines] if missing
         "use_fallbacks": True,  # built-in look and sound if a module is missing
         "profiler_in_process": True,
     },

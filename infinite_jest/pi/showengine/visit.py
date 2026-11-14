@@ -33,8 +33,8 @@ class VisitConfig:
     confidence_to_hook: float = 0.5
     hook_min_dwell: float = 8.0       # minimum seconds before a hook may change
     max_visit: float = 180.0          # nobody keeps the room forever
-    release_time: float = 6.0         # the reveal / afterimage
-    wipe_time: float = 4.0            # the visible erase, then idle
+    release_time: float = 50.0        # the confession, typed line by line (text/ARC.md)
+    wipe_time: float = 12.0           # the dossier struck out line by line, then idle
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Visit:
     reveal: dict[str, Any] | None = None
     answers: list[str] = field(default_factory=list)
     opted_out: bool = False
+    profile_extra: dict[str, Any] = field(default_factory=dict)   # evidence tuples etc. for the reveal
     oracle_words: list[str] = field(default_factory=list)
     dossier: list[str] = field(default_factory=list)
 
@@ -96,18 +97,22 @@ class VisitMachine:
         vid = data.get("visitor_id")
         if vid is not None and vid != self.visit.visitor_id:
             return False  # stale message about someone already wiped
-        ocean = clean_ocean(data.get("ocean"))
-        if ocean is not None:
-            self.visit.ocean = ocean
-        self.visit.confidence = num(data.get("confidence"), self.visit.confidence)
-        self.visit.profile_source = data.get("source") or "profiler"
-        if isinstance(data.get("hook_params"), dict):
-            self.visit.hook_params = dict(data["hook_params"])
         if data.get("phase") == "opted_out" or data.get("wiped"):
             self.opt_out(now)
             return True
         if self.visit.opted_out:
             return False
+        ocean = clean_ocean(data.get("ocean"))
+        if ocean is not None:
+            self.visit.ocean = ocean
+        self.visit.confidence = num(data.get("confidence"), self.visit.confidence)
+        src = data.get("source")
+        self.visit.profile_source = src[:20] if isinstance(src, str) and src else "profiler"
+        if isinstance(data.get("hook_params"), dict):
+            self.visit.hook_params = dict(data["hook_params"])
+        for k in ("evidence", "trait_confidence", "segment_pole", "scenes_tried", "choices"):
+            if k in data:
+                self.visit.profile_extra[k] = data[k]
         ev = clean_words(data.get("words")) or clean_words(data.get("evidence"))
         line = self.visit.hook_params.get("line")
         if isinstance(line, str) and line:
@@ -125,8 +130,7 @@ class VisitMachine:
         if self.phase not in ("approach", "profiling", "hook"):
             return False
         v = self.visit
-        v.ocean, v.words, v.hook_params, v.oracle_words, v.dossier, v.reveal = None, [], {}, [], [], None
-        v.answers, v.confidence = [], 0.0
+        self._forget_visitor()
         v.hook, v.hook_since, v.opted_out = "void", now, True
         self.tick(now)
         return True
@@ -243,15 +247,21 @@ class VisitMachine:
             self.wipe()
         self.changes.append((old, phase))
 
-    def wipe(self) -> None:
-        """Forget the visitor. Overwrite lists in place first, then drop the object."""
+    def _forget_visitor(self) -> None:
+        """Drop everything said or guessed about the visitor; the visit itself goes on."""
         v = self.visit
-        self.last_wiped_id = v.visitor_id
         for lst in (v.words, v.answers, v.oracle_words, v.dossier):
             for i in range(len(lst)):
                 lst[i] = ""
             lst.clear()
         v.hook_params.clear()
+        v.profile_extra.clear()
         if v.ocean:
             v.ocean.clear()
+        v.ocean, v.confidence, v.reveal = None, 0.0, None
+
+    def wipe(self) -> None:
+        """Forget the visitor. Overwrite lists in place first, then drop the object."""
+        self.last_wiped_id = self.visit.visitor_id
+        self._forget_visitor()
         self.visit = Visit()

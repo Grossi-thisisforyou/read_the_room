@@ -19,10 +19,14 @@ class Clock:
         return self.t
 
 
-def make_engine(mode="fixed", **kw):
+def make_engine(mode="fixed", short_ending=True, **kw):
+    """short_ending: the 6 s / 4 s release and wipe these tests were written for."""
     clock = Clock()
     sent = []
-    eng = Engine(config.load(None, {"mode": mode}), emit=lambda m, roles: sent.append((m, roles)), clock=clock, **kw)
+    over = {"mode": mode, "modules": {"text": None}}
+    if short_ending:
+        over["visit"] = {"release_time": 6.0, "wipe_time": 4.0}
+    eng = Engine(config.load(None, over), emit=lambda m, roles: sent.append((m, roles)), clock=clock, **kw)
     return eng, clock, sent
 
 

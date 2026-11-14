@@ -12,6 +12,10 @@ host = "0.0.0.0"
 port = 8765                   # WebSocket at /ws, control page at /, health at /status
 udp_port = 8766               # N900 sensor fast lane (0 = off)
 tcp_port = 8767               # N900 camera JPEG stream (0 = off)
+# Who may connect as "control" (wipe, blackout), "oracle" or "profiler" (both put text on
+# the wall). Addresses or networks. Anyone else asking for those roles is treated as a phone.
+# Tighter: ["127.0.0.1", "::1", "192.168.1.X"] with X = Baby's laptop's reserved address.
+privileged_from = ["127.0.0.1", "::1", "192.168.1.0/24"]
 
 [display]
 enabled = true
@@ -20,6 +24,7 @@ width = 1920                  # Full HD
 height = 1080
 fps = 30
 show_debug = false            # D on a keyboard toggles it
+retry_s = 5                   # projector off or unplugged: try to open it again this often
 
 # When does the room count as occupied?
 [presence]
@@ -37,13 +42,14 @@ profiling_timeout = 20.0
 confidence_to_hook = 0.5
 hook_min_dwell = 8.0
 max_visit = 180.0
-release_time = 6.0
-wipe_time = 4.0
+release_time = 50.0           # the confession, line by line
+wipe_time = 12.0              # the dossier struck out, last line held 2 s
 
 [modules]
 visuals = "infinite_jest.visuals"
 audio = "infinite_jest.audio"
 profiler = "infinite_jest.profiler"
+text = "infinite_jest.text"     # the voice of the room; [phone_lines] below are the fallback
 use_fallbacks = true          # built-in picture and sound if a module is missing
 profiler_in_process = true
 

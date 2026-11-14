@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,28 @@ def load(module_name: str | None) -> Any | None:
     return mod
 
 
+_last_report: dict[str, list] = {}   # key -> [monotonic time of last log, errors since]
+REPORT_EVERY = 60.0
+
+
+def report(logger: logging.Logger, key: str, text: str, exc_info: bool = True, level: int = logging.ERROR) -> None:
+    """Log an error at most once a minute per key (with the count of the ones skipped).
+
+    A plugin that throws on every frame would otherwise write ~30 tracebacks a
+    second to the journal, for days, on an SD card.
+    """
+    now = time.monotonic()
+    rec = _last_report.get(key)
+    if rec is not None and now - rec[0] < REPORT_EVERY:
+        rec[1] += 1
+        return
+    skipped = rec[1] if rec is not None else 0
+    if len(_last_report) < 256 or rec is not None:
+        _last_report[key] = [now, 0]
+    more = f" (and {skipped} more times in the last minute)" if skipped else ""
+    logger.log(level, "%s%s", text, more, exc_info=exc_info)
+
+
 def call(obj: Any, method: str, *args: Any) -> Any:
     """Call an optional method on a plugin; a crash in a plugin never stops the show."""
     fn = getattr(obj, method, None) if obj is not None else None
@@ -50,5 +73,6 @@ def call(obj: Any, method: str, *args: Any) -> Any:
     try:
         return fn(*args)
     except Exception:
-        log.exception("%s.%s failed", type(obj).__name__, method)
+        name = f"{type(obj).__name__}.{method}"
+        report(log, name, f"{name} failed")
         return None
