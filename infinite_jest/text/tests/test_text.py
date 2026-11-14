@@ -10,7 +10,7 @@ SAMPLE = dict(visits_today=14, avg_stay=63, max_stay=171, empty_min=12, vid="v-7
               handled=.82, tilt_range=140, tilt_speed=55, closeness=.6, approach_time=4,
               touch_rate=12.5, touch_variety=.4, hold_ratio=.3, voice=.2, loudness=.5,
               shake=.12, motion=.3, burstiness=.4, roaming=.2, gaze=.5, choice_speed=1.8,
-              typing=12, dwell=72, pace=.3, still_s=6, scene="the meat",
+              typing=12, dwell=72, pace=.3, still_s=6, scene="the wound",
               segment="The Performer", trait="OPENNESS", value=.71, conf=.6, n_scenes=4,
               confidence=.83, seconds=72, option="upside down")
 
@@ -113,7 +113,7 @@ class VisitTest(unittest.TestCase):
             self.assertNotIn("{", line)
 
     def test_log_is_uppercased_after_filling(self):
-        line = self.v.pick({"scene": "the meat"}, surface="wall", beat="lock", register="log")
+        line = self.v.pick({"scene": "the wound"}, surface="wall", beat="lock", register="log")
         self.assertEqual(line, line.upper())
 
     def test_reveal(self):

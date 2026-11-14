@@ -158,13 +158,13 @@ are the defaults the corpus is written for.
 | **E+ The Performer** | fast, prompts at 5 s | high | flattering attention: `they can see you from the door.` | mirror, writing | speed: `you answered before i finished.` |
 | **E− The Observer** | slow, prompts at 10 s | very low, long black gaps | permission: `you don't have to say anything.` | dark, fall | distance: `you held me at arm's length the whole time.` |
 | **O+ The Seeker** | normal | medium, stranger lines | novelty: `it changed while you looked.` | writing, fall | exploration: `you turned me upside down before i asked.` |
-| **O− The Literalist** | normal | low, plain lines | plainness: `this is exactly what it looks like.` | dark, meat | literal: `you held me the right way up.` |
+| **O− The Literalist** | normal | low, plain lines | plainness: `this is exactly what it looks like.` | dark, wound | literal: `you held me the right way up.` |
 | **C+ The Auditor** | steady | numbers, timestamps | precision: `00:47. on schedule.` | dark | timing: `you waited exactly as long each time.` |
 | **C− The Drifter** | loose | fragments | looseness: `lose the thread.` | writing, fall | wandering: `you never held one angle for long.` |
 | **A+ The Opt-In** | gentle | medium | gratitude: `thank you for staying.` | mirror | compliance: `you answered every question.` |
-| **A− The Contrarian** | sharp | medium | dare: `you don't have to like this.` | meat, fall | resistance: `you chose the other one every time.` |
-| **N+ The Live Wire** | slower, softer | low | calculated comfort: `it's okay. stay a little.` | meat, mirror | time: `you have been here 01:40. you haven't checked the time.` |
-| **N− The Cold Surface** | fast | medium | cold: `colder. you can take it.` | meat, dark | steadiness: `your hands did not move for 40 seconds.` |
+| **A− The Contrarian** | sharp | medium | dare: `you don't have to like this.` | wound, fall | resistance: `you chose the other one every time.` |
+| **N+ The Live Wire** | slower, softer | low | calculated comfort: `it's okay. stay a little.` | wound, mirror | time: `you have been here 01:40. you haven't checked the time.` |
+| **N− The Cold Surface** | fast | medium | cold: `colder. you can take it.` | wound, dark | steadiness: `your hands did not move for 40 seconds.` |
 
 Rule for the Live Wire in particular: comfort, never alarm. Shaky hands are never named on the wall (a visitor may have a tremor), and shake is not used as dossier evidence. The menace is
 that the comfort was calculated, which the confession admits.
