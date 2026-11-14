@@ -113,6 +113,8 @@ class Profiler:
         return []
 
     def _frame(self, data, ts):
+        if self.opted_out:
+            return []  # an opted-out visitor's frames are not even looked at
         v = self.vision.frame(data)
         return self._sensor(v, ts) if v else []
 
@@ -240,6 +242,7 @@ class Profiler:
         self.features.reset()
         self.vision.reset()
         self.bandit.reset()
+        self.last_profile = None
         self.opted_out = True
         self.phase = "opted_out"
         return [msg("profile", ts, {"visitor_id": vid, "phase": "opted_out",
