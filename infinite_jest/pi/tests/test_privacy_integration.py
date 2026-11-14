@@ -459,14 +459,16 @@ def test_wipe_clears_each_module(rig):
         and p.features.keys_chars == 0 and p.vision.prev is None and p.bandit.history == []
     # the figure may hold the procedural stand-in body again, never the camera's pixels
     tile_vals = np.array(sorted(set(TILE)), np.float32)
-    for name in ("gray", "bg", "trail"):
-        a = getattr(v.fig, name)
+    for name in ("gray", "bg", "trail", "trail_rgb", "g2", "prev_gray"):   # v1 and v2 figure names
+        a = getattr(v.fig, name, None)
         if a is not None:
             assert np.isin(a, tile_vals).mean() < 0.3, "visuals.fig.%s still holds the camera frame" % name
     assert o.visitor_id is None and o.profile is None and o.result == {}
     assert not s.visitor
     # the visitor's painted body strokes must not linger for the next visitor
-    assert pygame.mask.from_surface(v.paint, 8).count() == 0, "paint layer still holds strokes"
+    for layer in ("paint", "over", "under"):                                # v1: paint; v2: over/under
+        if hasattr(v, layer):
+            assert pygame.mask.from_surface(getattr(v, layer), 8).count() == 0, "%s layer still holds strokes" % layer
     assert pygame.mask.from_surface(v.fig_surf, 8).count() == 0, "last figure still held"
 
 
