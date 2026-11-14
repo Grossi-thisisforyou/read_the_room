@@ -108,7 +108,7 @@ class VisitMachine:
             return True
         if self.visit.opted_out:
             return False
-        ev = clean_words(data.get("evidence")) or clean_words(data.get("words"))
+        ev = clean_words(data.get("words")) or clean_words(data.get("evidence"))
         line = self.visit.hook_params.get("line")
         if isinstance(line, str) and line:
             ev = [line[:80]] + ev
