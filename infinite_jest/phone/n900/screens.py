@@ -6,7 +6,8 @@ agent's UI snapshot and the UI's own typing state. No GTK in here, so the
 tests can render the screens to PNG files.
 
 Look: deep dark industrial. Near-black, film grain and scanlines; raw
-off-white condensed type; Basquiat crowns, crossed-out words and (c) marks;
+off-white condensed type; crossed-out words and targeting marks (never crowns
+or (c) marks on screen: the sources stay hidden from visitors);
 Baselitz's upside-down words; Bacon's smeared flesh pink and a face that
 won't hold its shape. Everything is drawn, so nothing has to be shipped.
 """
@@ -22,7 +23,7 @@ FONT = 'Nokia Sans Cn'      # the N900's own condensed face; cairo falls back if
 FONT_FALLBACK = 'Sans'
 
 INK = (0.93, 0.90, 0.84)       # raw off-white
-BONE = (0.91, 0.85, 0.66)      # crown yellow-bone
+BONE = (0.91, 0.85, 0.66)      # yellow-bone
 BLOOD = (0.70, 0.05, 0.04)
 FLESH = (0.86, 0.47, 0.42)
 BG = (0.035, 0.03, 0.028)
@@ -102,11 +103,18 @@ def strike(cr, x, y, w, size, rnd, rgb=BLOOD, a=0.9, n=2):
                          (x + w + 6, yy + rnd.uniform(-3, 3))], rnd, 1.5, size * 0.09, rgb, a)
 
 
-def crown(cr, x, y, s, rnd, rgb=BONE, a=1.0):
-    pts = [(x, y), (x + s * 0.15, y - s * 0.75), (x + s * 0.33, y - s * 0.2),
-           (x + s * 0.5, y - s), (x + s * 0.67, y - s * 0.2), (x + s * 0.85, y - s * 0.75),
-           (x + s, y), (x, y)]
-    jitter_line(cr, pts, rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
+def reticle(cr, cx, cy, r, rnd, rgb=BONE, a=1.0):
+    """A hand-drawn targeting ring: the machine marking whoever holds it."""
+    pts = []
+    for i in range(19):
+        ang = 2 * math.pi * i / 18
+        rr = r * (1 + rnd.uniform(-0.06, 0.06))
+        pts.append((cx + math.cos(ang) * rr, cy + math.sin(ang) * rr))
+    jitter_line(cr, pts, rnd, r * 0.03, max(1.5, r * 0.035), rgb, a)
+    for ang in (0, math.pi / 2, math.pi, 1.5 * math.pi):
+        jitter_line(cr, [(cx + math.cos(ang) * r * 0.55, cy + math.sin(ang) * r * 0.55),
+                         (cx + math.cos(ang) * r * 1.35, cy + math.sin(ang) * r * 1.35)],
+                    rnd, r * 0.02, max(1.5, r * 0.03), rgb, a)
 
 
 def grain(cr, w, h, rnd, n=180, a=0.10):
@@ -228,10 +236,10 @@ def draw_consent(cr, w, h, snap, t, rnd):
     smear(cr, w * 0.2, h * 0.78, h * 0.32, FLESH, t, rnd, 0.6 + 0.4 * math.sin(t * 0.6))
     # Baselitz: the title hangs upside down top-left
     upside_down(cr, 'INFINITE JEST', m, h * 0.05, h * 0.075, INK, 0.75)
-    # Basquiat crown, top right
-    crown(cr, w * 0.83, h * 0.17, h * 0.13, rnd)
+    # a targeting mark, top right (no crowns or (c) marks: the sources stay hidden)
+    reticle(cr, w * 0.89, h * 0.11, h * 0.06, rnd)
     font(cr, h * 0.035, False)
-    show(cr, u'DARK DATA \xa9', w * 0.80, h * 0.23, BONE, 0.8)
+    show(cr, u'DARK DATA', w * 0.80, h * 0.23, BONE, 0.8)
     # The headline. RECORDING is struck through and still legible.
     size = fit(cr, 'THIS ROOM IS', w * 0.62, h * 0.13)
     y = h * 0.33
@@ -324,7 +332,7 @@ def draw_live(cr, w, h, snap, local, t, rnd):
         smear(cr, fx - h * 0.15, fy + h * 0.1, h * 0.3, cols[min(1, len(cols) - 1)], t, rnd, inten)
         face(cr, fx, fy, h * (0.2 + 0.05 * kick), t, loud, motion, rnd, cols[0])
         if hook in ('scrawl', 'inverted', ''):
-            crown(cr, fx - h * 0.12, fy - h * 0.28, h * 0.24, rnd)
+            reticle(cr, fx, fy - h * 0.05, h * 0.26, rnd, BONE, 0.4)
     # words the engine wants scrawled: some crossed out, some upside down
     words = st.get('words') or []
     wr = random.Random(len(words) * 7 + int(t / 3))
