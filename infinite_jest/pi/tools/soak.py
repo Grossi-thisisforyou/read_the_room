@@ -517,6 +517,7 @@ def timed_audio_worker(cfg, q_state, q_sensor, stop_ev, wipe_ev, stats_q):
             times, late, min_lead, worst_wipe = [], 0, 1e9, 0.0
             last_report = now
     sink.close()
+    synth.close()
 
 
 # ============================================================== accelerated
@@ -958,7 +959,10 @@ def report(path: str, skip_s: float = 300) -> dict:
             out[k + ".max"] = series(lambda r, k=k: r[k].get("max"))
     if any("audio" in r for r in recs):
         out["audio.p99"] = series(lambda r: r["audio"].get("p99"))
-        out["audio.underruns_total"] = sum(r["audio"].get("underruns", 0) for r in recs if r.get("audio"))
+        out["audio.max"] = series(lambda r: r["audio"].get("max"))
+        out["audio.worst_wipe_block_ms"] = series(lambda r: r["audio"].get("worst_wipe_block_ms"))
+        out["audio.cpu_frac"] = series(lambda r: r["audio"].get("cpu_frac"))
+        out["audio.underruns_total"] = max((r["audio"].get("underruns", 0) for r in recs if r.get("audio")), default=0)
         out["audio.late_total"] = sum(r["audio"].get("late", 0) for r in recs if r.get("audio"))
         out["audio.child_rss_mb"] = series(lambda r: r["children"]["audio"]["VmRSS"] / 1024)
         out["oracle.child_rss_mb"] = series(lambda r: r["children"]["oracle"]["VmRSS"] / 1024)
