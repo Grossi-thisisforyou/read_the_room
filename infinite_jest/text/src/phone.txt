@@ -24,7 +24,7 @@ careful. it's live.
 # Plain on purpose: this is the part that has to be understood by everyone.
 @ surface=phone phase=approach beat=consent register=confession tone=cold kind=sequence
 this phone is the eye of the room.
-it reads how you hold it, how close you come, how loud it gets.
+it reads your grip, your distance, how loud it gets.
 its camera looks at you. no picture is kept.
 it never records your voice. only the level.
 it keeps nothing. it forgets you when you leave.
@@ -32,14 +32,15 @@ cover the top edge to make it stop.
 touch to enter.
 ---
 before you start:
-this room watches how you hold the phone, and its camera looks at you.
+this room watches how you hold the phone.
+its camera looks at you. no picture is kept.
 it listens to the level of sound, never the words.
 nothing is saved. it is all deleted at the end.
 cover the top edge for three seconds to stop it.
 touch to enter.
 ---
 terms and conditions:
-we read your hands, your distance, your timing, your outline.
+we read your hands, distance, timing and outline.
 we never record you. we never keep a picture.
 we guess who you are, and we tell you how badly.
 we delete it all at the end.

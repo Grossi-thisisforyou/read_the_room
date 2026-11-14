@@ -49,6 +49,12 @@ class CorpusTest(unittest.TestCase):
             self.assertGreaterEqual(len(self.c.lines(beat="tailored", pole=pole)), 8, pole)
             self.assertGreaterEqual(len(self.c.lines(beat="infer", pole=pole)), 3, pole)
 
+    def test_consent_fits_the_phone(self):
+        for e in self.c.lines(beat="consent"):
+            self.assertLessEqual(len(e["lines"]), 7)
+            for l in e["lines"]:
+                self.assertLessEqual(len(l), 60, l)
+
     def test_every_confession_ends_on_the_refrain(self):
         for e in self.c.lines(beat="confession", surface="wall"):
             self.assertEqual(e["lines"][-1], "it still felt like it knew you.")

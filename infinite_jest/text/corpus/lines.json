@@ -4184,7 +4184,7 @@
    "lang": "en",
    "lines": [
     "this phone is the eye of the room.",
-    "it reads how you hold it, how close you come, how loud it gets.",
+    "it reads your grip, your distance, how loud it gets.",
     "its camera looks at you. no picture is kept.",
     "it never records your voice. only the level.",
     "it keeps nothing. it forgets you when you leave.",
@@ -4194,7 +4194,7 @@
    "needs": [],
    "max_words": 14,
    "source": "phone.txt",
-   "id": "p.consent.d0b44d"
+   "id": "p.consent.038280"
   },
   {
    "surface": "phone",
@@ -4205,7 +4205,8 @@
    "lang": "en",
    "lines": [
     "before you start:",
-    "this room watches how you hold the phone, and its camera looks at you.",
+    "this room watches how you hold the phone.",
+    "its camera looks at you. no picture is kept.",
     "it listens to the level of sound, never the words.",
     "nothing is saved. it is all deleted at the end.",
     "cover the top edge for three seconds to stop it.",
@@ -4214,7 +4215,7 @@
    "needs": [],
    "max_words": 14,
    "source": "phone.txt",
-   "id": "p.consent.b45d0a"
+   "id": "p.consent.59670c"
   },
   {
    "surface": "phone",
@@ -4225,7 +4226,7 @@
    "lang": "en",
    "lines": [
     "terms and conditions:",
-    "we read your hands, your distance, your timing, your outline.",
+    "we read your hands, distance, timing and outline.",
     "we never record you. we never keep a picture.",
     "we guess who you are, and we tell you how badly.",
     "we delete it all at the end.",
@@ -4235,7 +4236,7 @@
    "needs": [],
    "max_words": 14,
    "source": "phone.txt",
-   "id": "p.consent.51f972"
+   "id": "p.consent.76d896"
   },
   {
    "surface": "phone",
