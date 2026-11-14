@@ -39,6 +39,7 @@ class Hub:
         self.clients: dict[web.WebSocketResponse, str] = {}
         self.started = time.time()
         self.fps = 0.0
+        self.last_frame_ts: float | None = None   # wall clock of the last finished frame loop pass
         self._runner: web.AppRunner | None = None
         self._udp = None
         self._tcp: asyncio.base_events.Server | None = None
@@ -137,7 +138,8 @@ class Hub:
         for r in self.clients.values():
             roles[r] = roles.get(r, 0) + 1
         st = self.engine.status()
-        st.update({"clients": roles, "fps": round(self.fps, 1), "uptime_s": round(time.time() - self.started),
+        st.update({"clients": roles, "fps": round(self.fps, 1), "last_frame_ts": self.last_frame_ts,
+                   "uptime_s": round(time.time() - self.started),
                    "udp": dict(self.udp_seq)})
         return web.json_response(st)
 

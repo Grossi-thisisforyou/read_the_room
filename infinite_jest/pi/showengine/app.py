@@ -22,6 +22,21 @@ from .hub import Hub
 log = logging.getLogger("showengine.app")
 
 
+def sd_notify(msg: str) -> None:
+    """Tell systemd we're alive (Type=notify + WatchdogSec). No-op outside systemd."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    import socket
+    if addr.startswith("@"):
+        addr = "\0" + addr[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.sendto(msg.encode(), addr)
+    except OSError:
+        pass
+
+
 def _pick_video_driver(cfg: dict) -> None:
     """On Pi OS Lite there is no desktop: draw straight to the HDMI output (KMS/DRM)."""
     if os.environ.get("SDL_VIDEODRIVER"):
@@ -153,6 +168,8 @@ class Runner:
         period = 1.0 / fps if self.screen is not None else 0.05
         last = time.monotonic()
         frames, fps_t = 0, last
+        sd_notify("READY=1")
+        last_ping = 0.0
         try:
             import pygame
             while self.running:
@@ -169,10 +186,15 @@ class Runner:
                         self._overlay(engine, hub)
                     pygame.display.flip()
                 frames += 1
+                hub.last_frame_ts = time.time()
+                if now - last_ping >= 5.0:          # only while the frame loop really runs
+                    sd_notify("WATCHDOG=1")
+                    last_ping = now
                 if now - fps_t >= 2.0:
                     hub.fps, frames, fps_t = frames / (now - fps_t), 0, now
                 await asyncio.sleep(max(0.0, period - (time.monotonic() - now)))
         finally:
+            sd_notify("STOPPING=1")
             if sim_task:
                 sim_task.cancel()
             engine.machine.wipe()                 # nothing survives a shutdown either

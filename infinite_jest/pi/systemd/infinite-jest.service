@@ -5,7 +5,10 @@ After=local-fs.target sound.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+# the frame loop pings every 5 s; 20 s of silence = hung, systemd restarts it
+WatchdogSec=20
 User=@USER@
 Group=@USER@
 SupplementaryGroups=video render input audio
