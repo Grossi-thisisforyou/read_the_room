@@ -116,7 +116,7 @@ class Engine:
             if self.machine.visit.opted_out:
                 return   # opted out: their words go nowhere
             self.machine.on_answer(str(d.get("text", "")))
-            self.emit(self._fwd(msg), {"profiler"})
+            self._to_remote_profiler(msg)
         elif t == P.PHONE:
             if role in ("profiler", "control"):
                 self.emit(P.make(P.PHONE, d), {"phone"})
@@ -135,6 +135,12 @@ class Engine:
                 log.info("ignoring message type %r", t)
             return
         self.tick(now)
+
+    def _to_remote_profiler(self, msg: dict) -> None:
+        """Raw sensors, frames and answers go out over the network only when the profiler runs
+        as its own process. With the profiler in-process they never leave the engine."""
+        if self.profiler is None:
+            self.emit(self._fwd(msg), {"profiler"})
 
     def _fwd(self, msg: dict) -> dict:
         out = dict(msg)
@@ -165,6 +171,8 @@ class Engine:
             self.machine.on_answer(str(d.get("text", "")))
         elif kind == "choice" and not self.machine.visit.opted_out:
             self.machine.on_answer(str(d.get("option", "")))
+        elif kind == "optout" or (kind == "phone" and d.get("optout") is True):
+            self._opt_out(now)   # the phone saw its sensor covered: works with or without a profiler
         self.presence.feed(d, now)       # still needed after an opt-out: to see them leave
         if self.machine.visit.opted_out:
             return   # opted out: nothing more is read about them until the visit ends
@@ -173,7 +181,7 @@ class Engine:
         if self.profiler is not None:
             # the engine's clock, not the sender's ts: the N900's clock can be years off
             self._from_profiler(plugins.call(self.profiler, "on_sensor", d, now), now)
-        self.emit(self._fwd(msg), {"profiler"})
+        self._to_remote_profiler(msg)
 
     def _watch_cover(self, clean: dict, now: float) -> None:
         """Covering the proximity sensor for 3 s opts out. The profiler watches for it too;
@@ -181,9 +189,12 @@ class Engine:
         if "proximity" in clean:
             near = clean["proximity"]["near"]
             self._near_since = (self._near_since if self._near_since is not None else now) if near else None
+        if self._near_since is not None and now - self._near_since >= OPT_OUT_COVER_S:
+            self._opt_out(now)
+
+    def _opt_out(self, now: float) -> None:
         m = self.machine
-        if (self._near_since is not None and now - self._near_since >= OPT_OUT_COVER_S
-                and m.phase in ("approach", "profiling", "hook") and not m.visit.opted_out):
+        if m.phase in ("approach", "profiling", "hook") and not m.visit.opted_out:
             vid = m.visit.visitor_id
             self._on_profile({"visitor_id": vid, "phase": "opted_out", "wiped": True}, now)
             visit = {"visitor_id": vid, "phase": m.phase, "opt_out": True}
@@ -218,7 +229,7 @@ class Engine:
         if now - self._last_frame_in < 0.09:
             return   # the phone sends at most 4 fps; a flood shouldn't eat the Pi's CPU
         self._last_frame_in = now
-        self.emit(self._fwd(msg), {"profiler"})
+        self._to_remote_profiler(msg)
         if self.profiler is not None:
             self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], now), now)
         rgb = self.frames.decode(msg["data"])

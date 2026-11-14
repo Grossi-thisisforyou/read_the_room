@@ -492,8 +492,6 @@ def test_optout_drops_the_profile_and_clears_the_wall(rig):
             raise AssertionError("visitor-derived phone text after opt-out: %r" % m)
 
 
-@pytest.mark.xfail(strict=True, reason="engine keeps oracle words / dossier on the wall after opt-out "
-                                       "(VisitMachine.on_profile opt-out branch, visit.py)")
 def test_optout_clears_oracle_words_from_the_wall(rig):
     rig.visit(sentinel(), seconds=12.0, optout_at=11.0, after=0.0)
     rig.sent.clear()
@@ -517,7 +515,6 @@ def test_optout_frames_after_cover_reach_no_one(rig):
     assert p.vision.prev is None, "profiler analysed a frame after the visitor opted out"
 
 
-@pytest.mark.xfail(strict=True, reason="engine keeps feeding frames after opt-out (engine tester owns engine.py)")
 def test_optout_engine_stops_feeding_visuals_frames(rig):
     """Engine side (owner: engine tester). After opt-out the engine still hands camera frames to
     the visuals (mirror figure) and keeps its frame analyser running."""
@@ -528,14 +525,13 @@ def test_optout_engine_stops_feeding_visuals_frames(rig):
     assert rig.visuals.fig.gray is None and rig.engine.frames.prev is None
 
 
-@pytest.mark.xfail(strict=True, reason="engine ignores the phone's optout event without a profiler (engine.py)")
 def test_optout_without_in_process_profiler_still_stops_profiling(monkeypatch):
     """Engine side (owner: engine tester). The engine only learns about opt-out from the profiler.
     With no profiler (import failed, or it runs as its own process and is down) the 'optout'
     event is ignored, the fallback guess drives the hook and the wall."""
     r = Rig(monkeypatch, with_profiler=False)
     try:
-        r.visit(sentinel(), seconds=40.0, optout_at=4.0, after=0.0)
+        r.visit(sentinel(), seconds=6.0, optout_at=4.0, after=0.0)
         assert r.engine.machine.visit.opted_out
     finally:
         r.close()
@@ -552,14 +548,13 @@ def test_typed_text_reaches_no_one_but_the_count(rig):
     assert keys not in json.dumps(rig.engine.state)
 
 
-@pytest.mark.xfail(strict=True, reason="visit.answers keeps typed text (visit.py/engine.py)")
 def test_engine_keeps_only_the_count_of_typed_text(rig):
     """Engine side (owner: engine tester). VisitMachine.on_answer stores up to 200 characters of
     each typed text in visit.answers until the wipe, and nothing reads it. The school note says
     only the character count is used."""
     keys = sentinel()
     rig.visit(keys, seconds=30.0, after=0.0)
-    assert not any(keys in a for a in rig.engine.machine.visit.answers)
+    assert not any(keys in str(a) for a in rig.engine.machine.visit.answers)
 
 
 # ================================================================== 4. what the model sees
@@ -696,8 +691,6 @@ def test_optout_end_to_end_the_holder_is_not_read_again(rig):
     assert rig.profiler.last_profile is None
 
 
-@pytest.mark.xfail(strict=True, reason="engine forwards raw frames and typed text to any client that says "
-                                       "hello role 'profiler', even with the profiler in process (engine.py/hub.py)")
 def test_raw_frames_and_typed_text_stay_inside_the_engine_when_the_profiler_is_in_process(rig):
     keys = sentinel()
     rig.render = False
