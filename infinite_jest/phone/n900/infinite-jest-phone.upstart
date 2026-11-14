@@ -9,5 +9,7 @@ respawn
 
 script
     sleep 20
+    # Wi-Fi power saving drops packets; this needs root, so it runs here, not in the agent
+    /sbin/iwconfig wlan0 power off || true
     exec su - user -c "DISPLAY=:0 /usr/bin/run-standalone.sh /usr/bin/python2.5 /opt/infinite-jest-phone/agent.py >> /home/user/.ij-phone.log 2>&1"
 end script

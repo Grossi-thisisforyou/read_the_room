@@ -84,6 +84,7 @@ class _Child(object):
         self.proc = None
         self.running = False
         self.ok = False
+        self.dead = 0      # failed starts in a row, for log throttling and back-off
 
     def start(self):
         self.running = True
@@ -105,8 +106,10 @@ class _Child(object):
             mode, cmd, chunk = self.cmds[self.idx]
             self.mode = mode
             got = 0
+            devnull = None
             try:
-                log(self.name, 'starting:', cmd)
+                if self.dead < 10 or self.dead % 100 == 0:
+                    log(self.name, 'starting:', cmd)  # don't fill the log for days
                 devnull = open(os.devnull, 'w')
                 self.proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                                              stderr=devnull, bufsize=0)
@@ -121,14 +124,22 @@ class _Child(object):
             except Exception:
                 log(self.name, 'error:', exc())
             self.ok = False
+            if devnull is not None:
+                try:
+                    devnull.close()
+                except Exception:
+                    pass
             if got < 3:
                 self.fails += 1
+                self.dead += 1
                 if self.fails >= 2 and len(self.cmds) > 1:
                     self.idx = (self.idx + 1) % len(self.cmds)
                     self.fails = 0
-                    log(self.name, 'switching to pipeline', self.idx)
+                    if self.dead < 10:
+                        log(self.name, 'switching to pipeline', self.idx)
             else:
                 self.fails = 0
+                self.dead = 0
             try:
                 if self.proc is not None:
                     os.kill(self.proc.pid, 15)
@@ -136,8 +147,10 @@ class _Child(object):
             except Exception:
                 pass
             if self.running:
-                log(self.name, 'stopped, retrying in', self.retry, 's')
-                time.sleep(self.retry)
+                if self.dead < 10 or self.dead % 100 == 0:
+                    log(self.name, 'stopped, retrying in', self.retry, 's (%d failed starts)' % self.dead)
+                # a missing or busy camera: retry slower and slower (max 60 s)
+                time.sleep(min(60.0, self.retry * (1 + self.dead // 5)))
 
 
 class Camera(object):
@@ -154,6 +167,7 @@ class Camera(object):
         self.motion = 0.0
         self.brightness = 0.0
         self.prev = None
+        self.paused = False         # visitor opted out: frames are dropped unread
         self.step = 4               # sample every 4th pixel for the motion estimate
         v = {'gst': GST, 'device': device, 'fps': fps, 'w': w, 'h': h, 'w2': w * 2, 'h2': h * 2}
         if cmd:
@@ -181,9 +195,13 @@ class Camera(object):
     def alive(self):
         if self.fake:
             return True
-        return self.child.ok
+        # gst can hang without exiting (camera grabbed by another app): a
+        # frozen motion value must not keep "someone is here" true forever
+        return self.child.ok and time.time() - self.frame_t < 3.0
 
     def _on_frame(self, data, mode='gray'):
+        if self.paused:
+            return  # opted out: the frame is not even looked at
         if mode == 'uyvy':
             # U Y0 V Y1 ...: every 4th byte from 1 is one luma per pixel pair,
             # every other row: a (w*2)x(h*2) UYVY frame becomes w x h gray.
@@ -268,6 +286,8 @@ class Mic(object):
         self.voiced = False
         self.voice_score = 0.0
         self.floor = 0.01
+        self.paused = False
+        self.chunk_t = 0.0
         self.lock = threading.Lock()
         cmd = cmd or MIC_PIPELINE % {'gst': GST}
         self.child = None
@@ -287,9 +307,14 @@ class Mic(object):
             self.child.stop()
 
     def alive(self):
-        return self.fake or self.child.ok
+        return self.fake or (self.child.ok and time.time() - self.chunk_t < 3.0)
 
     def _on_chunk(self, data, mode='pcm'):
+        self.chunk_t = time.time()
+        if self.paused:
+            self.level = 0.0
+            self.voiced = False
+            return  # opted out: the audio is dropped unmeasured
         s = array('h', data)
         n = len(s)
         if not n:

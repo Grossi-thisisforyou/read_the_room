@@ -115,6 +115,20 @@ def mark(cr, x, y, s, rnd, rgb=BONE, a=1.0):
     jitter_line(cr, [(x - s * 0.1, y + s * 0.15), (x + s * 2.3, y + s * 0.1)], rnd, 2, max(2.0, s * 0.06), rgb, a * 0.8)
 
 
+def reticle(cr, cx, cy, r, rnd, rgb=BONE, a=1.0):
+    """A hand-drawn targeting ring: the machine marking whoever holds it."""
+    pts = []
+    for i in range(19):
+        ang = 2 * math.pi * i / 18
+        rr = r * (1 + rnd.uniform(-0.06, 0.06))
+        pts.append((cx + math.cos(ang) * rr, cy + math.sin(ang) * rr))
+    jitter_line(cr, pts, rnd, r * 0.03, max(1.5, r * 0.035), rgb, a)
+    for ang in (0, math.pi / 2, math.pi, 1.5 * math.pi):
+        jitter_line(cr, [(cx + math.cos(ang) * r * 0.55, cy + math.sin(ang) * r * 0.55),
+                         (cx + math.cos(ang) * r * 1.35, cy + math.sin(ang) * r * 1.35)],
+                    rnd, r * 0.02, max(1.5, r * 0.03), rgb, a)
+
+
 def grain(cr, w, h, rnd, n=180, a=0.10):
     # two batched fills (dark and light specks) keep this cheap on the N900
     for v in (0.0, 1.0):
@@ -238,15 +252,15 @@ def draw_consent(cr, w, h, snap, t, rnd):
     mark(cr, w * 0.80, h * 0.15, h * 0.09, rnd)
     font(cr, h * 0.035, False)
     show(cr, 'DARK DATA', w * 0.80, h * 0.23, BONE, 0.8)
-    # The headline. RECORDING is struck through and still legible.
+    # The headline (it reads you; it never records you). READING is struck through and still legible.
     size = fit(cr, 'THIS ROOM IS', w * 0.62, h * 0.13)
     y = h * 0.33
     show(cr, 'THIS ROOM IS', m, y)
     y += size * 1.0
-    size2 = fit(cr, 'RECORDING YOU', w * 0.88, h * 0.16)
-    show(cr, 'RECORDING YOU', m, y)
+    size2 = fit(cr, 'READING YOU', w * 0.88, h * 0.16)
+    show(cr, 'READING YOU', m, y)
     font(cr, size2)
-    rec_w = text_w(cr, 'RECORDING')
+    rec_w = text_w(cr, 'READING')
     strike(cr, m, y + size2 * 0.05, rec_w, size2 * 0.6, rnd, BLOOD, 0.75, 1)
     # plain statement, no cleverness
     y += h * 0.10
@@ -336,6 +350,8 @@ def draw_live(cr, w, h, snap, local, t, rnd):
     else:
         smear(cr, fx - h * 0.15, fy + h * 0.1, h * 0.3, cols[min(1, len(cols) - 1)], t, rnd, inten)
         face(cr, fx, fy, h * (0.2 + 0.05 * kick), t, loud, motion, rnd, cols[0])
+        if hook in ('scrawl', 'inverted', ''):
+            reticle(cr, fx, fy - h * 0.05, h * 0.26, rnd, BONE, 0.4)
     # words the engine wants scrawled: some crossed out, some upside down
     words = st.get('words') or []
     wr = random.Random(len(words) * 7 + int(t / 3))
