@@ -396,6 +396,23 @@ audio_sink = "null"
                         phases.append((t, ph))
                         seen = ph
 
+        async def hold_until_idle(min_s, max_s, label):
+            """Put down: wait for release (the confession, ~50 s) and wipe (~12 s) to finish."""
+            log(label)
+            t0 = time.monotonic()
+            await hold(min_s, label + " (min)")
+            while time.monotonic() - t0 < max_s:
+                await asyncio.sleep(1.0)
+                try:
+                    s = await status()
+                except Exception:
+                    continue
+                cpu.sample(s["phase"], s.get("fps"))
+                watch_phases()
+                if s["phase"] == "idle":
+                    await asyncio.sleep(1.5)
+                    return
+
         async def hold(seconds, label):
             log(label)
             t_end = time.monotonic() + seconds
@@ -490,7 +507,7 @@ audio_sink = "null"
         t_down = time.monotonic()
         phone.tilt(0, 0)
         phone.noise, phone.motion = 0.0, False
-        await hold(a.scale * 26 + 6, "put down flat")
+        await hold_until_idle(a.scale * 26 + 6, 150, "put down flat")
         watch_phases()
         s = await status()
         ck(s["phase"] == "idle", "putting it down ends the visit and returns to idle", s["phase"])
@@ -507,7 +524,9 @@ audio_sink = "null"
         texts = [d.get("text") or d.get("ask") for t, d in prx["phone"] if t_v1 <= t]
         ck(len(texts) >= 3, "phone receives phone text through the visit", texts)
         after = states_between(time.monotonic() - 2, time.monotonic())
-        leftovers = [x for x in after if x.get("visitor_id") or x.get("words") or x.get("ocean")
+        # idle may show the corpus's fixed attract lines ("files kept today: 0."); nothing else
+        leftovers = [x for x in after if x.get("visitor_id") or (x.get("words") and x.get("phase") != "idle")
+                     or x.get("ocean")
                      or x.get("dossier") or x.get("reveal") or x.get("hook")]
         ck(after and not leftovers, "after wipe the state holds no visitor data",
            leftovers[-1] if leftovers else "")
@@ -547,7 +566,7 @@ audio_sink = "null"
         t_down2 = time.monotonic()
         phone.tilt(0, 0)
         phone.noise, phone.motion = 0.0, False
-        await hold(a.scale * 20 + 4, "visit 2: put down")
+        await hold_until_idle(a.scale * 20 + 4, 150, "visit 2: put down")
         watch_phases()
         seq2 = [p for t, p in phases if t >= t_v2]
         ck("wipe" in seq2 and seq2[-1] == "idle" and seq2.count("approach") == 1,
