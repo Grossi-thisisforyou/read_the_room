@@ -13,12 +13,14 @@ value in [-1, 1]; each has a weight per trait and a reliability. A trait score
 is a shrunk weighted average around 0.5; confidence grows with evidence mass.
 """
 
+import json
 import math
+import os
 
 TRAITS = ("O", "C", "E", "A", "N")
 TRAIT_NAMES = {
     "O": "Openness", "C": "Conscientiousness", "E": "Extraversion",
-    "A": "Agreeableness", "N": "Neuroticism",
+    "A": "Agreeableness", "N": "Reactivity",  # Neuroticism, shown to visitors as Reactivity
 }
 
 # feature: (reliability, {trait: weight}). Signs follow the research notes;
@@ -38,7 +40,8 @@ WEIGHTS = {
     "touch_variety": (0.4, {"O": 0.6, "C": -0.2}),
     "hold_ratio":    (0.3, {"C": 0.3, "N": 0.2, "E": -0.2}),
     "choice_speed":  (0.3, {"C": -0.4, "N": 0.2, "E": 0.2}),
-    "shake":         (0.3, {"N": 0.4, "E": 0.2, "C": -0.2}),
+    # "shake" (hand tremor) is measured but deliberately NOT used: a visitor
+    # with a tremor would see it named as Neuroticism on the wall.
     "typing":        (0.4, {"E": 0.4, "O": 0.3, "A": 0.2}),
     # Visitors pick up and turn the N900. Picking it up = curiosity and
     # approach; exploring many angles = Openness; fast restless turning = N/E.
@@ -97,18 +100,38 @@ def estimate(summary, choices=(), prompts=None):
     return ocean, conf, overall, evidence
 
 
-# Segment labels, the way an ad platform names an audience. Picked from the
-# two most extreme traits. Deliberately cold.
+# Segment labels, the way an ad platform names an audience. Visitor-facing
+# names live in infinite_jest/text/corpus/labels.json when that module is
+# present; these defaults match it.
 LABELS = {
-    ("E", 1): "The Performer", ("E", -1): "The Lurker",
+    ("E", 1): "The Performer", ("E", -1): "The Observer",
     ("O", 1): "The Seeker", ("O", -1): "The Literalist",
     ("C", 1): "The Auditor", ("C", -1): "The Drifter",
-    ("A", 1): "The Pleaser", ("A", -1): "The Contrarian",
-    ("N", 1): "The Exposed Nerve", ("N", -1): "The Cold Surface",
+    ("A", 1): "The Opt-In", ("A", -1): "The Contrarian",
+    ("N", 1): "The Live Wire", ("N", -1): "The Cold Surface",
 }
 
 
+def _load_corpus_labels():
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "text", "corpus", "labels.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+        for pole, seg in d.get("segments", {}).items():
+            LABELS[(pole[0], 1 if pole[1] == "+" else -1)] = seg["label"]
+        for t, name in d.get("traits", {}).items():
+            if t in TRAIT_NAMES:
+                TRAIT_NAMES[t] = name.capitalize()
+    except (OSError, ValueError, KeyError, IndexError):
+        pass
+
+
+_load_corpus_labels()
+
+
 def segment(ocean, conf):
+    """-> (label, trait, sign). The pole string is trait + '+'/'-'."""
     ranked = sorted(TRAITS, key=lambda t: abs(ocean[t] - 0.5) * (0.3 + conf[t]),
                     reverse=True)
     t1 = ranked[0]

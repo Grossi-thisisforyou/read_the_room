@@ -25,7 +25,19 @@ import threading
 import time
 import urllib.request
 
-from . import voice
+from . import voice as _fallback_voice
+
+try:  # the shared text corpus has the reviewed prompts and a stricter guard
+    from infinite_jest.text import oracle_prompt as _tp
+    from infinite_jest.text import style as _ts
+
+    class voice:  # noqa: N801 - same surface as oracle/voice.py
+        words_messages = staticmethod(_tp.words_messages)
+        dossier_messages = staticmethod(_tp.dossier_messages)
+        clean_words = staticmethod(_ts.clean_words)
+        clean_dossier = staticmethod(_ts.clean_dossier)
+except ImportError:
+    voice = _fallback_voice
 
 DEFAULTS = {
     "url": "http://127.0.0.1:8080/v1/chat/completions",
