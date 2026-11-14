@@ -6,9 +6,10 @@ agent's UI snapshot and the UI's own typing state. No GTK in here, so the
 tests can render the screens to PNG files.
 
 Look: deep dark industrial. Near-black, film grain and scanlines; raw
-off-white condensed type; crossed-out words and tally marks;
-Baselitz's upside-down words; Bacon's smeared flesh pink and a face that
-won't hold its shape. Everything is drawn, so nothing has to be shipped.
+off-white condensed type; crossed-out words and the J R A mark;
+upside-down words; smeared flesh pink and a face that won't hold its shape.
+(The visual references stay private: no artist names, no
+giveaway marks anywhere a visitor or a reader of this repo looks.) Everything is drawn, so nothing has to be shipped.
 """
 
 import math
@@ -22,7 +23,7 @@ FONT = 'Nokia Sans Cn'      # the N900's own condensed face; cairo falls back if
 FONT_FALLBACK = 'Sans'
 
 INK = (0.93, 0.90, 0.84)       # raw off-white
-BONE = (0.91, 0.85, 0.66)      # crown yellow-bone
+BONE = (0.91, 0.85, 0.66)      # yellow-bone
 BLOOD = (0.70, 0.05, 0.04)
 FLESH = (0.86, 0.47, 0.42)
 BG = (0.035, 0.03, 0.028)
@@ -95,19 +96,23 @@ def jitter_line(cr, pts, rnd, amp, width, rgb, a=1.0):
 
 
 def strike(cr, x, y, w, size, rnd, rgb=BLOOD, a=0.9, n=2):
-    """Basquiat cross-out: rough strokes through a word (it stays legible)."""
+    """Cross-out: rough strokes through a word (it stays legible)."""
     for k in range(n):
         yy = y - size * (0.28 + 0.12 * k)
         jitter_line(cr, [(x - 6, yy + rnd.uniform(-3, 3)), (x + w * 0.5, yy + rnd.uniform(-4, 4)),
                          (x + w + 6, yy + rnd.uniform(-3, 3))], rnd, 1.5, size * 0.09, rgb, a)
 
 
-def tally(cr, x, y, s, rnd, rgb=BONE, a=1.0):
-    """Four strokes and a slash: the room keeping count."""
-    for i in range(4):
-        xx = x + s * (0.12 + 0.22 * i)
-        jitter_line(cr, [(xx, y), (xx + s * 0.04, y - s * 0.8)], rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
-    jitter_line(cr, [(x, y - s * 0.15), (x + s, y - s * 0.65)], rnd, s * 0.04, max(2.0, s * 0.07), rgb, a)
+def mark(cr, x, y, s, rnd, rgb=BONE, a=1.0):
+    """Baby's mark, J R A, scrawled: letters jitter like they were drawn by hand."""
+    font(cr, s)
+    for i, ch in enumerate('JRA'):
+        cr.save()
+        cr.translate(x + i * s * 0.75 + rnd.uniform(-2, 2), y + rnd.uniform(-3, 3))
+        cr.rotate(rnd.uniform(-0.12, 0.12))
+        show(cr, ch, 0, 0, rgb, a)
+        cr.restore()
+    jitter_line(cr, [(x - s * 0.1, y + s * 0.15), (x + s * 2.3, y + s * 0.1)], rnd, 2, max(2.0, s * 0.06), rgb, a * 0.8)
 
 
 def grain(cr, w, h, rnd, n=180, a=0.10):
@@ -130,7 +135,7 @@ def scanlines(cr, w, h, t):
 
 
 def smear(cr, cx, cy, r, rgb, t, rnd, strength=1.0):
-    """Bacon: a body that is mostly a wound, dragged sideways."""
+    """A body that is mostly a wound, dragged sideways."""
     for i in range(9):
         dy = (i - 4.5) * r * 0.17
         drag = (math.sin(t * 0.9 + i * 0.7) * 0.5 + 0.5) * r * 1.4 * strength
@@ -185,7 +190,7 @@ def face(cr, cx, cy, r, t, loud, motion, rnd, rgb=FLESH):
 
 
 def upside_down(cr, s, x, y, size, rgb=INK, a=1.0):
-    """Baselitz: the word hangs upside down, anchored at (x, y)."""
+    """The word hangs upside down, anchored at (x, y)."""
     cr.save()
     cr.translate(x, y)
     cr.rotate(math.pi)
@@ -202,7 +207,7 @@ def draw(cr, w, h, snap, local, t):
     cr.set_source_rgb(BG[0], BG[1], BG[2])
     cr.paint()
     if snap.get('optout'):
-        draw_optout(cr, w, h, t, rnd)
+        draw_optout(cr, w, h, t, rnd, snap.get('optout_text') or 'the eye is closed until you leave.')
     elif snap.get('screen') == 'live':
         draw_live(cr, w, h, snap, local, t, rnd)
     else:
@@ -225,14 +230,14 @@ def link_dot(cr, w, link, t):
 
 def draw_consent(cr, w, h, snap, t, rnd):
     m = w * 0.05
-    # Bacon smear bottom-left, breathing
+    # flesh smear bottom-left, breathing
     smear(cr, w * 0.2, h * 0.78, h * 0.32, FLESH, t, rnd, 0.6 + 0.4 * math.sin(t * 0.6))
-    # Baselitz: the title hangs upside down top-left
+    # the title hangs upside down top-left
     upside_down(cr, 'INFINITE JEST', m, h * 0.05, h * 0.075, INK, 0.75)
-    # a tally, top right: the room keeps count
-    tally(cr, w * 0.83, h * 0.17, h * 0.13, rnd)
+    # J R A mark and DARK DATA, top right
+    mark(cr, w * 0.80, h * 0.15, h * 0.09, rnd)
     font(cr, h * 0.035, False)
-    show(cr, u'DARK DATA', w * 0.80, h * 0.23, BONE, 0.8)
+    show(cr, 'DARK DATA', w * 0.80, h * 0.23, BONE, 0.8)
     # The headline. RECORDING is struck through and still legible.
     size = fit(cr, 'THIS ROOM IS', w * 0.62, h * 0.13)
     y = h * 0.33
@@ -245,27 +250,34 @@ def draw_consent(cr, w, h, snap, t, rnd):
     strike(cr, m, y + size2 * 0.05, rec_w, size2 * 0.6, rnd, BLOOD, 0.75, 1)
     # plain statement, no cleverness
     y += h * 0.10
-    for line in CONSENT_LINES:
-        fit(cr, line, w * 0.62, h * 0.045, False)
+    lines = [txt(l) for l in (snap.get('consent') or CONSENT_LINES)]
+    enter = 'TOUCH TO ENTER'
+    if len(lines) > 1 and lines[-1].lower().startswith('touch'):
+        enter = lines[-1].rstrip('.').upper()
+        lines = lines[:-1]
+    # fit however many lines the text has between the headline and the button
+    step = min(h * 0.058, (h * 0.84 - y) / max(1, len(lines)))
+    for line in lines:
+        fit(cr, line, w * 0.62, min(h * 0.045, step * 0.8), False)
         show(cr, line, m, y, INK, 0.92)
-        y += h * 0.058
+        y += step
     # enter
     blink = 0.55 + 0.45 * math.sin(t * 3.0)
-    fit(cr, 'TOUCH TO ENTER', w * 0.3, h * 0.07)
-    tw = text_w(cr, 'TOUCH TO ENTER')
-    show(cr, 'TOUCH TO ENTER', w - m - tw, h * 0.92, BONE, blink)
+    fit(cr, enter, w * 0.3, h * 0.07)
+    tw = text_w(cr, enter)
+    show(cr, enter, w - m - tw, h * 0.92, BONE, blink)
     jitter_line(cr, [(w - m - tw - 50, h * 0.90), (w - m - tw - 12, h * 0.90),
                      (w - m - tw - 24, h * 0.87), (w - m - tw - 12, h * 0.90),
                      (w - m - tw - 24, h * 0.93)], rnd, 1.2, 3, BONE, blink)
 
 
-def draw_optout(cr, w, h, t, rnd):
+def draw_optout(cr, w, h, t, rnd, sub='the eye is closed until you leave.'):
     """The visitor covered the eye for 3 s: nothing about them is read now."""
     s = 'YOU ARE NOT BEING READ'
     size = fit(cr, s, w * 0.86, h * 0.12)
     show(cr, s, (w - text_w(cr, s)) / 2, h * 0.5, INK, 0.9)
-    fit(cr, 'the eye is closed until you leave', w * 0.6, h * 0.045, False)
-    sub = 'the eye is closed until you leave'
+    sub = txt(sub)
+    fit(cr, sub, w * 0.6, h * 0.045, False)
     show(cr, sub, (w - text_w(cr, sub)) / 2, h * 0.62, INK, 0.5)
     # a closed eye: one heavy lid line
     jitter_line(cr, [(w * 0.42, h * 0.25), (w * 0.5, h * 0.28), (w * 0.58, h * 0.25)],

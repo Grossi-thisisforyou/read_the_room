@@ -96,6 +96,8 @@ FALLBACK_PROMPTS = [
 def load_prompts():
     """Prompts from the profiling thread's file if it is next to us, else ours."""
     for p in (os.path.join(HERE, 'prompts.json'),
+              os.path.join(HERE, 'text_prompts.json'),
+              os.path.join(HERE, '..', '..', 'text', 'corpus', 'prompts.json'),
               os.path.join(HERE, 'profiler_prompts.json'),
               os.path.join(HERE, '..', '..', 'profiler', 'prompts.json'),
               os.path.join(HERE, '..', '..', 'profiling', 'prompts.json')):
@@ -117,6 +119,35 @@ def load_prompts():
         except Exception:
             continue
     return list(FALLBACK_PROMPTS)
+
+
+def load_phone_text():
+    """Consent versions and opt-out lines written for the phone (text/corpus/lines.json)."""
+    consent, optout = [], []
+    for p in (os.path.join(HERE, 'text_lines.json'),
+              os.path.join(HERE, '..', '..', 'text', 'corpus', 'lines.json')):
+        try:
+            f = open(p, 'r')
+            try:
+                data = loads(f.read())
+            finally:
+                f.close()
+        except Exception:
+            continue
+        items = isinstance(data, dict) and data.get('lines') or data
+        for d in items or []:
+            try:
+                if d.get('surface') != 'phone':
+                    continue
+                if d.get('beat') == 'consent' and d.get('lines'):
+                    consent.append(list(d['lines']))
+                elif d.get('beat') == 'optout' and d.get('text') and len(d['text']) < 40:
+                    optout.append(d['text'])
+            except Exception:
+                continue
+        if consent or optout:
+            break
+    return consent, optout
 
 
 class Peak(object):
@@ -161,6 +192,7 @@ class Agent(object):
         self.listeners = []
         self.prompts = load_prompts()
         self.prompt_i = random.randint(0, len(self.prompts) - 1)
+        self.consent_versions, self.optout_lines = load_phone_text()
         # shared with the UI
         self.ui = {
             'screen': 'consent',     # consent | live
@@ -174,7 +206,20 @@ class Agent(object):
             'wiped_t': 0.0,
             'last_presence_t': time.time(),
             'optout': False,
+            'consent': None,         # this visit's consent text (None = built-in)
+            'optout_text': None,
         }
+        self.new_visit_text()
+
+    def new_visit_text(self):
+        """Each visitor gets one of the written consent versions."""
+        kw = {}
+        if self.consent_versions:
+            kw['consent'] = random.choice(self.consent_versions)
+        if self.optout_lines:
+            kw['optout_text'] = random.choice([l for l in self.optout_lines
+                                               if 'not being read' not in l] or self.optout_lines)
+        self.ui_update(**kw)
 
     # ------------------------------------------------------------ util --
     def ui_update(self, **kw):
@@ -275,6 +320,7 @@ class Agent(object):
         self.near_since = None
         self.ui_update(screen='consent', text='', prompt=None, state={},
                        reading={}, wiped_t=time.time(), optout=False)
+        self.new_visit_text()
 
     # ----------------------------------------------------------- loops --
     def reading(self, t):
