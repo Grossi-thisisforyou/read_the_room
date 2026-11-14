@@ -52,7 +52,7 @@ class Visit:
     hook_params: dict[str, Any] = field(default_factory=dict)
     words: list[str] = field(default_factory=list)
     reveal: dict[str, Any] | None = None
-    answers: list[str] = field(default_factory=list)
+    answers: list[int] = field(default_factory=list)   # character counts only, never the text
     opted_out: bool = False
     profile_extra: dict[str, Any] = field(default_factory=dict)   # evidence tuples etc. for the reveal
     oracle_words: list[str] = field(default_factory=list)
@@ -183,7 +183,7 @@ class VisitMachine:
 
     def on_answer(self, text: str) -> None:
         if self.phase in ("approach", "profiling", "hook") and text:
-            self.visit.answers = (self.visit.answers + [str(text)[:200]])[-8:]
+            self.visit.answers = (self.visit.answers + [len(str(text))])[-8:]   # the count, not the words
 
     def force(self, phase: str, now: float) -> None:
         """Operator override (from the control role)."""
