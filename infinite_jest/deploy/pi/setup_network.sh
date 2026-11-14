@@ -53,7 +53,7 @@ nm_set() {  # nm_set NAME TYPE [ifname] -- props...
   fi
 }
 
-apply() {
+cmd_apply() {
   load_conf
   echo "    Show network: Wi-Fi '$SHOW_SSID', Pi at $PI_ADDRESS, router $ROUTER"
   # Wi-Fi is switched off on a fresh Pi until a country is set.
@@ -97,7 +97,7 @@ apply() {
   [[ -f $CONF ]] && sha256sum "$CONF" > "$STATE" || true
 }
 
-install() {
+cmd_install() {
   load_conf
   if [[ ! -f $CONF ]]; then
     cp "$HERE/infinitejest-network.txt" "$CONF"
@@ -115,17 +115,17 @@ install() {
   fi
   # The router can't be reached by name; make the Pi findable as inartwetrust.local
   command -v avahi-daemon >/dev/null || echo "    ! avahi-daemon missing: use the address $PI_ADDRESS instead of the name."
-  apply
+  cmd_apply
 }
 
-boot() {  # at every boot: re-apply only if the file changed on the Mac
+cmd_boot() {  # at every boot: re-apply only if the file changed on the Mac
   if [[ -f $CONF ]] && ! sha256sum --status -c "$STATE" 2>/dev/null; then
     echo "infinitejest-network.txt changed, applying"
-    apply
+    cmd_apply
   fi
 }
 
-show() {
+cmd_show() {
   load_conf
   echo "Settings file: $CONF $( [[ -f $CONF ]] && echo '(present)' || echo '(missing: defaults used)')"
   ip -br addr | grep -v '^lo' || true
@@ -135,9 +135,9 @@ show() {
 
 [[ $EUID -eq 0 || ${1:-} == --show ]] || { echo "Run with sudo."; exit 1; }
 case "${1:---show}" in
-  --install) install ;;
-  --apply) apply ;;
-  --boot) boot ;;
-  --show) show ;;
+  --install) cmd_install ;;
+  --apply) cmd_apply ;;
+  --boot) cmd_boot ;;
+  --show) cmd_show ;;
   *) sed -n '2,8p' "$0"; exit 1 ;;
 esac

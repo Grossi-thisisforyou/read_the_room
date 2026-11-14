@@ -16,7 +16,13 @@
 
 set -uo pipefail
 
-BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUNDLE="${IJ_BUNDLE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# Run from a private copy of this script, so a newer INSTALL.sh copied onto the
+# stick mid-run (or a wobbly stick) can't change the script under our feet.
+if [[ -z "${IJ_BUNDLE:-}" && $EUID -eq 0 ]]; then
+  copy="$(mktemp /tmp/ij-install.XXXXXX)" && cp "${BASH_SOURCE[0]}" "$copy" && \
+    IJ_BUNDLE="$BUNDLE" exec bash "$copy" "$@"
+fi
 CODE_ONLY=0; START=1; SKIP_LLM=0; SKIP_IMAGES=0; SKIP_NET=0
 for arg in "$@"; do
   case "$arg" in
