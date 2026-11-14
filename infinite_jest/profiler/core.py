@@ -94,7 +94,9 @@ class Profiler:
     def handle(self, message):
         """Dispatch one contract message {type, ts, data}; return replies."""
         t = message.get("type")
-        ts = float(message.get("ts") or 0.0)
+        # the engine's receive time when it forwarded the message: the N900's own clock
+        # (message "ts") can be years off and would mix with the engine's visit times
+        ts = float(message.get("rx_ts") or message.get("ts") or 0.0)
         data = message.get("data") or {}
         if t == "sensor":
             return self._sensor(data, ts)

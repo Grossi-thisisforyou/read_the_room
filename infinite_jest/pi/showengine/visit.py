@@ -96,21 +96,22 @@ class VisitMachine:
         vid = data.get("visitor_id")
         if vid is not None and vid != self.visit.visitor_id:
             return False  # stale message about someone already wiped
-        ocean = clean_ocean(data.get("ocean"))
-        if ocean is not None:
-            self.visit.ocean = ocean
-        self.visit.confidence = num(data.get("confidence"), self.visit.confidence)
-        self.visit.profile_source = data.get("source") or "profiler"
-        if isinstance(data.get("hook_params"), dict):
-            self.visit.hook_params = dict(data["hook_params"])
         if data.get("phase") == "opted_out" or data.get("wiped"):
             # the visitor covered the phone: drop what we have, go quiet until they leave
-            self.visit.ocean, self.visit.words, self.visit.hook_params = None, [], {}
+            self._forget_visitor()
             self.visit.hook, self.visit.hook_since, self.visit.opted_out = "void", now, True
             self.tick(now)
             return True
         if self.visit.opted_out:
             return False
+        ocean = clean_ocean(data.get("ocean"))
+        if ocean is not None:
+            self.visit.ocean = ocean
+        self.visit.confidence = num(data.get("confidence"), self.visit.confidence)
+        src = data.get("source")
+        self.visit.profile_source = src[:20] if isinstance(src, str) and src else "profiler"
+        if isinstance(data.get("hook_params"), dict):
+            self.visit.hook_params = dict(data["hook_params"])
         ev = clean_words(data.get("evidence")) or clean_words(data.get("words"))
         line = self.visit.hook_params.get("line")
         if isinstance(line, str) and line:
@@ -234,10 +235,9 @@ class VisitMachine:
             self.wipe()
         self.changes.append((old, phase))
 
-    def wipe(self) -> None:
-        """Forget the visitor. Overwrite lists in place first, then drop the object."""
+    def _forget_visitor(self) -> None:
+        """Drop everything said or guessed about the visitor; the visit itself goes on."""
         v = self.visit
-        self.last_wiped_id = v.visitor_id
         for lst in (v.words, v.answers, v.oracle_words, v.dossier):
             for i in range(len(lst)):
                 lst[i] = ""
@@ -245,4 +245,10 @@ class VisitMachine:
         v.hook_params.clear()
         if v.ocean:
             v.ocean.clear()
+        v.ocean, v.confidence, v.reveal = None, 0.0, None
+
+    def wipe(self) -> None:
+        """Forget the visitor. Overwrite lists in place first, then drop the object."""
+        self.last_wiped_id = self.visit.visitor_id
+        self._forget_visitor()
         self.visit = Visit()
