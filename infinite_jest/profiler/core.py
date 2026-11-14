@@ -230,6 +230,7 @@ class Profiler:
             "features": {f: round(v[2], 3) for f, v in self.features.summary().items()},
             "evidence": ["{} -> {}{}".format(f, t, "+" if s > 0 else "-")
                          for _c, t, f, _r, s in evidence[:5]],
+            "words": wall_words(evidence[:5]),
             "seconds": round(ts - self.visit_start, 1),
         }
         self.last_profile = data
@@ -260,6 +261,21 @@ class Profiler:
         return [msg("profile", ts, {"visitor_id": vid, "phase": "opted_out",
                                     "hook": "void", "confidence": 0.0,
                                     "wiped": True})]
+
+
+def wall_words(evidence):
+    """The evidence as lines for the wall: what you did, and the trait it moved.
+    e.g. "YOU TURNED IT THROUGH 140 DEGREES  O+". The engine scrawls these
+    when the local model has nothing to say."""
+    out, seen = [], set()
+    for _c, trait, feat, raw, sign in evidence:
+        line = rv._describe(feat, raw)
+        line = line.split(" (")[0].upper()
+        if line in seen:
+            continue
+        seen.add(line)
+        out.append("{}  {}{}".format(line, trait, "+" if sign > 0 else "-")[:60])
+    return out
 
 
 def _corpus_reveal(ocean, conf, overall, evidence, bandit, features, seconds, vid):

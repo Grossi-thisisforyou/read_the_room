@@ -180,7 +180,7 @@ LEXICON = {
                 r"overdos" + _W + r"|poison" + _W + r"|attack" + _W + r"|violen" + _W + r"|terror" + _W,
     # the visual sources stay hidden; internal scene / palette names stay in code
     "source": r"bacon" + _W + r"|francis|basquiat" + _W + r"|baselitz" + _W + r"|samo|jean[\s-]*michel|"
-              r"georg|expressionis" + _W + r"|crown" + _W + r"|skull" + _W + r"|copyright" + _W +
+              r"georg|expressionis" + _W + r"|crown" + _W + r"|skull" + _W + r"|kings?|kingly|copyright" + _W +
               r"|trademark" + _W + r"|tm|painter" + _W + r"|painting" + _W + r"|artists?|artwork" + _W +
               r"|canvas" + _W + r"|museum" + _W + r"|galler(?:y|ies)|popes?|papal|triptych" + _W +
               r"|graffiti|street art|brushstroke" + _W + r"|picasso|warhol|scrawl" + _W + r"|meat",
