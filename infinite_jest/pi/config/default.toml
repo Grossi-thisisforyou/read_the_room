@@ -65,5 +65,14 @@ audio_device = "default"      # "default" = HDMI to the projector; a USB DAC is 
 volume = 0.8
 
 [visuals]
+# Pi 5 budget (measure with: python3 tools/budget.py): at the
+# built-in look a 1080p frame costs ~15 ms on a fast x86, roughly 35-50 ms on
+# the Pi 5, so expect ~20-28 fps rather than 30. The loop copes (motion is
+# time-based). If it visibly stutters, these are the cheap knobs, cheapest
+# first (each changes the look a little, so judge them on the projector):
+# internal_size = [480, 270]    # default [640, 360]: paint fade + upscale ~25% cheaper
+# figure_w = 128                # default 160 x 180: the body smear is the biggest layer
+# figure_h = 144
+# smooth_scale = false          # nearest-neighbour upscale: ~3 ms less, blockier
 
 [profiler]

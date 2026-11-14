@@ -48,3 +48,13 @@ def test_forwarded_messages_use_the_pis_receive_time():
                          "data": _reading(i)})
     assert not p.revealed
     assert not any(m["type"] == "reveal" for m in out)
+
+
+def test_status_reports_the_soc_temperature(tmp_path):
+    from showengine.hub import cpu_temp
+    f = tmp_path / "temp"
+    f.write_text("81234\n")
+    assert cpu_temp(f) == 81.2
+    assert cpu_temp(tmp_path / "missing") is None
+    f.write_text("junk")
+    assert cpu_temp(f) is None
