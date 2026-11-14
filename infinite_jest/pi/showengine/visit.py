@@ -67,10 +67,10 @@ def clean_ocean(raw: Any) -> dict[str, float] | None:
 HIDDEN = ("bacon", "baselitz", "basquiat", "crown")
 
 
-def clean_words(raw: Any, limit: int = 24) -> list[str]:
+def clean_words(raw: Any, limit: int = 24, width: int = 80) -> list[str]:
     if not isinstance(raw, list):
         return []
-    out = [str(w)[:80] for w in raw if isinstance(w, (str, int, float))]
+    out = [str(w)[:width] for w in raw if isinstance(w, (str, int, float))]
     return [w for w in out if not any(h in w.lower() for h in HIDDEN)][:limit]
 
 
@@ -104,10 +104,7 @@ class VisitMachine:
         if isinstance(data.get("hook_params"), dict):
             self.visit.hook_params = dict(data["hook_params"])
         if data.get("phase") == "opted_out" or data.get("wiped"):
-            # the visitor covered the phone: drop what we have, go quiet until they leave
-            self.visit.ocean, self.visit.words, self.visit.hook_params = None, [], {}
-            self.visit.hook, self.visit.hook_since, self.visit.opted_out = "void", now, True
-            self.tick(now)
+            self.opt_out(now)
             return True
         if self.visit.opted_out:
             return False
@@ -123,6 +120,17 @@ class VisitMachine:
         self.tick(now)
         return True
 
+    def opt_out(self, now: float) -> bool:
+        """The visitor covered the phone's eye: drop what we have, go quiet until they leave."""
+        if self.phase not in ("approach", "profiling", "hook"):
+            return False
+        v = self.visit
+        v.ocean, v.words, v.hook_params, v.oracle_words, v.dossier, v.reveal = None, [], {}, [], [], None
+        v.answers, v.confidence = [], 0.0
+        v.hook, v.hook_since, v.opted_out = "void", now, True
+        self.tick(now)
+        return True
+
     def on_reveal(self, data: dict) -> bool:
         vid = data.get("visitor_id")
         if self.phase not in ("hook", "release") or (vid is not None and vid != self.visit.visitor_id):
@@ -130,7 +138,8 @@ class VisitMachine:
         if self.visit.opted_out:
             return False
         self.visit.reveal = {
-            "lines": clean_words(data.get("lines"), 12),
+            # reveal lines are whole sentences ("you held the device 75% of the time. ..."): don't cut them mid-word
+            "lines": clean_words(data.get("lines"), 12, 160),
             "label": str(data.get("label", ""))[:80],
         }
         return True
@@ -182,14 +191,14 @@ class VisitMachine:
                 self._go("profiling", now)
         elif p == "profiling":
             if not self.present:
-                self._go("release", now)
+                self._go("wipe" if self.visit.opted_out else "release", now)   # opted out: nothing to reveal
             elif t >= c.min_profiling and self.visit.confidence >= c.confidence_to_hook:
                 self._go("hook", now)
             elif t >= c.profiling_timeout:
                 self._go("hook", now)
         elif p == "hook":
             if not self.present or self._visit_age(now) >= c.max_visit:
-                self._go("release", now)
+                self._go("wipe" if self.visit.opted_out else "release", now)
         elif p == "release":
             if t >= c.release_time:
                 self._go("wipe", now)

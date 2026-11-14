@@ -36,7 +36,9 @@ class Presence:
 
     def score_of(self, d: dict) -> float:
         s = self.raw_score(d)
-        if self.cfg.handheld and "presence" not in d:
+        # handheld: the N900 reports `held` itself, so its own `presence` (a slow-falling peak that
+        # also counts holding) is not used; otherwise putting the phone down took ~16 s, not 8 s
+        if self.cfg.handheld and ("presence" not in d or "held" in d):
             # handheld: the camera and the mic alone only half-count; holding the phone counts
             cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0)
             hand = Presence.raw_score({k: d[k] for k in ("held", "shake", "kind", "proximity") if k in d})

@@ -65,8 +65,8 @@ class Engine:
             self._on_frame_msg(msg, now)
         elif t == P.PROFILE:
             self.stats["profile"] += 1
-            self.machine.on_profile(d, now)
-            self.emit(self._fwd(msg), {"oracle"})
+            if self.machine.on_profile(d, now):     # only the current visitor's, and nothing after an opt-out
+                self.emit(self._fwd(msg), {"oracle"})
         elif t == P.ORACLE:
             if role in ("oracle", "profiler") and self.machine.on_oracle(d):
                 self.stats["oracle"] += 1
@@ -107,6 +107,16 @@ class Engine:
         self.stats["sensor"] += 1
         self.last_sensor_ts = time.time()
         kind = d.get("kind", "phone")
+        if kind == "optout" or d.get("optout") is True or d.get("opt_out") is True:
+            # the N900 sends kind "optout" once, then {"kind": "phone", "optout": true, "held": ...}
+            # until the next wipe. The engine acts on it itself, profiler or not.
+            if not self.machine.visit.opted_out and self.machine.opt_out(now):
+                log.info("visitor opted out")
+                self.emit(P.make(P.SENSOR, {"kind": "optout"}), {"profiler"})
+                if self.profiler is not None:
+                    self._from_profiler(plugins.call(self.profiler, "on_sensor", {"kind": "optout"}, msg["ts"]), now)
+            self.presence.feed({k: d[k] for k in ("held", "kind") if k in d}, now)   # only "still holding it?"
+            return
         if kind == "phone":
             self.sensor.update({k: v for k, v in d.items() if k != "kind"})
             self.tilt.feed(d, now)
@@ -119,6 +129,8 @@ class Engine:
         elif kind == "choice":
             self.machine.on_answer(str(d.get("option", "")))
         self.presence.feed(d, now)
+        if self.machine.visit.opted_out:
+            return                      # opted out: nothing about them goes to the profilers
         if self.machine.phase in ("approach", "profiling", "hook"):
             self.fallback.feed(d)
         if self.profiler is not None:
@@ -134,11 +146,11 @@ class Engine:
             self.machine.on_reveal(result)
         else:
             self.stats["profile"] += 1
-            self.machine.on_profile(result, now)
-            self.emit(P.make(P.PROFILE, {k: v for k, v in result.items() if k != "type"}), {"oracle"})
+            if self.machine.on_profile(result, now):   # the oracle only hears about the current visitor
+                self.emit(P.make(P.PROFILE, {k: v for k, v in result.items() if k != "type"}), {"oracle"})
 
     def _on_frame_msg(self, msg: dict, now: float) -> None:
-        if self.blackout:
+        if self.blackout or self.machine.visit.opted_out:
             return
         self.emit(self._fwd(msg), {"profiler"})
         if self.profiler is not None:
@@ -239,6 +251,8 @@ class Engine:
             if self.profiler is not None:
                 self._from_profiler(plugins.call(self.profiler, "on_visit", visit, time.time()), now)
         line = self.cfg.get("phone_lines", {}).get(new)
+        if m.visit.opted_out:
+            line = None                 # an opted-out visitor is left alone until the wipe
         if isinstance(line, dict) and line:
             self.emit(P.make(P.PHONE, dict(line)), {"phone"})
         if new == "wipe":
@@ -247,7 +261,7 @@ class Engine:
     def _wipe_everything(self, visitor_id: str | None) -> None:
         self.fallback.reset()
         self.frames.reset()
-        for k in ("touch",):
+        for k in ("touch", "optout", "opt_out"):
             self.sensor.pop(k, None)
         self.override_scene = None
         self.emit(P.make(P.WIPE, {"visitor_id": visitor_id or ""}), None)
