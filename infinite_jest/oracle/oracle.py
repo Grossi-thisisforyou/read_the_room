@@ -18,12 +18,14 @@ something it must not, nothing is sent and the engine keeps the profiler's
 template text.
 """
 
+import http.client
 import json
 import queue
+import socket
 import sys
 import threading
 import time
-import urllib.request
+import urllib.parse
 
 from . import voice as _fallback_voice
 
@@ -51,13 +53,53 @@ DEFAULTS = {
 }
 
 
+MAX_ANSWER_BYTES = 65536   # a 70-token answer is ~1 KB; anything bigger is broken
+
+
+def _abort(held):
+    for sock in held:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
 def http_complete(cfg):
+    u = urllib.parse.urlsplit(cfg["url"])
+    host, port, path = u.hostname or "127.0.0.1", u.port or 80, u.path or "/"
+
     def complete(messages, max_tokens):
         body = json.dumps({"model": cfg["model"], "messages": messages, "max_tokens": max_tokens,
                            "temperature": cfg["temperature"], "stream": False}).encode()
-        req = urllib.request.Request(cfg["url"], body, {"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=cfg["timeout"]) as r:
-            return json.loads(r.read())["choices"][0]["message"]["content"]
+        conn = http.client.HTTPConnection(host, port, timeout=cfg["timeout"])
+        # A socket timeout only bounds each read, so a server that trickles a byte
+        # now and then would hold the worker (and every later visitor) forever.
+        # The watchdog shuts the socket at the deadline, whatever it is doing.
+        # (http.client hands the socket to the response and forgets it, so hold it here.)
+        held = []
+        watchdog = threading.Timer(cfg["timeout"], _abort, (held,))
+        watchdog.daemon = True
+        t0 = time.monotonic()
+        watchdog.start()
+        try:
+            conn.connect()
+            held.append(conn.sock)
+            conn.request("POST", path, body, {"Content-Type": "application/json"})
+            r = conn.getresponse()
+            if r.status != 200:
+                raise OSError("llama-server answered HTTP %d" % r.status)
+            raw = r.read(MAX_ANSWER_BYTES + 1)
+            if time.monotonic() - t0 >= cfg["timeout"]:
+                raise TimeoutError("llama-server too slow")
+            if len(raw) > MAX_ANSWER_BYTES:
+                raise ValueError("llama-server answer too long")
+            content = json.loads(raw.decode("utf-8"))["choices"][0]["message"]["content"]
+            if not isinstance(content, str):
+                raise ValueError("llama-server answer has no text")
+            return content
+        finally:
+            watchdog.cancel()
+            conn.close()
     return complete
 
 
