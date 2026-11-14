@@ -295,6 +295,11 @@ class Agent(object):
             if data.get('text'):
                 kw['text'] = data['text']
                 kw['text_t'] = time.time()
+            elif data.get('ask') and len(data.get('options') or []) < 2:
+                # an open question (the engine's "What do you never tell anyone?"):
+                # show it as words; the visitor answers on the slide-out keyboard
+                kw['text'] = data['ask']
+                kw['text_t'] = time.time()
             if data.get('ask') and len(data.get('options') or []) >= 2:
                 kw['prompt'] = {'prompt_id': data.get('prompt_id'), 'ask': data['ask'],
                                 'options': list(data['options'])[:2], 't': time.time()}
@@ -348,7 +353,10 @@ class Agent(object):
         else:
             self.near_since = None
         if self.opted_out:
-            return {'kind': 'phone', 'optout': True}
+            # Only "is the phone still in someone's hand": without it the Pi
+            # thinks the visitor left, wipes, and the agent starts reading the
+            # same person again a few seconds later.
+            return {'kind': 'phone', 'optout': True, 'held': bool(r.get('held'))}
         return r
 
     def opt_out(self):

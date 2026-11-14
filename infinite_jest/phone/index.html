@@ -146,7 +146,7 @@ function handle(m){
     if(Array.isArray(d.palette)&&d.palette.length)S.palette=d.palette.slice(0,8);
     if(typeof d.tempo==="number"&&d.tempo>20&&d.tempo<300)S.tempo=d.tempo;
     if(typeof d.intensity==="number")S.intensity=clamp(d.intensity);
-    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=d.hook}
+    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=(HOOK_NAMES[d.hook]||"")}
     S.phase=d.phase||S.phase;S.scene=d.scene||S.scene;
     $("st-sens").textContent=(S.scene||S.phase||"").toString().slice(0,24);
   }else if(m.type==="phone"){
@@ -355,6 +355,7 @@ $("enter").addEventListener("click",enter);
 /* ---------------- background: smear, mark, pulse ---------------- */
 var cv=$("bg"), cx=cv.getContext("2d"), W=0, H=0, DPR=1, seed=7;
 function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647}
+var HOOK_NAMES={flesh:"the meat",scrawl:"the writing",inverted:"the fall",mirror:"the mirror",void:"the dark"};
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cx.setTransform(DPR,0,0,DPR,0,0)}
 addEventListener("resize",resize);resize();
 

@@ -112,7 +112,9 @@ async def main():
     nframes = len(got['frames'])
     check('optout' in got['sensor_kinds'] and agent.ui_snapshot()['optout'], 'opt-out after 3 s covered')
     await asyncio.sleep(1.0)
-    check(len(got['frames']) == nframes and got['last_phone'] == {'kind': 'phone', 'optout': True}, 'nothing is read after opt-out')
+    lp = dict(got['last_phone'])
+    check(len(got['frames']) == nframes and lp.pop('held', None) in (True, False)
+          and lp == {'kind': 'phone', 'optout': True}, 'nothing but "held" is read after opt-out')
     open(prox, 'w').write('open')
 
     # 4) wipe
@@ -138,4 +140,5 @@ async def main():
     print('FAILED' if check.failed else 'ALL PASSED')
     sys.exit(1 if check.failed else 0)
 
-asyncio.run(main())
+if __name__ == "__main__":  # a script, not a pytest module (it exits with a status)
+    asyncio.run(main())
