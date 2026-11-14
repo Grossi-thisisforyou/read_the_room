@@ -63,7 +63,7 @@ def test_status_reports_the_soc_temperature(tmp_path):
 def test_handheld_chatter_next_to_the_plinth_does_not_start_visits():
     """The N900 agent's own 'presence' mixes in voice (0.7) and camera motion.
     In handheld mode it used to win outright, so a chatty lounge started visit
-    after visit with nobody touching the phone (seen in soak: idle never held)."""
+    after visit with nobody touching the phone."""
     clock = [0.0]
     eng = Engine(load(None), clock=lambda: clock[0])
     assert eng.mode == "handheld"
