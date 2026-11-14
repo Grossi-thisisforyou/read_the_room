@@ -41,8 +41,20 @@ def encode(msg: dict) -> str:
     return json.dumps(msg, separators=(",", ":"), allow_nan=False)
 
 
-def decode(raw: str | bytes) -> dict:
-    """Parse and sanity-check one message. Raises BadMessage."""
+def _no_constants(name: str) -> Any:
+    # Python's json accepts NaN / Infinity; they would poison every later encode()
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def _finite_float(text: str) -> float:
+    v = float(text)
+    if v != v or v in (float("inf"), float("-inf")):   # 1e999 overflows to inf
+        raise ValueError("number out of range")
+    return v
+
+
+def loads(raw: str | bytes) -> Any:
+    """Strict JSON from untrusted input: size-capped, no NaN/Infinity, no stack-busting nesting."""
     if isinstance(raw, (bytes, bytearray)):
         if len(raw) > MAX_MESSAGE_BYTES:
             raise BadMessage("message too large")
@@ -50,9 +62,18 @@ def decode(raw: str | bytes) -> dict:
     elif len(raw) > MAX_MESSAGE_BYTES:
         raise BadMessage("message too large")
     try:
-        msg = json.loads(raw)
-    except (ValueError, TypeError) as e:
-        raise BadMessage(f"not JSON: {e}") from None
+        return json.loads(raw, parse_constant=_no_constants, parse_float=_finite_float)
+    except (ValueError, TypeError, RecursionError) as e:
+        raise BadMessage(f"not JSON: {str(e)[:80]}") from None
+
+
+def decode(raw: str | bytes) -> dict:
+    """Parse and sanity-check one message. Raises BadMessage."""
+    return check(loads(raw))
+
+
+def check(msg: Any) -> dict:
+    """Sanity-check one already-parsed envelope. Raises BadMessage."""
     if not isinstance(msg, dict) or not isinstance(msg.get("type"), str):
         raise BadMessage("needs an object with a string 'type'")
     data = msg.get("data", {})
@@ -60,17 +81,20 @@ def decode(raw: str | bytes) -> dict:
         data = {}
     if not isinstance(data, dict):
         raise BadMessage("'data' must be an object")
-    ts = msg.get("ts")
-    if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+    ts = num(msg.get("ts"), -1.0, None, None)
+    if ts < 0:
         ts = time.time()
-    return {"type": msg["type"], "ts": float(ts), "data": data}
+    return {"type": msg["type"], "ts": ts, "data": data}
 
 
 def num(value: Any, default: float = 0.0, lo: float | None = 0.0, hi: float | None = 1.0) -> float:
     """Read a number from untrusted input, clamped; default if missing or junk."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return default
-    v = float(value)
+    try:
+        v = float(value)
+    except OverflowError:       # a 400-digit integer from the network
+        return default
     if v != v or v in (float("inf"), float("-inf")):
         return default
     if lo is not None and v < lo:
