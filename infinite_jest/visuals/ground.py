@@ -122,6 +122,7 @@ def build_ground(W, H, spec, tooth=None):
     yield
     rgb = np.clip(arr, 0, 255).astype(np.uint8)
     tooth = tooth if tooth is not None and tooth.shape == (W, H) else brush.make_tooth(W, H, spec.get("seed", 0) + 5)
+    yield
     # big visible strokes across the field: same paint, a shade off
     nb = int(6 + 14 * busy)
     for chunk in range(2):

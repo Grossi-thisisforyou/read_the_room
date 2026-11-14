@@ -35,7 +35,7 @@ import numpy as np
 import pygame
 
 from . import bankimg, brush, ground, palettes, scenes, scrawl
-from .corpus import WallText
+from .corpus import BLOCK as _BLOCK, WallText
 from .figure import Figure, flesh_lut, flesh_luts, ghost_body  # noqa: F401 (flesh_lut kept for callers)
 
 HOOKS = ("flesh", "scrawl", "inverted", "mirror", "void")
@@ -46,7 +46,7 @@ LEX_TENDER = ["MADE FOR YOU", "STAY", "ONLY YOU", "WE SAW YOU", "YOURS", "TAILOR
               "KEEP LOOKING", "WE LIKE THIS ONE", "SOFT TARGET"]
 LEX_COLD = ["DATA", "PROFILE", "SUBJECT", "HARVEST", "SCORE", "PREDICTED", "CONSENT",
             "SAMPLE", "OPTED IN", "TARGET", "RETAINED", "LEAKED", "SEGMENT", "HOOKED",
-            "INVENTORY", "PROPERTY OF", "MONETIZE", "NO NAME", "BEHAVIOUR"]
+            "INVENTORY", "RAW MATERIAL", "PROPERTY OF", "MONETIZE", "NO NAME", "BEHAVIOUR"]
 LEX_JEST = ["INFINITE", "JEST", "ENTERTAINMENT", "LOOP", "MORE", "AGAIN", "ONE MORE",
             "THE ENTERTAINMENT", "DONT LOOK AWAY", "PLEASURE"]
 LEX_IDLE = ["NOBODY", "WAITING", "EMPTY ROOM", "NEXT", "COME IN", "WE ARE READY"]
@@ -192,6 +192,8 @@ class Visuals:
         self.lut_key = None
         self.bank_dir = config.get("bank_dir")
         self.bank_max = int(config.get("bank_max_per_hook", 40))
+        self.bank_reload_s = float(config.get("bank_reload_s", 600))
+        self.bank_loader = bankimg.Loader()
         self.bank = self._load_bank(self.bank_dir)
         self.bank_loaded = time.monotonic()
         self.corpus = WallText(config)
@@ -205,6 +207,14 @@ class Visuals:
                       stroke_rate=0.0, flicker=0.0, glitch=0.0, scale=1.0, ground_lum=1.0,
                       mark_rate=0.3, jitter=0.35, text_fade=0.996, scan=0.0, hinge=0.0, reveal=0.0)
         self.hook = "flesh"
+        self.hook_req, self.hook_req_t = "flesh", 0.0
+        self.hook_hold_s = _num(config.get("hook_hold_s", 6.0), 6.0)
+        self.min_scene_s = _num(config.get("min_scene_s", 20.0), 20.0)
+        self.hook_fade_s = _num(config.get("hook_fade_s", 2.5), 2.5)
+        self._hook_force = False
+        self._hold_flip = False
+        self._hold_phase, self._hold_vid = "idle", None
+        self.scene_t = 0.0
         self.phase = "idle"
         self.pt = 0.0
         self.inten = 0.4
@@ -344,8 +354,10 @@ class Visuals:
         self.extra_words = []
         self.main = None
         self.wipe_t = self.t
-        if time.monotonic() - self.bank_loaded > 600:  # pick up new overnight images and words
-            self.bank = self._load_bank(self.bank_dir)
+        if time.monotonic() - self.bank_loaded > self.bank_reload_s:  # pick up new overnight images and words
+            # on a background thread, reading only new files; swapped in by _render
+            self.bank_loader.start(self._bank_path(), self._bank_size(), self.bank_max, self.H,
+                                   getattr(self.bank, "cache", {}))
             self.corpus.reload(self.config)
             self.bank_loaded = time.monotonic()
 
@@ -369,6 +381,9 @@ class Visuals:
         self.frame_ms = self.frame_ms * 0.9 + (time.perf_counter() - t0) * 100
 
     def _render(self, surface, dt):
+        nb = self.bank_loader.poll()
+        if nb is not None:              # a background reload finished: the next scene uses it
+            self.bank = nb
         self._update_params(dt)
         self._camera(dt)
         self._schedule(dt)
@@ -411,7 +426,7 @@ class Visuals:
         if hook not in HOOKS:
             # unknown hook name: a stable choice among the five so it is never blank
             hook = HOOKS[zlib.crc32(str(hook).encode()) % 4]
-        self.hook = hook
+        hook = self.hook = self._hold_hook(hook, phase, pt)
         pal = s.get("palette")
         name = palettes.pick_for(oc, hook)
         try:
@@ -470,9 +485,33 @@ class Visuals:
             self.p[key] = _lerp(self.p[key], v, rate)
         self.oc, self.phase, self.pt, self.inten = oc, phase, pt, inten
 
+    def _hold_hook(self, req, phase, pt):
+        """Hysteresis on the hook: the profiler sometimes flips its guess every
+        few seconds, and every flip was a scene cut. During hook and release a
+        new hook takes over only once it has been asked for continuously for
+        hook_hold_s and the current scene has been up for min_scene_s, unless
+        the phase just changed (or is less than 2 s old), a new visitor came,
+        or a shake or a phone flip forces a cut."""
+        if req != self.hook_req:
+            self.hook_req, self.hook_req_t = req, self.t
+        flip = self.steer_flip != self._hold_flip
+        self._hold_flip = self.steer_flip
+        force, self._hook_force = self._hook_force or flip, False
+        new_phase = phase != self._hold_phase or self.visitor != self._hold_vid
+        self._hold_phase, self._hold_vid = phase, self.visitor
+        if req == self.hook:
+            return req
+        if phase not in ("hook", "release") or new_phase or pt < 2.0 or force:
+            return req
+        if (self.t - self.hook_req_t >= self.hook_hold_s
+                and self.t - self.scene_t >= self.min_scene_s):
+            return req
+        return self.hook
+
     def _on_shake(self):
         """A shake: glitch burst, a scatter of data, and a cut to the next scene."""
         self.shake_t = self.t
+        self._hook_force = True
         if self.phase == "hook":
             self.rotation += 1
             self.next_rotation = self.pt + 30 + self.rng.uniform(0, 15)
@@ -565,18 +604,57 @@ class Visuals:
             spec = dict(sc["ground"])
             spec["pal"] = pal
             spec["seed"] = zlib.crc32(repr(want).encode()) & 0xffff
-            gen = ground.build_ground(self.W + 2 * self.M, self.H + 2 * self.M, self._ground_spec(spec), None)
+            gen = self._prepare(want, sc, pal, spec)
             self.pending = (want, sc, pal, gen)
         if self.pending is not None:
             want, sc, pal, gen = self.pending
+            # one step per frame; after a shake, as many as fit in ~5 ms (the
+            # whole scene at once took 60-90 ms: a visible hitch on the cut)
+            budget = 0.005 if self._trans_mode_now() == "cut" else 0.0
+            t0 = time.perf_counter()
             try:
-                next(gen)
-                if self._trans_mode_now() == "cut":  # a shake does not wait
-                    while True:
-                        next(gen)
+                while True:
+                    next(gen)
+                    if time.perf_counter() - t0 >= budget:
+                        break
             except StopIteration as e:
                 self.pending = None
                 self._install(want, sc, pal, e.value)
+
+    def _prepare(self, key, sc, pal, spec):
+        """Everything a new scene needs, a slice per frame: the ground (itself
+        a generator), the library underpainting and cutout, the glaze, the
+        light pool and the props. Returns the pieces for _install."""
+        surf = yield from ground.build_ground(self.W + 2 * self.M, self.H + 2 * self.M, self._ground_spec(spec), None)
+        out = dict(surf=surf, cut=None)
+        hook = key[0] if key[0] in HOOKS else None
+        rb = random.Random(zlib.crc32(repr(key).encode()) + 11)
+        bank = self.bank
+        if hook and bank:
+            # one underpainting per scene (seeded by its key): never re-picked frame to frame
+            img = bank.pick("under", hook, self.pal_name, rb)
+            if img is not None:
+                img = img if img.get_size() == surf.get_size() else bankimg.crop_fill(img, surf.get_size())
+                img.set_alpha(55)
+                surf.blit(img, (0, 0))
+            yield
+            cut = bank.pick("cut", hook, self.pal_name, rb)
+            if cut is not None:
+                out["cut"] = self._paint_cut(cut, pal, rb.randrange(1 << 16))
+                yield
+        r = random.Random(zlib.crc32(repr(key).encode()) + 3)
+        out["glaze"] = ground.glaze(surf, r.choice([-24, -16, 16, 24]), 1.15)
+        out["glaze_period"] = r.uniform(40, 90)
+        yield
+        lc = palettes.mix(pal[3], pal[4], 0.5)
+        out["light"] = ground.light_pool(int(self.H * 0.45), [c * 0.14 for c in lc])
+        props = []
+        for pd in sc.get("props", []):
+            yield
+            w = pd["w"] * self.W; h = pd["h"] * self.H
+            props.append((pd, ground.build_prop(pd["kind"], w, h, pal, r.randrange(1000))))
+        out["props"] = props
+        return out
 
     def _trans_mode_now(self):
         return getattr(self, "_trans_mode", None)
@@ -599,49 +677,36 @@ class Visuals:
 
     def _install_now(self, key, sc, pal):
         spec = dict(sc["ground"]); spec["pal"] = pal; spec["seed"] = 1
-        gen = ground.build_ground(self.W + 2 * self.M, self.H + 2 * self.M, self._ground_spec(spec), None)
-        surf = None
+        gen = self._prepare(key, sc, pal, spec)
+        prep = None
         try:
             while True:
                 next(gen)
         except StopIteration as e:
-            surf = e.value
-        self._install(key, sc, pal, surf, transition=False)
+            prep = e.value
+        self._install(key, sc, pal, prep, transition=False)
 
-    def _install(self, key, sc, pal, surf, transition=True):
+    def _install(self, key, sc, pal, prep, transition=True):
         if transition and self.scene is not None:
             self.snap = self.low.copy()
             mode = self._trans_mode_now() or random.Random(zlib.crc32(repr(key).encode())).choice(
                 ["fade", "wipe", "drag", "fade", "wipe"])
             dur = {"fade": 1.6, "wipe": 1.4, "drag": 1.2, "cut": 0.5}[mode]
+            old = self.scene_key[0] if self.scene_key else None
+            if mode != "cut" and old in HOOKS and key[0] in HOOKS and old != key[0]:
+                mode, dur = "fade", self.hook_fade_s      # one hook into another: a slow crossfade
             self.trans = (mode, self.t, dur)
         self._trans_mode = None
         self.scene_key = key
+        self.scene_t = self.t
         self.scene = sc
         self.scene_pal = pal
-        hook = key[0] if key[0] in HOOKS else None
-        rb = random.Random(zlib.crc32(repr(key).encode()) + 11)
-        self.scene_cut = None
-        if hook and self.bank:
-            img = self.bank.pick("under", hook, self.pal_name, rb)
-            if img is not None:
-                img = img if img.get_size() == surf.get_size() else bankimg.crop_fill(img, surf.get_size())
-                img.set_alpha(55)
-                surf.blit(img, (0, 0))
-            cut = self.bank.pick("cut", hook, self.pal_name, rb)
-            if cut is not None:
-                self.scene_cut = self._paint_cut(cut, pal, rb.randrange(1 << 16))
-        self.ground_surf = surf
-        r = random.Random(zlib.crc32(repr(key).encode()) + 3)
-        self.glaze_surf = ground.glaze(surf, r.choice([-24, -16, 16, 24]), 1.15)
-        self.glaze_period = r.uniform(40, 90)
-        lc = palettes.mix(pal[3], pal[4], 0.5)
-        self.light = ground.light_pool(int(self.H * 0.45), [c * 0.14 for c in lc])
-        self.props = []
-        for pd in sc.get("props", []):
-            w = pd["w"] * self.W; h = pd["h"] * self.H
-            spr = ground.build_prop(pd["kind"], w, h, pal, r.randrange(1000))
-            self.props.append((pd, spr))
+        self.scene_cut = prep["cut"]
+        self.ground_surf = prep["surf"]
+        self.glaze_surf = prep["glaze"]
+        self.glaze_period = prep["glaze_period"]
+        self.light = prep["light"]
+        self.props = prep["props"]
         self.under.fill((0, 0, 0, 0))
         if key[0] == "idle":
             self.cover.fill((0, 0, 0, 0))
@@ -1224,6 +1289,11 @@ class Visuals:
 
     # ---- words ------------------------------------------------------------
     def _words(self):
+        # the piece's internal names (hooks, palettes) never go on the wall,
+        # whoever sent the words
+        return [w for w in self._words_raw() if not (_BLOCK & set(str(w).upper().split()))]
+
+    def _words_raw(self):
         s = self.state
         sw = s.get("words")
         if isinstance(sw, str):
@@ -1492,79 +1562,174 @@ class Visuals:
         surf.set_alpha(int(255 * a))
         surface.blit(surf, ((self.TW - surf.get_width()) // 2, int(self.TH * 0.62)))
 
+    @staticmethod
+    def _wrap(text, size, max_w):
+        """Word-wrap one line to max_w (scrawl.text_width, with a little slack
+        for the hand jitter); a word longer than a row is split."""
+        lim = max_w * 0.93
+        rows, cur = [], ""
+        for word in text.split():
+            while scrawl.text_width(word, size) > lim and len(word) > 1:
+                n = max(1, int(lim / (size * 0.95)))
+                if cur:
+                    rows.append(cur)
+                    cur = ""
+                rows.append(word[:n])
+                word = word[n:]
+            cand = (cur + " " + word) if cur else word
+            if cur and scrawl.text_width(cand, size) > lim:
+                rows.append(cur)
+                cur = word
+            else:
+                cur = cand
+        if cur or not rows:
+            rows.append(cur)
+        return rows
+
+    def _reveal_layout(self, lines, n_dele, W, H, u):
+        """Rows for the file's lines: wrapped to the card, the font shrunk until
+        the newest lines fit above the deletion notes; the oldest lines drop
+        off the top when even the smallest size cannot hold them all.
+        Returns (size, line height, [(line index, row text)], top)."""
+        top = 170 * u
+        bottom = H - 30 * u - (n_dele * 48 * u + 20 * u if n_dele else 0)
+        avail = W - 130 * u - 40 * u
+        vis = lines[-13:]
+        first = len(lines) - len(vis)
+        size = 34 * u
+        while True:
+            lh = size * 58.0 / 34.0
+            rows = []
+            for i, ln in enumerate(vis):
+                rows += [(first + i, r) for r in self._wrap(ln, size, avail)]
+            if len(rows) * lh <= bottom - top + lh * 0.3 or size <= 18 * u:
+                break
+            size = max(18 * u, size * 0.9)
+        while len(rows) * lh > bottom - top + lh * 0.3 and len(rows) > 1:
+            drop = rows[0][0]                       # the oldest whole line goes
+            rows = [r for r in rows if r[0] != drop] or rows[-1:]
+        return size, lh, rows, top
+
     def _draw_reveal(self, surface, amount):
         """The visitor's file: a hand-ruled record, lines typed in one by one;
-        in wipe, lines are struck out from the bottom, then deletion lines."""
+        in wipe, lines are struck out from the bottom, then deletion lines.
+        Long lines wrap to the card (the font shrinks when they would not fit)
+        and the card stays inside a 5% safe margin of the output."""
         rv = self.state.get("reveal")
         if not isinstance(rv, dict):
             rv = (self.reveal_cache or {}).get("rv") or {}
         u = self.TW / 1920.0
         def _lst(v):
             if isinstance(v, str):
-                return [v]
-            return [_text(x, 60) for x in v] if isinstance(v, (list, tuple)) else []
+                return [_text(v, 240)]
+            return [_text(x, 240) for x in v] if isinstance(v, (list, tuple)) else []
         header = _text(rv.get("header", "FILE"), 40) or "FILE"
         label = _text(rv.get("label", ""), 60)
         lines = _lst(rv.get("lines"))
         total = int(_clamp(_num(rv.get("total"), len(lines)), 0, 999))
         struck = int(_clamp(_num(rv.get("struck")), 0, 999)) if self.phase == "wipe" else 0
-        dele = _lst(rv.get("wipe")) if self.phase == "wipe" else []
-        key = (header, label, tuple(lines[:-1]), total, struck, tuple(dele))
+        dele = _lst(rv.get("wipe"))[:4] if self.phase == "wipe" else []
+        key = (header, label, tuple(lines[:-1]), lines[-1] if lines else None, total, struck, tuple(dele))
         pal = self.scene_pal
         paper = tuple(int(c) for c in palettes.mix(pal[4], (236, 232, 222), 0.6))
         ink = (26, 22, 24)
         red = tuple(int(c) for c in palettes.mix(pal[3], (170, 30, 30), 0.6))
-        W, H = int(1180 * u), int(940 * u)
-        size = 34 * u
-        lh = 58 * u
+        W = int(min(1180 * u, self.TW * 0.9))
+        H = int(min(940 * u, self.TH * 0.9))
+        lw = max(2, int(3 * u))
+        tx = 130 * u
+        right = W - 40 * u                          # nothing is written past this
         if self.reveal_cache is None or self.reveal_cache.get("key") != key:
             rr = random.Random(zlib.crc32(header.encode()))
+            size, lh, rows, top = self._reveal_layout(lines, len(dele), W, H, u)
             s = pygame.Surface((W, H))
             s.fill(paper)
+            boxes = []
             # hand-ruled lines and a margin
-            for i in range(14):
-                y = 170 * u + i * lh
-                pygame.draw.line(s, palettes.mix(paper, (120, 140, 170), 0.45), (30 * u, y + rr.uniform(-1, 1)), (W - 30 * u, y + rr.uniform(-2, 2)), max(1, int(2 * u)))
+            y = top
+            while y < H - 30 * u:
+                pygame.draw.line(s, palettes.mix(paper, (120, 140, 170), 0.45), (30 * u, y + rr.uniform(-1, 1)),
+                                 (W - 30 * u, y + rr.uniform(-2, 2)), max(1, int(2 * u)))
+                y += lh
             pygame.draw.line(s, red, (110 * u, 20 * u), (112 * u + rr.uniform(-2, 2), H - 20 * u), max(1, int(2 * u)))
-            scrawl.draw_text(s, header, 130 * u, 22 * u, 48 * u, ink, rr, 0.15, max(3, int(4 * u)))
+            count = "%d/%d" % (len(lines), max(total, len(lines)))
+            csize = scrawl.fit_size(count, 40 * u, 240 * u)
+            cx = right - scrawl.text_width(count, csize) * 1.06
+            boxes.append(scrawl.draw_text(s, header, tx, 22 * u, scrawl.fit_size(header, 48 * u, (cx - 30 * u - tx) * 0.93),
+                                          ink, rr, 0.15, max(3, int(4 * u))))
             if label:
-                scrawl.draw_text(s, label, 130 * u, 84 * u, scrawl.fit_size(label, 26 * u, W - 330 * u), red, rr, 0.15, max(2, int(3 * u)))
-            done = lines[:-1] if lines else []
-            for i, ln in enumerate(done[-12:]):
-                bb = scrawl.draw_text(s, ln[:46], 130 * u, 170 * u + i * lh - size * 1.05, size, ink, rr, 0.18, max(2, int(3 * u)))
-                if struck and i >= len(done[-12:]) + (1 if lines else 0) - struck:
+                boxes.append(scrawl.draw_text(s, label, tx, 84 * u, scrawl.fit_size(label, 26 * u, (right - tx) * 0.93),
+                                              red, rr, 0.15, lw))
+            n_struck_from = len(lines) - struck          # lines at or after this index are struck
+            newest = len(lines) - 1
+            for j, (li, row) in enumerate(rows):
+                if li == newest:
+                    continue                             # typed in per frame below
+                bb = scrawl.draw_text(s, row, tx, top + j * lh - size * 1.05, size, ink, rr, 0.18, lw)
+                boxes.append(bb)
+                if struck and li >= n_struck_from:
                     scrawl.cross_out(s, bb, red, rr, max(3, int(4 * u)), mode="bar")
-            for j, ln in enumerate(dele[:4]):
-                scrawl.draw_text(s, ln[:46], 130 * u, H - 210 * u + j * 48 * u, 28 * u, red, rr, 0.2, max(2, int(3 * u)))
-            self.reveal_cache = dict(key=key, surf=s, rv=rv, t_last=self.t, last=lines[-1] if lines else "")
+            for j, ln in enumerate(dele):
+                ds = scrawl.fit_size(ln, 28 * u, (right - tx) * 0.93)
+                boxes.append(scrawl.draw_text(s, ln, tx, H - 30 * u - (len(dele) - j) * 48 * u, ds, red, rr, 0.2, lw))
+            boxes.append(scrawl.draw_text(s, count, cx, 44 * u, csize, red, rr, 0.12, lw))
+            self.reveal_cache = dict(key=key, surf=s, rv=rv, t_last=self.t, last=lines[-1] if lines else "",
+                                     layout=(size, lh, rows, top), boxes=boxes)
         c = self.reveal_cache
         if (lines[-1] if lines else "") != c.get("last"):
             c["last"] = lines[-1] if lines else ""
             c["t_last"] = self.t
-        s = c["surf"].copy() if lines else c["surf"]
+        boxes = list(c["boxes"])
         rr = random.Random(len(lines))
-        if lines:
-            # the newest line types itself out
+        size, lh, rows, top = c["layout"]
+        newest = len(lines) - 1
+        n = 999 if self.phase == "wipe" else int((self.t - c["t_last"]) * 28) + 1
+        if lines and n >= sum(len(r) + 1 for li, r in rows if li == newest) and "full" in c:
+            s, boxes = c["full"]                    # typed out: reuse the finished card
+        elif lines:
+            s = c["surf"].copy()
+            # the newest line types itself out, row by row
             # (in the wipe nothing is added any more: the file is shown whole)
-            n = 999 if self.phase == "wipe" else int((self.t - c["t_last"]) * 28) + 1
-            i = min(len(lines) - 1, 12)
-            bb = scrawl.draw_text(s, lines[-1][:min(n, 46)], 130 * u, 170 * u + i * lh - size * 1.05, size, ink, rr, 0.18, max(2, int(3 * u)))
-            if struck and len(lines) <= 13 and struck >= 1:
-                scrawl.cross_out(s, bb, red, rr, max(3, int(4 * u)), mode="bar")
-            if n < len(lines[-1]) and int(self.t * 3) % 2 == 0:
-                pygame.draw.line(s, ink, (bb.right + 6 * u, bb.top + 4 * u), (bb.right + 6 * u, bb.bottom - 4 * u), max(2, int(3 * u)))
-        scrawl.draw_text(s, "%d/%d" % (len(lines), max(total, len(lines))), W - 190 * u, 44 * u, 40 * u, red, rr, 0.12, max(2, int(3 * u)))
+            typed = n >= sum(len(r) + 1 for li, r in rows if li == newest)
+            bb = None
+            for j, (li, row) in enumerate(rows):
+                if li != newest or n <= 0:
+                    continue
+                part = row[:n]
+                n -= len(row) + 1
+                bb = scrawl.draw_text(s, part, tx, top + j * lh - size * 1.05, size, ink, rr, 0.18, lw)
+                boxes.append(bb)
+                if struck >= 1:
+                    scrawl.cross_out(s, bb, red, rr, max(3, int(4 * u)), mode="bar")
+            if bb is not None and n < 0 and int(self.t * 3) % 2 == 0:
+                cx = min(bb.right + 6 * u, right)
+                pygame.draw.line(s, ink, (cx, bb.top + 4 * u), (cx, bb.bottom - 4 * u), lw)
+            if typed:
+                c["full"] = (s, boxes)
+        else:
+            s = c["surf"]
         a = int(255 * _clamp(amount * 1.2))
         s.set_alpha(a)
         x = int(self.TW * 0.5 - W / 2 + (self.TW * 0.18 if self.main is not None and self.main.cx < self.W * 0.45 else -self.TW * 0.12 if self.main is not None and self.main.cx > self.W * 0.55 else 0))
-        surface.blit(s, (x, int((self.TH - H) / 2)))
+        y = int((self.TH - H) / 2)
+        mx, my = int(math.ceil(self.TW * 0.05)), int(math.ceil(self.TH * 0.05))
+        x = max(mx, min(self.TW - mx - W, x))
+        y = max(my, min(self.TH - my - H, y))
+        self.reveal_rect = pygame.Rect(x, y, W, H)
+        self.reveal_boxes = boxes                  # card-local text boxes (tests check they stay on the card)
+        surface.blit(s, (x, y))
 
     def _load_bank(self, path):
         """Optional overnight images (bank/<hook>/ and its derived/ versions):
         faint underpainting in the grounds, and painted cutout figures for
         collage and as a stand-in when the camera is missing. See bankimg.py."""
-        path = path or os.path.join(os.path.dirname(__file__), "bank")
         try:
-            return bankimg.Bank(path, (self.W + 2 * self.M, self.H + 2 * self.M), self.bank_max, fig_h=self.H)
+            return bankimg.Bank(self._bank_path(path), self._bank_size(), self.bank_max, fig_h=self.H)
         except Exception:
             return bankimg.Bank(None, (1, 1))
+
+    def _bank_path(self, path=None):
+        return path or self.bank_dir or os.path.join(os.path.dirname(__file__), "bank")
+
+    def _bank_size(self):
+        return (self.W + 2 * self.M, self.H + 2 * self.M)
