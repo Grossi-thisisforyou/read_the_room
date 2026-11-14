@@ -1,0 +1,579 @@
+{
+ "_about": "Either/or prompts for the N900, same shape as profiler/prompts.json (id, ask, options, traits, counterpart) so the profiler can load this file instead. Ask lines are lowercase, no question mark: the phone shows the two options as its two halves. Trait nudges are design choices, not validated items; 'counterpart' names the real-world move each prompt restages. The first five keep the profiler's ids and nudges. 'pace' says which visitors the prompt suits: any, fast (E+), slow (E-). 'risk' marks prompts Baby may want to cut.",
+ "prompts": [
+  {
+   "id": "closer",
+   "ask": "look closer or look away",
+   "options": [
+    "closer",
+    "away"
+   ],
+   "traits": [
+    {
+     "O": 0.3,
+     "E": 0.2
+    },
+    {
+     "N": 0.3,
+     "O": -0.1
+    }
+   ],
+   "pace": "any",
+   "counterpart": "the personality quiz as bait: a harmless choice that is really a measurement"
+  },
+  {
+   "id": "scream",
+   "ask": "the noise or the silence",
+   "options": [
+    "the noise",
+    "the silence"
+   ],
+   "traits": [
+    {
+     "O": 0.2,
+     "N": 0.2,
+     "E": 0.2
+    },
+    {
+     "C": 0.2,
+     "E": -0.3
+    }
+   ],
+   "pace": "any",
+   "counterpart": "a like on a page: taste as a proxy for personality"
+  },
+  {
+   "id": "seen",
+   "ask": "do you want to be",
+   "options": [
+    "seen",
+    "forgotten"
+   ],
+   "traits": [
+    {
+     "E": 0.4,
+     "N": -0.1
+    },
+    {
+     "E": -0.3,
+     "N": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "self-report items in the myPersonality app"
+  },
+  {
+   "id": "upside",
+   "ask": "turn the world",
+   "options": [
+    "upside down",
+    "right way up"
+   ],
+   "traits": [
+    {
+     "O": 0.4,
+     "C": -0.2
+    },
+    {
+     "C": 0.3,
+     "O": -0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "abstract versus representational art preference, a known Openness marker"
+  },
+  {
+   "id": "secret",
+   "ask": "tell me a secret or keep it",
+   "options": [
+    "tell",
+    "keep"
+   ],
+   "traits": [
+    {
+     "A": 0.2,
+     "E": 0.2,
+     "O": 0.1
+    },
+    {
+     "A": -0.1,
+     "N": 0.1,
+     "C": 0.1
+    }
+   ],
+   "pace": "slow",
+   "counterpart": "disclosure as data: what you volunteer is the most valuable signal. Only the length is kept, never the text."
+  },
+  {
+   "id": "louder",
+   "ask": "louder or quieter",
+   "options": [
+    "louder",
+    "quieter"
+   ],
+   "traits": [
+    {
+     "E": 0.3
+    },
+    {
+     "E": -0.3
+    }
+   ],
+   "pace": "any",
+   "counterpart": "stimulation seeking, the oldest marker of Extraversion"
+  },
+  {
+   "id": "stay",
+   "ask": "stay or go",
+   "options": [
+    "stay",
+    "go"
+   ],
+   "traits": [
+    {
+     "A": 0.2
+    },
+    {
+     "A": -0.1,
+     "E": 0.1
+    }
+   ],
+   "pace": "any",
+   "counterpart": "retention: every platform's real question"
+  },
+  {
+   "id": "first",
+   "ask": "first or last",
+   "options": [
+    "first",
+    "last"
+   ],
+   "traits": [
+    {
+     "E": 0.2,
+     "C": -0.1
+    },
+    {
+     "C": 0.2,
+     "E": -0.2
+    }
+   ],
+   "pace": "fast",
+   "counterpart": "a forced ranking that feels like a joke and is scored like a survey"
+  },
+  {
+   "id": "map",
+   "ask": "a map or a maze",
+   "options": [
+    "map",
+    "maze"
+   ],
+   "traits": [
+    {
+     "C": 0.3
+    },
+    {
+     "O": 0.3,
+     "C": -0.1
+    }
+   ],
+   "pace": "any",
+   "counterpart": "need for structure, scored from one picture choice"
+  },
+  {
+   "id": "door",
+   "ask": "the door or the window",
+   "options": [
+    "door",
+    "window"
+   ],
+   "traits": [
+    {
+     "C": 0.2,
+     "O": -0.1
+    },
+    {
+     "O": 0.2
+    }
+   ],
+   "pace": "slow",
+   "counterpart": "projective tests dressed as small talk"
+  },
+  {
+   "id": "copy",
+   "ask": "the original or the copy",
+   "options": [
+    "original",
+    "copy"
+   ],
+   "traits": [
+    {
+     "C": 0.1,
+     "O": -0.1
+    },
+    {
+     "O": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "authenticity questions used to sort consumers by taste"
+  },
+  {
+   "id": "known",
+   "ask": "be known or be liked",
+   "options": [
+    "known",
+    "liked"
+   ],
+   "traits": [
+    {
+     "O": 0.1,
+     "A": -0.2
+    },
+    {
+     "A": 0.3,
+     "E": 0.1
+    }
+   ],
+   "pace": "slow",
+   "counterpart": "values items borrowed from marketing segmentation"
+  },
+  {
+   "id": "rules",
+   "ask": "rules or exceptions",
+   "options": [
+    "rules",
+    "exceptions"
+   ],
+   "traits": [
+    {
+     "C": 0.3
+    },
+    {
+     "C": -0.2,
+     "O": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "a Conscientiousness item with the questionnaire removed"
+  },
+  {
+   "id": "crowd",
+   "ask": "the crowd or the corner",
+   "options": [
+    "crowd",
+    "corner"
+   ],
+   "traits": [
+    {
+     "E": 0.4
+    },
+    {
+     "E": -0.4
+    }
+   ],
+   "pace": "any",
+   "counterpart": "the classic party question from every introvert quiz"
+  },
+  {
+   "id": "watch",
+   "ask": "watch or be watched",
+   "options": [
+    "watch",
+    "be watched"
+   ],
+   "traits": [
+    {
+     "E": -0.2,
+     "O": 0.1
+    },
+    {
+     "E": 0.3
+    }
+   ],
+   "pace": "any",
+   "counterpart": "the room asking you to consent to what it is already doing"
+  },
+  {
+   "id": "now",
+   "ask": "now or later",
+   "options": [
+    "now",
+    "later"
+   ],
+   "traits": [
+    {
+     "C": -0.2,
+     "E": 0.1
+    },
+    {
+     "C": 0.2
+    }
+   ],
+   "pace": "fast",
+   "counterpart": "delay discounting, measured in one tap"
+  },
+  {
+   "id": "noise",
+   "ask": "noise or signal",
+   "options": [
+    "noise",
+    "signal"
+   ],
+   "traits": [
+    {
+     "O": 0.2,
+     "C": -0.1
+    },
+    {
+     "C": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "taste for disorder, a marker borrowed from music preference studies"
+  },
+  {
+   "id": "truth",
+   "ask": "a kind lie or the truth",
+   "options": [
+    "kind lie",
+    "truth"
+   ],
+   "traits": [
+    {
+     "A": 0.3
+    },
+    {
+     "A": -0.2
+    }
+   ],
+   "pace": "slow",
+   "counterpart": "an Agreeableness item, and the piece's own question"
+  },
+  {
+   "id": "finish",
+   "ask": "finish it or leave it open",
+   "options": [
+    "finish",
+    "leave it"
+   ],
+   "traits": [
+    {
+     "C": 0.3
+    },
+    {
+     "O": 0.2,
+     "C": -0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "need for closure, scored without asking"
+  },
+  {
+   "id": "hand",
+   "ask": "left or right",
+   "options": [
+    "left",
+    "right"
+   ],
+   "traits": [
+    {},
+    {}
+   ],
+   "pace": "fast",
+   "counterpart": "a meaningless choice. it changes nothing, and still makes the profile feel precise"
+  },
+  {
+   "id": "inside",
+   "ask": "inside or outside",
+   "options": [
+    "inside",
+    "outside"
+   ],
+   "traits": [
+    {
+     "E": -0.2
+    },
+    {
+     "E": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "lifestyle segmentation: homebody versus out every night"
+  },
+  {
+   "id": "sharp",
+   "ask": "sharp or soft",
+   "options": [
+    "sharp",
+    "soft"
+   ],
+   "traits": [
+    {
+     "A": -0.2,
+     "N": -0.1
+    },
+    {
+     "A": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "a taste choice read as temperament"
+  },
+  {
+   "id": "faster",
+   "ask": "faster or slower",
+   "options": [
+    "faster",
+    "slower"
+   ],
+   "traits": [
+    {
+     "E": 0.2,
+     "N": -0.1
+    },
+    {
+     "E": -0.1,
+     "C": 0.1
+    }
+   ],
+   "pace": "fast",
+   "counterpart": "tempo preference, sold to streaming services as mood data"
+  },
+  {
+   "id": "show",
+   "ask": "show me or hide me",
+   "options": [
+    "show me",
+    "hide me"
+   ],
+   "traits": [
+    {
+     "E": 0.3
+    },
+    {
+     "E": -0.2,
+     "N": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "a privacy setting disguised as a game"
+  },
+  {
+   "id": "drive",
+   "ask": "drive or be driven",
+   "options": [
+    "drive",
+    "be driven"
+   ],
+   "traits": [
+    {
+     "C": 0.2,
+     "A": -0.1
+    },
+    {
+     "A": 0.2,
+     "C": -0.1
+    }
+   ],
+   "pace": "any",
+   "counterpart": "locus of control, as a two-word quiz"
+  },
+  {
+   "id": "remember",
+   "ask": "remember this or forget it",
+   "options": [
+    "remember",
+    "forget"
+   ],
+   "traits": [
+    {
+     "O": 0.1,
+     "N": 0.1
+    },
+    {
+     "N": -0.1
+    }
+   ],
+   "pace": "slow",
+   "counterpart": "the room asks what it is about to do anyway: it forgets everyone"
+  },
+  {
+   "id": "more",
+   "ask": "more or enough",
+   "options": [
+    "more",
+    "enough"
+   ],
+   "traits": [
+    {
+     "O": 0.2,
+     "E": 0.1
+    },
+    {
+     "C": 0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "the autoplay question, answered for you by default"
+  },
+  {
+   "id": "lights",
+   "ask": "lights on or lights off",
+   "options": [
+    "on",
+    "off"
+   ],
+   "traits": [
+    {
+     "E": 0.2
+    },
+    {
+     "E": -0.2,
+     "O": 0.1
+    }
+   ],
+   "pace": "any",
+   "counterpart": "a mood-board question used to sort people into audiences"
+  },
+  {
+   "id": "again",
+   "ask": "again or never",
+   "options": [
+    "again",
+    "never"
+   ],
+   "traits": [
+    {
+     "O": 0.2,
+     "A": 0.1
+    },
+    {
+     "A": -0.1,
+     "C": 0.1
+    }
+   ],
+   "pace": "any",
+   "counterpart": "a satisfaction survey with no middle"
+  },
+  {
+   "id": "trust",
+   "ask": "known or unknown",
+   "options": [
+    "known",
+    "unknown"
+   ],
+   "traits": [
+    {
+     "A": 0.2,
+     "O": 0.1
+    },
+    {
+     "A": -0.2
+    }
+   ],
+   "pace": "any",
+   "counterpart": "consent, asked after the data was taken"
+  }
+ ]
+}
