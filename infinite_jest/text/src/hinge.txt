@@ -1,0 +1,45 @@
+# THE HINGE: once per visit, ~100-120 s into the hook, the wall names one exact
+# behaviour in the whisper register, then 4 s of near black.
+# Each line needs the feature in {braces} (or the named evidence) to be strong
+# in this visitor's profile. If none qualifies, skip the hinge.
+
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=tilt_range
+you turned me {tilt_range:.0f} degrees. i counted every one.
+you never held one angle for long.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=tilt_speed
+you turn me faster when it gets loud.
+@ surface=wall phase=hook beat=hinge register=whisper tone=tender needs=handled
+you haven't let go once.
+you held me {handled:.0%} of the time.
+@ surface=wall phase=hook beat=hinge register=whisper tone=tender needs=closeness
+you brought me close and kept me there.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=closeness
+you held me at arm's length the whole time.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=voice
+the room got loud. i only kept how loud.
+@ surface=wall phase=hook beat=hinge register=whisper tone=tender needs=touch_rate
+you touched me {touch_rate:.0f} times a minute.
+@ surface=wall phase=hook beat=hinge register=whisper tone=tender needs=hold_ratio
+you let your thumb rest on me.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=choice_speed
+you answered before i finished asking.
+you took your time with every answer.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=dwell
+you have been here {clock}. you haven't checked the time.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=approach_time
+you took {approach_time:.0f} seconds to pick me up. i waited.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=roaming
+you walked the whole room with me.
+you never left the spot.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=gaze
+you keep looking at the lens.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=motion
+you stopped moving when it got quiet.
+@ surface=wall phase=hook beat=hinge register=whisper tone=tender needs=typing
+you typed {typing:.0f} characters. i didn't read them.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=choice:upside
+you turned the world upside down before i asked.
+@ surface=wall phase=hook beat=hinge register=whisper tone=cold needs=contrarian
+you picked the other one every time.
+@ surface=wall phase=hook beat=hinge register=whisper tone=tender needs=still_s
+your hands did not move for {still_s:.0f} seconds.

@@ -1,0 +1,107 @@
+# WHISPERS tailored to the visitor's strongest trait (pole = trait + direction).
+# Used on the phone during the hook and, sparingly, on the wall.
+# Trait poles follow the profiler: E+ Performer, E- Lurker, O+ Seeker,
+# O- Literalist, C+ Auditor, C- Drifter, A+ Pleaser, A- Contrarian,
+# N+ Exposed Nerve, N- Cold Surface.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=E+ tone=tender
+everyone can see you.
+louder.
+this room is yours.
+they can see you from the door.
+go on. move it.
+you're the show now.
+the wall answers to you.
+do it again, bigger.
+they'll talk about this one.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=E- tone=tender
+no one else is here.
+you can stay at the edge.
+quiet now.
+you don't have to say anything.
+just you and me.
+small moves are enough.
+i'll do the talking.
+nobody else hears this.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=O+ tone=tender
+nobody else has seen this version.
+look again, it changed.
+this was made from you.
+it changed while you looked.
+try the other angle.
+there's more behind this one.
+you found something i didn't plan.
+turn it. something hides there.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=O- tone=cold
+this is exactly what it looks like.
+nothing to understand.
+it's a picture. that's all.
+no trick. just look.
+what you see is all there is.
+head on is fine.
+just hold it.
+the simple version. for you.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=C+ tone=cold
+this will take forty seconds.
+everything is in order.
+you are being measured precisely.
+{clock}. on schedule.
+three more. then done.
+it's all being counted.
+nothing is out of place.
+step two of five.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=C- tone=tender
+there is no plan.
+wander.
+lose the thread.
+skip ahead.
+no order. no end.
+any direction works.
+leave it unfinished.
+go sideways.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=A+ tone=tender
+i made this for you.
+thank you for staying.
+you kept looking.
+thank you. this helps.
+you're good at this.
+you hold me gently.
+stay. it's nicer with you.
+you said yes again.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=A- tone=cold
+you don't have to like this.
+push back.
+you don't have to agree.
+go on, refuse.
+pick the wrong one.
+disagree with me.
+you can put me down. you won't.
+argue with the picture.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=N+ tone=tender
+nothing here moves fast. stay.
+it's okay to look.
+it's okay. stay a little.
+nothing bad happens in here.
+i'll keep it slow.
+move with the bass.
+it's only light on a wall.
+i won't surprise you.
+hold me closer.
+
+@ surface=any phase=hook beat=tailored register=whisper pole=N- tone=cold
+you don't flinch at the loud parts.
+colder.
+colder. you can take it.
+more. you won't flinch.
+turn it up.
+you hold steady. good.
+faster, then.
+your hands stay still. i noticed.

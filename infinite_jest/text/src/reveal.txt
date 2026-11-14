@@ -1,0 +1,141 @@
+# THE CONFESSION and THE WIPE. One version of each is picked per visit.
+# Sequences: lines separated by "---" belong to different versions.
+# Every full confession ends on the refrain: it still felt like it knew you.
+
+@ surface=wall phase=release beat=confession register=confession tone=cold kind=sequence
+the machine's confidence: {confidence:.0%}.
+that number measures how much we watched, not how right we are.
+studies find one minute of behaviour predicts personality at about r = .2.
+this room was never tested. it is probably worse.
+companies have sold numbers like these as mind reading.
+it still felt like it knew you.
+---
+everything above is a guess with a number on it.
+the number makes it look like knowledge.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+we did not learn who you are. we learned what kept you here.
+that was enough to keep you here.
+it still felt like it knew you.
+---
+the phone said this was made for you.
+we make one for everyone.
+the scene was chosen because it worked, not because it was true.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+you learned that holding still made words appear.
+we learned that you would hold still.
+that is the whole method.
+it reads behaviour and calls it personality.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+you gave us {seconds:.0f} seconds of behaviour.
+we turned it into five numbers and a name.
+the name sounds like you. it was picked from a list of ten.
+that is how an audience is made.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+some of what the phone said was true. most of it was bait.
+it was tuned to the kind of person we guessed you were.
+if the guess was wrong, it still kept you here.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+we may have read you wrong.
+you would not have noticed. the pictures still worked.
+it did not need to know you to hold you.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+imagine a film so tailored nobody could stop watching.
+this is a small, cheap version of it.
+it had {seconds:.0f} seconds and one phone.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+in 2016 a method like this was sold as mind reading.
+profile, pick the hook, test, adapt.
+it works on attention. it barely works on people.
+our confidence: {confidence:.0%}. studies find about r = .2. this room was never tested.
+it still felt like it knew you.
+---
+Cambridge Analytica sold numbers like these as mind reading.
+the idea was the same. they had likes. we had hands.
+confidence {confidence:.0%}. studies find about r = .2. this room was never tested.
+it is barely better than a guess.
+it still felt like it knew you.
+
+# For a visit shorter than 15 s.
+@ surface=wall phase=release beat=confession.short register=confession tone=cold kind=sequence
+that was {seconds:.0f} seconds.
+it was enough to open a file.
+not enough to guess. we guessed anyway.
+---
+you put it down after {seconds:.0f} seconds.
+that was enough to start a file.
+this one ends here.
+---
+{seconds:.0f} seconds. one gesture. one guess.
+
+# After an opt-out there is no dossier, only this.
+@ surface=wall phase=release beat=confession.optout register=confession tone=tender kind=sequence
+you closed the eye.
+we read nothing after that.
+what we read before is gone too.
+---
+you said no.
+that is the only thing we kept, and only until now.
+
+# THE WIPE: the wall strikes each line, bottom to top, then the last line stands alone.
+@ surface=wall phase=wipe beat=deletion register=confession tone=cold kind=sequence
+deleting evidence.
+deleting scores.
+deleting segment.
+deleting the scene that held you.
+nothing about you was kept.
+---
+this profile is being deleted now.
+it existed for {seconds:.0f} seconds.
+it is gone.
+you were never here.
+---
+delete {vid}.
+done.
+the next one is already waiting.
+nothing about you was kept.
+---
+forgetting how you held it.
+forgetting how close you came.
+forgetting what you chose.
+no picture was taken.
+forgotten.
+---
+we keep counts. not people.
+visitors today: {visits_today}.
+files kept today: 0.
+---
+the room forgets you now.
+it will not recognise you if you come back.
+it never could.
+---
+this profile is being deleted now.
+nothing about you was kept.
+
+@ surface=wall phase=wipe beat=deletion register=confession tone=cold kind=sequence lang=de
+AKTE {vid}
+gelöscht.
+nothing about you was kept.
+---
+gelöscht. deleted.
+nichts gespeichert. nothing kept.
+
+# Keyed to the "seen / forgotten" prompt.
+@ surface=wall phase=wipe beat=deletion register=confession tone=tender kind=sequence needs=choice:seen=forgotten
+you asked to be forgotten.
+you are.
+@ surface=wall phase=wipe beat=deletion register=confession tone=cold kind=sequence needs=choice:seen=seen
+you asked to be seen.
+you were.
+now you are not.

@@ -1,0 +1,54 @@
+# WHEN SOMEONE REFUSES TO PLAY. See ARC.md, "When someone refuses to play".
+
+@ surface=wall phase=hook beat=optout register=log tone=cold
+EYE CLOSED
+NOT READING
+OPTED OUT
+CONSENT WITHDRAWN
+NOTHING TAKEN
+
+@ surface=wall phase=hook beat=optout register=confession tone=tender
+you closed the eye. we stopped.
+what we read before is gone too.
+this part is just for looking.
+
+@ surface=wall phase=idle beat=optout register=log tone=cold
+ONE VISITOR DECLINED
+DECLINED. NOTHING KEPT.
+
+@ surface=wall phase=hook beat=silent register=log tone=cold
+NO ANSWERS. NOTED.
+SILENT SUBJECT
+NO INPUT
+REFUSAL LOGGED
+
+@ surface=phone phase=hook beat=silent register=whisper tone=cold
+fine. i'll just watch.
+no more questions.
+
+@ surface=any phase=hook beat=shake register=whisper tone=tender
+i'm still here.
+that won't make me forget.
+i felt that.
+again, if you want.
+shake it. nothing changes.
+
+@ surface=wall phase=hook beat=shake register=log tone=cold
+IMPACT
+SHOCK {shake:.2f} G
+STILL READING
+
+@ surface=wall phase=hook beat=flip register=log tone=cold
+LEFT UPSIDE DOWN
+ORIENTATION ABANDONED
+@ surface=phone phase=hook beat=flip register=whisper tone=tender
+it's fine. i like it this way.
+
+@ surface=wall phase=hook beat=group register=log tone=cold
+MULTIPLE SUBJECTS
+AVERAGING
+ONE FILE. SEVERAL HANDS.
+@ surface=wall phase=hook beat=group register=confession tone=cold
+you came as a crowd. we read you as one.
+@ surface=phone phase=hook beat=group register=whisper tone=tender
+pass me around. it all counts.
