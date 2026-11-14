@@ -256,6 +256,7 @@ class Profiler:
         self.features.reset()
         self.vision.reset()
         self.bandit.reset()
+        self.last_profile = None
         self.opted_out = True
         self.phase = "opted_out"
         return [msg("profile", ts, {"visitor_id": vid, "phase": "opted_out",
