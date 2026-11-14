@@ -45,6 +45,8 @@ class EMA(object):
 class Sensors(object):
     """Polled at ~20 Hz by the agent. Keeps smoothed, derived features."""
 
+    HANG_S = 45.0   # dead still at an angle this long = hanging on the tether, not held
+
     def __init__(self, root='', paths=None, lux_max=400.0):
         self.paths = {}
         p = paths or PATHS
@@ -57,7 +59,10 @@ class Sensors(object):
         self.jerk = EMA(0.3)        # sample-to-sample change: shake
         self.grav = [0.0, 0.0, -1.0]
         self.light = EMA(0.2)
-        self.held_until = 0.0
+        self.latched = False        # held (see poll)
+        self.move_t = -1e9
+        self.drift_t = -1e9
+        self.ref = None
         self.battery = None
         self.battery_t = -1e9
         self.flat = True
@@ -94,12 +99,28 @@ class Sensors(object):
                 self.flat = (abs(beta) < 12 or abs(beta) > 168) and abs(gamma) < 12
                 shake = clamp(math.sqrt(self.jerk(abs(d))) * 2.2)
                 out['shake'] = round(shake, 3)
-                # Held = moved recently. A hand always trembles a little; a phone
-                # hanging still from its tether or lying on the plinth doesn't,
-                # whatever angle it rests at.
+                # Held is a latch. A pick-up (clear motion) sets it. It stays set
+                # while the phone is off the flat: a still holder trembles below
+                # what the 18 mg accelerometer steps can show, so stillness alone
+                # must not drop it. It drops after 4 s resting flat (or face down),
+                # or after HANG_S with no drift at all at an angle: a phone hanging
+                # dead still from its tether. A hand drifts more than 40 mg in that
+                # time; a hanging phone doesn't.
+                ref = self.ref
+                drift = ref is None or max(abs(x - ref[0]), abs(y - ref[1]), abs(z - ref[2])) > 0.04
+                if drift:
+                    self.ref = (x, y, z)
+                    self.drift_t = t
                 if v > 0.00015 or shake > 0.25:
-                    self.held_until = t + 4.0
-                held = t < self.held_until
+                    self.latched = True
+                    self.move_t = t
+                    self.drift_t = t
+                if self.latched:
+                    if self.flat and t - self.move_t > 4.0:
+                        self.latched = False
+                    elif not self.flat and t - self.drift_t > self.HANG_S:
+                        self.latched = False
+                held = self.latched
                 out['held'] = bool(held)
                 out['_handling'] = clamp(math.sqrt(v) * 20.0)
             except ValueError:
