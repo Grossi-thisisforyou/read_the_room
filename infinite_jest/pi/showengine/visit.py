@@ -57,6 +57,8 @@ class Visit:
     profile_extra: dict[str, Any] = field(default_factory=dict)   # evidence tuples etc. for the reveal
     oracle_words: list[str] = field(default_factory=list)
     dossier: list[str] = field(default_factory=list)
+    dwell: dict[str, float] = field(default_factory=dict)   # seconds each scene was really on, for the reveal
+    dwell_t: float | None = None
 
 
 def clean_ocean(raw: Any) -> dict[str, float] | None:
@@ -201,6 +203,10 @@ class VisitMachine:
     # ---- clock --------------------------------------------------------------
     def tick(self, now: float) -> None:
         c = self.cfg
+        v = self.visit
+        if self.phase == "hook" and v.hook and v.dwell_t is not None:
+            v.dwell[v.hook] = v.dwell.get(v.hook, 0.0) + min(1.0, max(0.0, now - v.dwell_t))
+        v.dwell_t = now
         t = now - self.phase_since
         p = self.phase
         if p == "idle":
@@ -275,6 +281,7 @@ class VisitMachine:
             lst.clear()
         v.hook_params.clear()
         v.profile_extra.clear()
+        v.dwell.clear()
         if v.ocean:
             v.ocean.clear()
         v.ocean, v.confidence, v.reveal = None, 0.0, None

@@ -16,6 +16,7 @@ Standard library only, Python 3.7+.
 
 import json
 import os
+import re
 import random
 import string
 
@@ -296,6 +297,8 @@ class Visit:
                             "n_scenes": p.get("scenes_tried") or 1},
                            surface="wall", beat="scene")
             if sc:
+                words = {1: "one scene", 2: "two scenes", 3: "three scenes", 4: "four scenes", 5: "five scenes"}
+                sc = re.sub(r"\b([1-5]) scenes\b", lambda m: words[int(m.group(1))], sc)
                 lines.append(sc)
             why = self.pick(ctx, surface="wall", beat="why")
             if why:
