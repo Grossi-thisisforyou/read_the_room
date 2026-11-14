@@ -16,7 +16,7 @@ from .fallback_profile import FallbackProfiler
 from .frames import FrameAnalyzer
 from .presence import Presence, PresenceConfig
 from .tilt import Tilt
-from .visit import VisitConfig, VisitMachine
+from .visit import VisitConfig, VisitMachine, visible_text
 
 log = logging.getLogger("showengine")
 
@@ -105,9 +105,9 @@ class Engine:
         elif t == P.ORACLE:
             if role in ("oracle", "profiler") and self.machine.on_oracle(d):
                 self.stats["oracle"] += 1
-                text = d.get("phone_text")
-                if isinstance(text, str) and text.strip():
-                    self.emit(P.make(P.PHONE, {"text": text.strip()[:120]}), {"phone"})
+                text = visible_text(d.get("phone_text"), 120)
+                if text:
+                    self.emit(P.make(P.PHONE, {"text": text}), {"phone"})
         elif t == P.REVEAL:
             if role != "profiler":
                 return

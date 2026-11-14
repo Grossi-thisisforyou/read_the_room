@@ -42,7 +42,7 @@ LINES = {
     ("A", 1): ["we made this for you", "thank you for staying", "you are kind to look"],
     ("A", -1): ["you don't have to like this", "push back", "nobody asked you"],
     ("N", 1): ["you are safe here. stay.", "something is behind you", "it's okay to look"],
-    ("N", -1): ["nothing touches you", "colder", "you are unbothered. we noticed."],
+    ("N", -1): ["nothing touches you", "colder", "you kept still. we noticed."],
 }
 
 

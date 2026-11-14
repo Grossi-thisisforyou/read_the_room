@@ -146,9 +146,12 @@ function handle(m){
     if(Array.isArray(d.palette)&&d.palette.length)S.palette=d.palette.slice(0,8);
     if(typeof d.tempo==="number"&&d.tempo>20&&d.tempo<300)S.tempo=d.tempo;
     if(typeof d.intensity==="number")S.intensity=clamp(d.intensity);
-    if(typeof d.hook==="string"){S.hook=d.hook;$("hook").textContent=d.hook}
+    // hook and scene names are internal: never shown. The strip shows the
+    // engine's visitor-safe words instead.
+    if(typeof d.hook==="string")S.hook=d.hook;
+    if(Array.isArray(d.words))$("hook").textContent=d.words.length?String(d.words[0]).slice(0,40):"";
     S.phase=d.phase||S.phase;S.scene=d.scene||S.scene;
-    $("st-sens").textContent=(S.scene||S.phase||"").toString().slice(0,24);
+    $("st-sens").textContent=(S.phase||"").toString().slice(0,24);
   }else if(m.type==="phone"){
     if(typeof d.text==="string")$("msg").textContent=d.text;
     if(d.ask&&Array.isArray(d.options)&&d.options.length>=2)showChoice(d);
@@ -352,19 +355,20 @@ function wipe(){
 }
 $("enter").addEventListener("click",enter);
 
-/* ---------------- background: smear, crown, pulse ---------------- */
+/* ---------------- background: smear, reticle, pulse ---------------- */
 var cv=$("bg"), cx=cv.getContext("2d"), W=0, H=0, DPR=1, seed=7;
 function rnd(){seed=(seed*16807)%2147483647;return seed/2147483647}
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cx.setTransform(DPR,0,0,DPR,0,0)}
 addEventListener("resize",resize);resize();
 
-function crown(x,y,s,col,j){
-  cx.strokeStyle=col;cx.lineWidth=Math.max(2,s*.05);cx.lineCap="round";cx.lineJoin="round";
+function reticle(x,y,s,col,j){   // targeting ring (no crowns: the sources stay hidden)
+  var cxm=x+s/2, cym=y+s/2, r=s*.38;
+  cx.strokeStyle=col;cx.lineWidth=Math.max(1.5,s*.02);cx.lineCap="round";cx.lineJoin="round";
   cx.beginPath();
-  var pts=[[0,1],[0,.25],[.25,.65],[.5,0],[.75,.65],[1,.25],[1,1],[0,1]];
-  for(var i=0;i<pts.length;i++){var px=x+pts[i][0]*s+(rnd()-.5)*j, py=y+pts[i][1]*s*.7+(rnd()-.5)*j;i?cx.lineTo(px,py):cx.moveTo(px,py)}
+  for(var i=0;i<=18;i++){var a=i/18*6.283, rr=r*(1+(rnd()-.5)*.1);i?cx.lineTo(cxm+Math.cos(a)*rr,cym+Math.sin(a)*rr):cx.moveTo(cxm+Math.cos(a)*rr,cym+Math.sin(a)*rr)}
   cx.stroke();
-  for(i=0;i<3;i++){cx.beginPath();cx.arc(x+[0,.5,1][i]*s+(rnd()-.5)*j,y+[.25,0,.25][i]*s*.7-s*.1,s*.05,0,6.3);cx.stroke()}
+  for(i=0;i<4;i++){var b=i*1.5708;cx.beginPath();cx.moveTo(cxm+Math.cos(b)*r*.55,cym+Math.sin(b)*r*.55);
+    cx.lineTo(cxm+Math.cos(b)*r*1.35+(rnd()-.5)*j,cym+Math.sin(b)*r*1.35+(rnd()-.5)*j);cx.stroke()}
 }
 function scribble(x,y,w,h,col,n){
   cx.strokeStyle=col;cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x,y);
@@ -383,7 +387,7 @@ function draw(t){
   cx.fillStyle="#070605";cx.fillRect(0,0,W,H);
   var base=pal[0]||"#0a0807";
   cx.globalAlpha=S.running?.55+.25*S.intensity:.25;cx.fillStyle=base;cx.fillRect(0,0,W,H);cx.globalAlpha=1;
-  // Bacon-ish smears from the palette
+  // smears from the palette
   var k=S.running?3+Math.round(S.intensity*3):2;
   for(var i=0;i<k;i++){
     var c=pal[(i+1)%pal.length]||"#b3121b";
@@ -391,9 +395,9 @@ function draw(t){
   }
   // beat flash: whole-frame tint in the hottest palette colour
   if(S.running){cx.globalAlpha=pulse*.22;cx.fillStyle=pal[2%pal.length]||"#b3121b";cx.fillRect(0,0,W,H);cx.globalAlpha=1}
-  // Basquiat crown + scribbles
+  // targeting ring + scribbles
   var cs=Math.min(W,H)*(S.running?.22:.3);
-  crown(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
+  reticle(W-cs-18,S.running?H*.62:H*.1+cs*.1,cs,"rgba(236,228,214,"+(S.running?.25+.4*pulse:.75)+")",cs*.06);
   scribble(W*.55,H*(S.running?.08:.3),W*.4,H*.07,"rgba(179,18,27,.5)",9);
   // grain
   cx.fillStyle="rgba(236,228,214,.05)";

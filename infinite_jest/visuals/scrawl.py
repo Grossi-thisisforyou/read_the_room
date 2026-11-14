@@ -7,6 +7,7 @@ and looks hand-made: every letter is wobbled slightly differently each time.
 """
 import math
 import random
+import unicodedata
 
 import pygame
 
@@ -77,8 +78,20 @@ def _polyline(surf, color, pts, width):
         pygame.draw.lines(surf, color, False, pts, width)
 
 
+def fold(text):
+    """Accents off (E for É); anything without a glyph is skipped, never boxed."""
+    t = unicodedata.normalize("NFKD", str(text))
+    return "".join(c for c in t if not unicodedata.combining(c))
+
+
 def text_width(text, size):
-    return len(text) * size * 0.95
+    return len(fold(text)) * size * 0.95
+
+
+def fit_size(text, size, max_w):
+    """Shrink size so the word fits max_w (long words would run off the wall)."""
+    w = text_width(text, size)
+    return size * max_w / w if w > max_w > 0 else size
 
 
 def draw_text(surf, text, x, y, size, color, rng=None, jitter=0.35, width=2, slant=0.0):
@@ -88,13 +101,9 @@ def draw_text(surf, text, x, y, size, color, rng=None, jitter=0.35, width=2, sla
     sc = size / 6.0
     cx = x
     drift = 0.0
-    for ch in text.upper():
+    for ch in fold(text).upper():
         if ch == " ":
             cx += size * 0.7
-            continue
-        if ch == "©":
-            draw_copyright(surf, cx + size * 0.4, y + size * 0.45, size * 0.45, color, rng, width)
-            cx += size * 1.0
             continue
         glyph = _G.get(ch)
         if glyph is None:
@@ -112,17 +121,6 @@ def draw_text(surf, text, x, y, size, color, rng=None, jitter=0.35, width=2, sla
             _polyline(surf, color, pts, width)
         cx += size * (0.95 + rng.uniform(-0.1, 0.15) * jitter)
     return pygame.Rect(int(x), int(y - size * 0.2), int(cx - x), int(size * 1.4))
-
-
-def draw_copyright(surf, cx, cy, r, color, rng, width=2):
-    n = 14
-    pts = []
-    for i in range(n + 2):
-        a = i / n * 2 * math.pi + rng.uniform(-0.1, 0.1)
-        rr = r * (1 + rng.uniform(-0.12, 0.12))
-        pts.append((cx + math.cos(a) * rr, cy + math.sin(a) * rr))
-    _polyline(surf, color, pts, width)
-    draw_text(surf, "C", cx - r * 0.45, cy - r * 0.55, r * 1.1, color, rng, 0.3, max(1, width - 1))
 
 
 def draw_reticle(surf, cx, cy, r, color, rng=None, width=2):
