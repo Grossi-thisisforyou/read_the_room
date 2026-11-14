@@ -141,7 +141,10 @@ class Profiler:
         if not isinstance(data, dict):
             return []
         kind = data.get("kind")
-        if kind == "optout" or data.get("opt_out"):
+        # the N900 sends kind "optout" once, then {"kind": "phone", "optout": true} until the wipe
+        if kind == "optout" or data.get("opt_out") or data.get("optout"):
+            if self.opted_out:
+                return []
             if self.visitor_id is None:
                 self._start(ts)
             return self._opt_out(ts)
