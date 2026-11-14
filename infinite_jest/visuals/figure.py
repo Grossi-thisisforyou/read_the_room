@@ -457,9 +457,14 @@ class Figure:
         # flow field at half resolution: a dominant swipe bent by slow noise;
         # drag zones keep some regions crisp and pull others long
         X2, Y2 = self.X2, self.Y2
+        # X2, Y2 are float32: reduce the time phases mod 2 pi in float64 first.
+        # Added raw, t * 0.6 loses its fraction in float32 after days of uptime
+        # (t = 5 days: the smear moves in uneven steps; 2 weeks: every other
+        # frame is frozen). Same picture, exact.
+        tau = 2 * math.pi
         ang = (swipe_angle
-               + 0.8 * np.sin(X2 * 0.09 + t * 0.6) * np.cos(Y2 * 0.06 - t * 0.37)
-               + 0.5 * np.sin((X2 + Y2) * 0.04 + t * 0.23))
+               + 0.8 * np.sin(X2 * 0.09 + (t * 0.6) % tau) * np.cos(Y2 * 0.06 - (t * 0.37) % tau)
+               + 0.5 * np.sin((X2 + Y2) * 0.04 + (t * 0.23) % tau))
         ox = int(t * 1.0) % (w // 2)
         oy = int(t * 0.7) % (h // 2)
         mag = smear * np.clip(self.dragz2[ox:ox + w // 2, oy:oy + h // 2] * 2.2 - 0.55, 0.08, 1.4)
@@ -571,7 +576,7 @@ def flesh_lut(pal, rawness=0.5, cold=0.0, shadow=None):
 SHADOWS = [
     (52, 26, 78),    # violet bruise
     (30, 72, 62),    # green shadow
-    (96, 20, 42),    # raw meat
+    (96, 20, 42),    # raw red
     (40, 44, 96),    # cold blue
     (74, 52, 30),    # umber
 ]

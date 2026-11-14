@@ -18,8 +18,10 @@ parameters follow their targets over one to two bars; the phone (tilt)
 follows within ~50 ms. Patterns and the personal motif come from an RNG
 seeded by the visitor id, so a given visitor always gets 'their' track.
 """
-import queue
+import os
+import sys
 import threading
+import time
 import zlib
 
 import numpy as np
@@ -112,6 +114,221 @@ def _wrap(semis):
     return s - 12 if s > 6 else s
 
 
+# ------------------------------------------------------------ helper process
+def _helper_init(parent_pid):
+    """Runs in the helper process: yield the CPU to the render loop, and exit
+    if the audio process that started us is gone (killed by the watchdog)."""
+    try:
+        os.nice(5)
+    except (OSError, AttributeError):
+        pass
+
+    def watch():
+        while True:
+            time.sleep(2.0)
+            if os.getppid() != parent_pid:
+                os._exit(0)
+    threading.Thread(target=watch, name="ij-helper-watch", daemon=True).start()
+
+
+def _noop():
+    return True
+
+
+def build_section(g, key, ctx):
+    """One sample-bank section ('k', 'h', 'c', 's' or 't'), as {name: [arrays]}.
+    Module level so the helper process can run it; same result wherever it runs."""
+    ent = {}
+    for name, val in getattr(TechnoSynth, "_build_" + g)(key, ctx):
+        if val is not None and not name[-1].isdigit():
+            ent[name] = val
+    return ent
+
+
+def make_riser(seed, var, n, tension, sps2, salt):
+    rng = np.random.default_rng([seed, var, salt])
+    return V.riser(rng, n, tension=tension, sps=sps2)
+
+
+def _fit_riser(sig, n):
+    """A riser made for a slightly different length: keep its end on the drop.
+    Longer -> drop the (near-silent) start; shorter -> start it later.
+    Returns (signal, start offset)."""
+    m = sig.shape[-1]
+    if m <= n:
+        return sig, n - m
+    out = sig[:, m - n:].copy()
+    e = min(n, 256)
+    out[:, :e] *= np.linspace(0.0, 1.0, e, dtype=np.float32)
+    return out, 0
+
+
+class _Helper:
+    """Slow sample generation (bank sections, risers) in one spawned process.
+
+    Building a section of the sample bank takes 50-200 ms on x86 and two to
+    three times that on a Pi 5; an 8 s riser ~75 ms. Inside render_block that
+    empties the output buffer. A thread is not enough: it holds the GIL while
+    it runs Python between numpy calls, and render_block's many small numpy
+    calls queue up behind it. So a helper process makes them and the render
+    loop keeps playing the samples it has until the new ones arrive. One job
+    runs at a time; a newer request under the same name replaces a queued one.
+    All calls are cheap (no waiting).
+    """
+
+    ORDER = ("riser", "shake", "bank:k", "bank:h", "bank:s", "bank:c", "bank:t")
+
+    def __init__(self):
+        import concurrent.futures as cf
+        import multiprocessing as mp
+        cur = mp.current_process()
+        was_daemon = cur.daemon
+        # The audio child is a daemon process, and multiprocessing refuses to
+        # let a daemon start children. The helper watches its parent and exits
+        # with it (see _helper_init), which is what the flag would guarantee.
+        if was_daemon:
+            cur.daemon = False
+        try:
+            self._ex = cf.ProcessPoolExecutor(1, mp_context=mp.get_context("spawn"),
+                                              initializer=_helper_init, initargs=(os.getpid(),))
+            self._running = ("warmup", None, self._ex.submit(_noop))
+            self._running[2].result(timeout=60)     # the process really starts here
+        finally:
+            if was_daemon:
+                cur.daemon = True
+        self._queued = {}        # name -> (key, fn, args)
+        self._done = {}          # name -> (key, result)
+        self.broken = False
+
+    def submit(self, name, key, fn, *args):
+        self._queued[name] = (key, fn, args)
+        self.poll()
+
+    def poll(self):
+        """Collect a finished job and start the next one."""
+        if self.broken:
+            return
+        if self._running is not None:
+            name, key, fut = self._running
+            if not fut.done():
+                return
+            self._running = None
+            try:
+                res = fut.result()
+            except Exception as e:          # helper died: the synth falls back
+                print("[audio] helper process failed: %r" % (e,), file=sys.stderr)
+                self.broken = True
+                return
+            if name != "warmup":
+                self._done[name] = (key, res)
+        for name in self.ORDER:
+            if name in self._queued:
+                key, fn, args = self._queued.pop(name)
+                try:
+                    self._running = (name, key, self._ex.submit(fn, *args))
+                except Exception:
+                    self.broken = True
+                return
+
+    def take(self, name):
+        """The finished (key, result) for name, or None."""
+        self.poll()
+        return self._done.pop(name, None)
+
+    def pending(self, name):
+        """(key) requested or being made under this name, else None."""
+        if name in self._queued:
+            return self._queued[name][0]
+        if self._running is not None and self._running[0] == name:
+            return self._running[1]
+        return None
+
+    def forget(self):
+        self._queued.clear()
+        self._done.clear()
+
+    def idle(self):
+        self.poll()
+        return self.broken or (not self._queued and self._running is None)
+
+    def close(self):
+        try:
+            self._ex.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+
+class _ThreadHelper:
+    """The same jobs on a background thread: the fallback when no helper
+    process can be started (or it died). Worse for the GIL, better than
+    building inside render_block."""
+
+    ORDER = _Helper.ORDER
+
+    def __init__(self):
+        self._cv = threading.Condition()
+        self._queued = {}
+        self._running = None      # (name, key)
+        self._done = {}
+        self._closed = False
+        self.broken = False
+        threading.Thread(target=self._loop, name="ij-bank", daemon=True).start()
+
+    def _loop(self):
+        while True:
+            with self._cv:
+                while not self._queued and not self._closed:
+                    self._cv.wait()
+                if self._closed:
+                    return
+                name = next(n for n in self.ORDER if n in self._queued)
+                key, fn, args = self._queued.pop(name)
+                self._running = (name, key)
+            try:
+                res = fn(*args)
+            except Exception as e:           # never let a build kill the audio
+                print("[audio] build failed: %r" % (e,), file=sys.stderr)
+                res = None
+            with self._cv:
+                self._running = None
+                if res is not None:
+                    self._done[name] = (key, res)
+
+    def submit(self, name, key, fn, *args):
+        with self._cv:
+            self._queued[name] = (key, fn, args)
+            self._cv.notify()
+
+    def poll(self):
+        pass
+
+    def take(self, name):
+        with self._cv:
+            return self._done.pop(name, None)
+
+    def pending(self, name):
+        with self._cv:
+            if name in self._queued:
+                return self._queued[name][0]
+            if self._running is not None and self._running[0] == name:
+                return self._running[1]
+        return None
+
+    def forget(self):
+        with self._cv:
+            self._queued.clear()
+            self._done.clear()
+
+    def idle(self):
+        with self._cv:
+            return not self._queued and self._running is None
+
+    def close(self):
+        with self._cv:
+            self._closed = True
+            self._cv.notify()
+
+
 class DNA:
     """Per-visitor musical fingerprint (the personal motif), fixed for the visit."""
 
@@ -144,7 +361,7 @@ class DNA:
 
 
 class TechnoSynth:
-    def __init__(self, block=1024, seed=0, volume=0.9, threaded=False, internal=2):
+    def __init__(self, block=1024, seed=0, volume=0.9, threaded=False, internal=2, helper=True):
         # .B is what render_block() returns (1024 frames, the public contract);
         # internally the synth renders `internal` x larger blocks and hands
         # them out in pieces, which halves numpy's per-call overhead.
@@ -176,16 +393,39 @@ class TechnoSynth:
         self.hg = 1.0          # hinge gain (everything except the sub)
         self.slam_due = False
         self.jobs = []
+        self.gen = 0               # bumped at every reset: late results for an older state are dropped
+        self.helper = None
+        self.risers = {}           # "riser"/"shake" -> [job key, signal, unused]
+        self.rvar = 0
         self._reset_musical_state(snap=True, sync=True)
-        # Live: sounds are (re)built on a background thread (numpy's FFTs
-        # release the GIL), so a slow build never delays an audio block.
-        # Offline renders build one sound per block instead (deterministic).
+        # Live: sounds (bank sections, risers) are made by a helper process and
+        # render_block keeps the samples it has until new ones arrive, so a slow
+        # build never delays an audio block (see _Helper). Offline renders build
+        # one sound per block inline instead (deterministic).
         self.threaded = bool(threaded)
         if self.threaded:
-            self._req = queue.Queue()
-            self._done = queue.Queue()
-            self._want = {}
-            threading.Thread(target=self._bank_thread, name="ij-bank", daemon=True).start()
+            self._start_helper(process=bool(helper))
+
+    def _start_helper(self, process=True):
+        old = self.helper
+        self.helper = None
+        if old is not None:
+            old.close()
+        if process:
+            try:
+                self.helper = _Helper()
+            except Exception as e:
+                print("[audio] no helper process (%r); building on a thread" % (e,), file=sys.stderr)
+        if self.helper is None:
+            self.helper = _ThreadHelper()
+        self._queue_bank()
+        self._order_risers()
+
+    def close(self):
+        """Stop the helper (the audio worker calls this when it stops)."""
+        if self.helper is not None:
+            self.helper.close()
+            self.helper = None
 
     # ------------------------------------------------------------------ setup
     def _alloc(self):
@@ -282,7 +522,11 @@ class TechnoSynth:
         if not keep_tails:
             self.mlp.fc_last = None
         self.arr.reset(self.seed)
+        self.gen = getattr(self, "gen", 0) + 1
+        if getattr(self, "helper", None) is not None:
+            self.helper.forget()
         self._queue_bank(sync=sync)
+        self._order_risers()
 
     def _room_seed(self):
         return (seed_for(None, self.user_seed) * 31 + 7919 * self.clock.epoch) & 0x7FFFFFFF
@@ -500,11 +744,16 @@ class TechnoSynth:
     def _queue_bank(self, sync=False):
         want = self._desired_keys()
         ctx = dict(dna=self.dna, mode=self.mode, grit=self.clock.grit)
-        if getattr(self, "threaded", False) and not sync:
+        h = getattr(self, "helper", None)
+        if h is not None and not sync:
+            if h.broken:                     # the helper process died: carry on with a thread
+                self._start_helper(process=False)
+                return
             for g, key in want.items():
-                if self.bank_keys.get(g) != key and self._want.get(g) != key:
-                    self._want[g] = key
-                    self._req.put((g, key, ctx))
+                job = (self.gen, key)
+                if self.bank_keys.get(g) == key or h.pending("bank:" + g) == job:
+                    continue
+                h.submit("bank:" + g, job, build_section, g, key, ctx)
             return
         pending = {j[0]: j[1] for j in self.jobs}
         for g, key in want.items():
@@ -516,33 +765,58 @@ class TechnoSynth:
             while self.jobs:
                 self._run_job(1 << 30)
 
-    def _bank_thread(self):
-        while True:
-            g, key, ctx = self._req.get()
-            if self._want.get(g) != key:
-                continue                     # superseded by a newer request
-            try:
-                ent = {}
-                for name, val in getattr(self, "_build_" + g)(key, ctx):
-                    if val is not None and not name[-1].isdigit():
-                        ent[name] = val
-                self._done.put((g, key, ent))
-            except Exception as e:           # never let a build kill the audio
-                import sys
-                print("[audio] bank build failed: %r" % (e,), file=sys.stderr)
+    # Risers are long noise sweeps (8.5 s: ~75 ms to make on x86). Live, one of
+    # each kind is kept in stock, made ahead by the helper for the current
+    # seed / tension / tempo; when one is played the next one is ordered.
+    def _riser_spec(self, name):
+        bpm = int(round(self.p["bpm"]))
+        sps = SR * 60.0 / bpm / 4.0
+        if name == "riser":
+            tq = round(self.p["N"] * 8) / 8.0
+            return (self.seed, tq, bpm), (int(min(8.5 * SR, 64 * sps)), tq, sps / 2.0, 9)
+        return (self.seed, bpm), (int(16 * sps), 0.6, sps / 2.0, 11)
+
+    def _order_risers(self):
+        h = getattr(self, "helper", None)
+        if h is None or not hasattr(self, "risers"):
+            return
+        for name in ("riser", "shake"):
+            want, (n, tension, sps2, salt) = self._riser_spec(name)
+            cur = self.risers.get(name)
+            if cur is not None and cur[2] and cur[0][0] == want:
+                continue                     # a fresh one for these settings is in stock
+            pend = h.pending(name)
+            if pend is not None and pend[0] == want:
+                continue
+            self.rvar = (self.rvar + 1) & 0xFFFFFF
+            h.submit(name, (want, self.rvar), make_riser, self.seed, self.rvar, n, tension, sps2, salt)
+
+    def _stock_riser(self, name, n):
+        """A riser from stock fitted to n samples, as (signal, offset), or None."""
+        cur = self.risers.get(name)
+        if cur is None:
+            self._order_risers()
+            return None
+        cur[2] = False
+        self._order_risers()
+        return _fit_riser(cur[1], n)
 
     def _run_job(self, budget=1):
-        """Advance the bank builder by `budget` sounds (one per audio block live)."""
-        if getattr(self, "threaded", False):
-            try:
-                while True:
-                    g, key, ent = self._done.get_nowait()
-                    self.bank.update(ent)
-                    self.bank_keys[g] = key
+        """Live: collect what the helper has made. Offline: advance the inline
+        builder by `budget` sounds (one per audio block)."""
+        h = getattr(self, "helper", None)
+        if h is not None:
+            for g in "khsct":
+                got = h.take("bank:" + g)
+                if got is not None and got[0][0] == self.gen:
+                    self.bank.update(got[1])
+                    self.bank_keys[g] = got[0][1]
                     if g == "s":
                         self.tcache = {}
-            except queue.Empty:
-                pass
+            for name in ("riser", "shake"):
+                got = h.take(name)
+                if got is not None:
+                    self.risers[name] = [got[0], got[1], True]
             return
         while self.jobs and budget > 0:
             job = self.jobs[0]
@@ -558,7 +832,8 @@ class TechnoSynth:
                     self.tcache = {}
                 self.jobs.pop(0)
 
-    def _build_k(self, key, ctx):
+    @staticmethod
+    def _build_k(key, ctx):
         s, fam, drive, root, bq = key
         rng = np.random.default_rng([s, 1, int(drive * 4), root, bq, sum(map(ord, fam))])
         bq = bq * 2 + 1
@@ -575,7 +850,8 @@ class TechnoSynth:
         beat = int(SR * 60.0 / (bq * 2 + 1))
         yield "rumble", [V.rumble(rng, k0 / trim, beat, drive=1.4 + drive, cutoff=95.0 + 25.0 * ctx["grit"])]
 
-    def _build_h(self, key, ctx):
+    @staticmethod
+    def _build_h(key, ctx):
         s, kname, Eq, Iq = key
         kit = next(k for k in KITS if k["name"] == kname)
         rng = np.random.default_rng([s, 2, Eq, Iq, sum(map(ord, kname))])
@@ -594,7 +870,8 @@ class TechnoSynth:
         yield "snare", [V.snare(rng, kit["snare"], t) for t in (1.0, 1.12, 1.26)]
         yield "roll", [V.snare(rng, "noise", t, 0.18) for t in (1.0, 1.12, 1.26)]
 
-    def _build_c(self, key, ctx):
+    @staticmethod
+    def _build_c(key, ctx):
         s, Oq, Aq, root = key
         rng = np.random.default_rng([s, 3, Oq, Aq, root])
         d = ctx["dna"]
@@ -622,7 +899,8 @@ class TechnoSynth:
         yield "metal", mets
         yield "swell", [V.swell(rng), V.swell(rng, 2.4)]
 
-    def _build_s(self, key, ctx):
+    @staticmethod
+    def _build_s(key, ctx):
         s, Aq, Nq, Iq, root, mode = key
         rng = np.random.default_rng([s, 4, Aq, Nq, Iq, root])
         Aq, Nq, Iq = Aq / 3.0, Nq / 3.0, Iq / 2.0
@@ -645,7 +923,8 @@ class TechnoSynth:
         toms = [V.tom(rng, float(midi_hz(root + 24 + iv))) for iv in (0, sc[2], sc[4], 12)]
         yield "tom", toms
 
-    def _build_t(self, key, ctx):
+    @staticmethod
+    def _build_t(key, ctx):
         s, root = key
         rng = np.random.default_rng([s, 5])
         ticks = []
@@ -724,6 +1003,7 @@ class TechnoSynth:
         self.bar_t0 = float(self.next_step_at)
         self.bar_len = 16.0 * self.sps()
         self._queue_bank()
+        self._order_risers()
 
         D = Dice(self.seed, plan.groove, plan.bis % plan.loop)
         G = Dice(self.seed, plan.groove)
@@ -1038,8 +1318,15 @@ class TechnoSynth:
                 continue
             if inst == "riser":
                 n = int(min(8.5 * SR, 64 * sps))
-                rng = np.random.default_rng([self.seed, self.vbar, 9])
-                sig = V.riser(rng, n, tension=p["N"], sps=sps / 2.0)
+                if self.helper is not None:          # made ahead, never here
+                    got = self._stock_riser("riser", n)
+                    if got is None:
+                        continue
+                    sig, lag = got
+                    at += lag
+                else:
+                    rng = np.random.default_rng([self.seed, self.vbar, 9])
+                    sig = V.riser(rng, n, tension=p["N"], sps=sps / 2.0)
                 g = 0.3 * self.p["riser"] * self._hookmod("riser")
                 self._add(self.fx, sig, at, (g, g))
                 self._add(self.vsend, sig[0], at, g * 0.3)
@@ -1164,10 +1451,16 @@ class TechnoSynth:
             sps = self.sps()
             div = 4 if e < 0.7 else (8 if e < 0.9 else 16)
             self.stutters.append([b0, b0 + int(sps * (1 + 2 * e)), int(sps / div), None])
-            rng = np.random.default_rng([self.seed, b0 & 0xFFFFFF, 11])
-            sig = V.riser(rng, int(16 * sps), tension=0.6, sps=sps / 2.0)
+            lag = 0
+            if self.helper is not None:              # made ahead, never here
+                got = self._stock_riser("shake", int(16 * sps))
+                sig, lag = got if got is not None else (None, 0)
+            else:
+                rng = np.random.default_rng([self.seed, b0 & 0xFFFFFF, 11])
+                sig = V.riser(rng, int(16 * sps), tension=0.6, sps=sps / 2.0)
             g = 0.22 * e
-            self._add(self.dry, sig, b0 + self.IB, (g, g))
+            if sig is not None:
+                self._add(self.dry, sig, b0 + self.IB + lag, (g, g))
             self.shake_cool = int(16 * sps / self.IB)   # at most once per bar
 
     # ----------------------------------------------------------------- master

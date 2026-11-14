@@ -144,6 +144,8 @@ eng.stop()
 
 The sound runs in its own process, so it never slows down the visuals. If that process ever crashes, a watchdog restarts it after 1 second (then 2, 4 ... up to 30 seconds if it keeps crashing), logs it, and sends it the last show state, so the music comes back by itself. `on_wipe`, `set_volume` and `stop` work even while it is restarting. Any state field can be missing or malformed; the engine ignores what it can't read. When only the old orientation format is available, `tilt` can also be sent in degrees as `{beta, gamma}`. The new state field `hinge` (true or false) triggers the hinge described above.
 
+The slow sounds (the sample sets rebuilt as a visitor's traits settle, the long risers) are made ahead of time by a small helper process that the sound process starts, at low priority; the sound keeps playing the samples it has until the new ones arrive, so no audio block ever waits for them (worst block about 10 to 20 ms on x86 over a simulated evening, against about 90 ms before). If the helper cannot start or dies, a background thread takes over. It exits with the sound process.
+
 For the film rig, `TechnoSynth(seed=0)`, `set_state()`, `render_block()` and `.B` work as before: one `render_block()` call gives one block of 1024 stereo frames.
 
 ## Loudness and sound quality

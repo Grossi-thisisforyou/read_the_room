@@ -80,7 +80,7 @@ def _worker(cfg, q_state, q_sensor, stop_ev, wipe_ev, incarnation=0, vol_val=Non
     gain = float(cfg.get("master_gain", 1.0))
     vol = _volume(cfg)
     synth = TechnoSynth(seed=int(cfg.get("audio_seed", 0)), volume=vol * gain, threaded=True)
-    sys.setswitchinterval(0.002)     # the bank thread must not hold the GIL for long
+    sys.setswitchinterval(0.002)     # if the sample helper falls back to a thread, keep its GIL slices short
     retry_s = float(cfg.get("audio_retry_s", 7.0))
     want_real = str(cfg.get("audio_sink", "auto")).lower() != "null"
     crash_after = int(cfg.get("audio_test_crash", 0) or 0) if incarnation == 0 else 0
@@ -134,6 +134,7 @@ def _worker(cfg, q_state, q_sensor, stop_ev, wipe_ev, incarnation=0, vol_val=Non
         pass
     finally:
         sink.close()
+        synth.close()
 
 
 class AudioEngine:
