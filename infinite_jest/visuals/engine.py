@@ -266,6 +266,8 @@ class Visuals:
                 self.visits += 1
         if state.get("phase") == "wipe" and self.state.get("phase") != "wipe":
             self.on_wipe()
+        elif state.get("opted_out") and not self.state.get("opted_out"):
+            self.on_wipe()          # they said no: their painted body goes now, not at the wipe
         self.state = state
         self._read_tilt(state)
         self._busy(state.get("phase", "idle") not in ("idle", None))

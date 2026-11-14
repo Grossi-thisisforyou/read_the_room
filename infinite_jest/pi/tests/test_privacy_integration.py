@@ -526,6 +526,15 @@ def test_optout_wall_shows_no_tailored_lines(rig):
     """After opt-out the visuals drew corpus lines picked by tone ("you hold me gently.")
     in the film: they read as if the room were still reading the visitor."""
     rig.visit(sentinel(), seconds=12.0, optout_at=11.0, after=0.0)
+    # the painted body from their camera goes the moment the state says so, not 2.5 s later
+    # when it goes stale (after that only the stand-in figure, which is no one, is drawn)
+    vz = rig.visuals
+    st = dict(vz.state, opted_out=False, phase="hook")
+    vz.on_state(st)
+    vz.on_frame(np.frombuffer(make_frame(1.0), np.uint8).reshape(H, W))
+    assert vz.fig.ready
+    vz.on_state(dict(st, opted_out=True))
+    assert not vz.fig.ready, "the visitor's own camera figure is still held after opt-out"
     for _ in range(30):
         rig.phone({"kind": "phone", "optout": True})
         rig.step()
