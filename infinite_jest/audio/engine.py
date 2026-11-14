@@ -12,7 +12,7 @@ import time
 
 _THREAD_VARS = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
 _CFG_KEYS = ("audio_device", "audio_sink", "audio_latency_ms", "audio_seed",
-             "audio_volume", "master_gain")
+             "audio_volume", "volume", "master_gain")
 _STATE_KEYS = ("visitor_id", "phase", "scene", "intensity", "palette", "tempo", "hook",
                "ocean", "phase_t", "tilt", "tilt_energy", "shake", "steer")
 _SENSOR_KEYS = ("steer", "tilt", "tilt_energy", "shake", "accel")
@@ -58,11 +58,17 @@ def _drain(q):
     return last
 
 
-def _worker(cfg, q_state, q_sensor, stop_ev, wipe_ev):
+def _volume(cfg):
+    """audio_volume, or the show engine's own [audio] volume key."""
+    return float(cfg.get("audio_volume", cfg.get("volume", 0.9)))
+
+
+def _worker(cfg, q_state, q_sensor, stop_ev, wipe_ev, vol_val=None):
     from .synth import TechnoSynth
     from .sinks import NullSink, open_sink
-    vol = float(cfg.get("audio_volume", 0.9)) * float(cfg.get("master_gain", 1.0))
-    synth = TechnoSynth(seed=int(cfg.get("audio_seed", 0)), volume=vol)
+    gain = float(cfg.get("master_gain", 1.0))
+    vol = _volume(cfg)
+    synth = TechnoSynth(seed=int(cfg.get("audio_seed", 0)), volume=vol * gain)
     sink = open_sink(cfg, synth.B)
     print("[audio] sink: %s" % sink.name, file=sys.stderr)
     failed_at = None
@@ -77,6 +83,9 @@ def _worker(cfg, q_state, q_sensor, stop_ev, wipe_ev):
             if wipe_ev.is_set():
                 wipe_ev.clear()
                 synth.wipe()
+            if vol_val is not None and vol_val.value != vol:   # control "volume" from the engine
+                vol = vol_val.value
+                synth.volume = vol * gain
             block = synth.render_block()
             try:
                 sink.write(block)
@@ -123,8 +132,9 @@ class AudioEngine:
         self._qx = ctx.Queue(maxsize=4)
         self._stop = ctx.Event()
         self._wipe = ctx.Event()
+        self._vol = ctx.Value("d", _volume(self.cfg), lock=False)
         self._proc = ctx.Process(target=_worker, name="ij-audio", daemon=True,
-                                 args=(self.cfg, self._qs, self._qx, self._stop, self._wipe))
+                                 args=(self.cfg, self._qs, self._qx, self._stop, self._wipe, self._vol))
         # keep numpy's BLAS single-threaded in the audio child (the Pi also runs an LLM)
         saved = {k: os.environ.get(k) for k in _THREAD_VARS}
         for k in _THREAD_VARS:
@@ -147,6 +157,16 @@ class AudioEngine:
         if not self.running or not isinstance(data, dict):
             return
         _put_latest(self._qx, {k: _plain(data[k]) for k in _SENSOR_KEYS if k in data})
+
+    def set_volume(self, volume):
+        """The engine's control "volume" command, 0..1."""
+        try:
+            v = min(1.0, max(0.0, float(volume)))
+        except (TypeError, ValueError):
+            return
+        self.cfg["audio_volume"] = v
+        if self.running:
+            self._vol.value = v
 
     def on_wipe(self):
         if self.running:
