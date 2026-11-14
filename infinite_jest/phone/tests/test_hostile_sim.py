@@ -192,7 +192,7 @@ def test_optout_holds_while_visitor_still_holds_the_phone(monkeypatch):
     assert rig.agent.camera.paused and rig.agent.mic.paused
     # put it down and walk away: after optout_release_s the phone resets
     rig.write(ACC, FACE_UP)
-    rig.run(DEFAULTS['optout_release_s'] + 4)
+    rig.run(DEFAULTS['optout_release_s'] + 10)   # 'held' fades ~4 s after the last movement, then the release clock runs
     assert not rig.agent.opted_out and not rig.agent.camera.paused
     assert rig.agent.ui_snapshot()['screen'] == 'consent'
 

@@ -134,6 +134,7 @@ def _worker(cfg, q_state, q_sensor, stop_ev, wipe_ev, incarnation=0, vol_val=Non
         pass
     finally:
         sink.close()
+        synth.close()
 
 
 class AudioEngine:
