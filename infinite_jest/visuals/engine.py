@@ -87,7 +87,11 @@ class Visuals:
         self.lut_key = None
         self.bank_dir = config.get("bank_dir")
         self.bank_max = int(config.get("bank_max_per_hook", 40))
-        self.bank = self._load_bank(self.bank_dir)
+        # scaled surfaces by file path: a reload only reads images it has not seen
+        # (a full reload of 200 images froze the picture ~1.8 s here, ~5 s on a Pi)
+        self.bank_cache = {}
+        self.bank_new_per_reload = int(config.get("bank_new_per_reload", 6))
+        self.bank = self._load_bank(self.bank_dir, limit_new=None)
         self.bank_loaded = time.monotonic()
         # while a visitor is present, keep this file fresh so the overnight image
         # generator (bank_gen) pauses and leaves the CPU to picture and sound
@@ -176,7 +180,7 @@ class Visuals:
         self.extra_words = []
         self.wipe_t = self.t
         if time.monotonic() - self.bank_loaded > 600:  # pick up new overnight images
-            self.bank = self._load_bank(self.bank_dir)
+            self.bank = self._load_bank(self.bank_dir, limit_new=self.bank_new_per_reload)
             self.bank_loaded = time.monotonic()
 
     def render(self, surface, dt):
@@ -262,7 +266,9 @@ class Visuals:
     # ---- layers -----------------------------------------------------------
     def _draw_ground(self):
         hook = self.hook
-        key = (hook, tuple(self.pal[2]), tuple(self.pal[1]), round(self.p["ground_lum"], 2))
+        # lum in 4% steps: in 1% steps a phase change rebuilt the ground (~8 ms
+        # here, ~25 ms on a Pi) on 30+ consecutive frames
+        key = (hook, tuple(self.pal[2]), tuple(self.pal[1]), round(self.p["ground_lum"] * 25) / 25)
         if key != self.ground_key:
             self.ground = self._make_ground(hook)
             self.ground_key = key
@@ -316,8 +322,11 @@ class Visuals:
             pygame.draw.ellipse(surf, dcol, (W * 0.30, H * 0.78, W * 0.40, H * 0.14))
             pygame.draw.ellipse(surf, [min(255, int(c * 1.1)) for c in p[3]], (W * 0.30, H * 0.78, W * 0.40, H * 0.14), 2)
         if self.bank and hook in self.bank:
-            img = self.rng.choice(self.bank[hook])
-            img = pygame.transform.smoothscale(img, (W, H))
+            # one underpainting per visitor and hook: picking anew on every
+            # rebuild made it flicker through the library while lum glided
+            imgs = self.bank[hook]
+            pick = zlib.crc32(("%s/%s" % (self.visitor, hook)).encode()) % len(imgs)
+            img = imgs[pick].copy()
             img.set_alpha(110)
             surf.blit(img, (0, 0))
         return surf
@@ -618,13 +627,17 @@ class Visuals:
         pygame.surfarray.blit_array(s, arr)
         return s
 
-    def _load_bank(self, path):
+    def _load_bank(self, path, limit_new=None):
         """Optional pre-generated images: bank/<hook>/*.png|jpg, used as faint
-        underpainting behind that hook's ground. Made offline on the Mac."""
+        underpainting behind that hook's ground. Made on the Pi by bank_gen.
+        Images already in the cache are reused; at most limit_new new files
+        are read per call (None = all, at start-up)."""
         path = path or os.path.join(os.path.dirname(__file__), "bank")
         out = {}
         if not os.path.isdir(path):
             return out
+        loaded = 0
+        keep = {}
         for hook in HOOKS:
             d = os.path.join(path, hook)
             if not os.path.isdir(d):
@@ -636,12 +649,19 @@ class Visuals:
             newest, older = files[-half:] if half else [], files[:-half] if half else files
             files = newest + random.sample(older, min(len(older), self.bank_max - len(newest)))
             for fn in files:
-                if True:
+                fp = os.path.join(d, fn)
+                im = self.bank_cache.get(fp)
+                if im is None:
+                    if limit_new is not None and loaded >= limit_new:
+                        continue        # next reload picks it up
+                    loaded += 1
                     try:
-                        im = pygame.image.load(os.path.join(d, fn))
-                        imgs.append(pygame.transform.smoothscale(im, (self.W, self.H)))
+                        im = pygame.transform.smoothscale(pygame.image.load(fp), (self.W, self.H))
                     except Exception:
-                        pass
+                        continue
+                keep[fp] = im
+                imgs.append(im)
             if imgs:
                 out[hook] = imgs
+        self.bank_cache = keep          # files no longer picked (or deleted by the cap) are let go
         return out
