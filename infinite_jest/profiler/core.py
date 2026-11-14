@@ -94,7 +94,9 @@ class Profiler:
     def handle(self, message):
         """Dispatch one contract message {type, ts, data}; return replies."""
         t = message.get("type")
-        ts = float(message.get("ts") or 0.0)
+        # rx_ts is the Pi's clock (the engine adds it when forwarding); the
+        # sender's ts may come from a phone whose clock is minutes off
+        ts = float(message.get("rx_ts") or message.get("ts") or 0.0)
         data = message.get("data") or {}
         if t == "sensor":
             return self._sensor(data, ts)

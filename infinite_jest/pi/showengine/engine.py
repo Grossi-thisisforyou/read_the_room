@@ -122,7 +122,9 @@ class Engine:
         if self.machine.phase in ("approach", "profiling", "hook"):
             self.fallback.feed(d)
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, msg["ts"]), now)
+            # the Pi's clock, not the phone's: an offline N900's clock can be minutes
+            # off, and the profiler compares it with on_visit's time.time()
+            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, time.time()), now)
         self.emit(self._fwd(msg), {"profiler"})
 
     def _from_profiler(self, result: Any, now: float) -> None:
@@ -142,7 +144,7 @@ class Engine:
             return
         self.emit(self._fwd(msg), {"profiler"})
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], msg["ts"]), now)
+            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], time.time()), now)
         rgb = self.frames.decode(msg["data"])
         if rgb is not None:
             self._use_frame(rgb, now)
