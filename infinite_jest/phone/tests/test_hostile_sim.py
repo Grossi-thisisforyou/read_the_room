@@ -190,9 +190,9 @@ def test_optout_holds_while_visitor_still_holds_the_phone(monkeypatch):
     leaked = [d for d in after if d.get('kind') == 'phone' and not d.get('optout')]
     assert not leaked, 'readings resumed while the visitor still held the phone: %r' % leaked[:1]
     assert rig.agent.camera.paused and rig.agent.mic.paused
-    # put it down and walk away: the phone resets and reads the next visitor
+    # put it down and walk away: after optout_release_s the phone resets
     rig.write(ACC, FACE_UP)
-    rig.run(DEFAULTS['idle_reset_s'] + 30)
+    rig.run(DEFAULTS['optout_release_s'] + 4)
     assert not rig.agent.opted_out and not rig.agent.camera.paused
     assert rig.agent.ui_snapshot()['screen'] == 'consent'
 
@@ -206,7 +206,7 @@ def test_optout_on_the_consent_screen_with_engine_down_resets(monkeypatch):
     rig.run(5)
     assert rig.agent.opted_out
     rig.write(PROX, 'open')
-    rig.run(DEFAULTS['idle_reset_s'] + 20)
+    rig.run(DEFAULTS['optout_release_s'] + 4)
     assert not rig.agent.opted_out
 
 

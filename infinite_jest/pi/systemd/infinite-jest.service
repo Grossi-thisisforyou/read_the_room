@@ -3,6 +3,8 @@
 Description=Infinite Jest show engine
 After=local-fs.target sound.target
 Wants=network-online.target
+# an unattended show never gives up: keep restarting (every RestartSec) however often it crashes
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -16,10 +18,11 @@ Environment=SDL_AUDIODRIVER=alsa
 Environment=IJ_CONFIG=@HOME@/.config/infinite-jest/engine.toml
 ExecStart=/usr/bin/python3 -m showengine
 Restart=always
-RestartSec=2
-# a crash loop shouldn't cook the Pi: at most 10 restarts a minute
-StartLimitIntervalSec=60
-StartLimitBurst=10
+RestartSec=3
+# the frame loop pings systemd every 2 s (showengine/sdnotify.py); if it freezes for
+# 60 s (a hung plugin, a stuck driver) systemd kills it and the restart above brings it back
+WatchdogSec=60
+NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target

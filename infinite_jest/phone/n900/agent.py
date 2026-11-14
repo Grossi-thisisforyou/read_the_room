@@ -55,6 +55,7 @@ DEFAULTS = {
     'local_prompts': 1,       # show bundled either/or prompts when the Pi sends none
     'prompt_every_s': 25.0,
     'idle_reset_s': 90.0,     # back to the consent screen after this long with nobody
+    'optout_release_s': 8.0,  # an opt-out lasts until the phone has been put down this long
     'name': 'n900',
 }
 
@@ -156,10 +157,13 @@ class Agent(object):
         self.presence = Peak(0.12)
         self.touch_t = 0.0
         self.near_since = None
-        self.prox_armed = False     # proximity must read 'open' once before an opt-out
+        self.prox_armed = True      # after a wipe, proximity must read 'open' once before an opt-out
         self.opted_out = False
         self.clock_offset = None    # Pi clock minus N900 clock, from the engine's state ts
         self.mode = 'handheld'      # contract default; the engine's state.mode overrides
+        self.held_t = 0.0           # last time the phone was in someone's hands (local only, never sent)
+        self.optout_t = 0.0
+        self.reading_t = 0.0
         self.lock = threading.Lock()
         self.listeners = []
         self.prompts = load_prompts()
@@ -308,12 +312,11 @@ class Agent(object):
                 self.events.get_nowait()
             except Exception:
                 break
-        if (from_engine and self.opted_out
-                and time.time() - self.ui_snapshot()['last_presence_t'] < 10.0):
+        if self.opted_out and self.reading_t - self.held_t < float(self.conf['optout_release_s']):
             # The engine ends the visit soon after an opt-out (the phone stops
             # sending readings), but the same visitor may still be holding the
-            # phone. "The eye is closed until you leave": stay closed; the
-            # local idle reset reopens it once the phone has been put down.
+            # phone. "The eye is closed until you leave": stay closed until the
+            # phone has been put down for optout_release_s (see reading()).
             self.ui_update(text='', prompt=None, state={}, reading={}, wiped_t=time.time())
             return
         self.opted_out = False
@@ -362,22 +365,32 @@ class Agent(object):
                 self.near_since = t
             elif (self.near_since is not None and not self.opted_out
                   and t - self.near_since >= 3.0):
-                self.opt_out()
+                self.opt_out(t)
         else:
             self.near_since = None
             self.prox_armed = True
+        self.reading_t = t
+        if r.get('held') or touched:
+            self.held_t = t
         if self.opted_out:
-            if handling > 0.05 or touched:
-                # still in someone's hands: stay closed. Only the accelerometer
-                # and touch are used for this, never the camera or the mic.
-                self.ui_update(last_presence_t=t)
+            # One rule ends an opt-out: the phone has been out of anyone's hands
+            # (accelerometer + touch only, never camera or mic) for
+            # optout_release_s. A covered sensor keeps it closed, except when the
+            # phone lies still face-down (that is the plinth, not a hand).
+            tilt = r.get('tilt') or {}
+            face_down = not r.get('held') and abs(tilt.get('beta', 0) or 0) > 168
+            if ((not near or face_down)
+                    and t - max(self.held_t, self.optout_t) >= float(self.conf['optout_release_s'])):
+                self.opted_out = False      # put down: the opted-out visitor has left
+                self.wipe()
             return {'kind': 'phone', 'optout': True}
         return r
 
-    def opt_out(self):
+    def opt_out(self, t=None):
         log('visitor opted out')
         self.opted_out = True
         self._pause_capture(True)
+        self.optout_t = t is None and time.time() or t
         if self.camera:
             self.camera.wipe()
         self.emit('sensor', {'kind': 'optout'})
@@ -498,7 +511,7 @@ class Agent(object):
         snap = self.ui_snapshot()
         if snap['last_presence_t'] > t + 5:
             self.ui_update(last_presence_t=t)   # the N900 clock jumped backwards
-        if snap['screen'] == 'live' or self.opted_out:
+        if snap['screen'] == 'live' and not self.opted_out:   # opt-out ends in reading()
             if t - snap['last_presence_t'] > float(self.conf['idle_reset_s']):
                 log('nobody here, back to the consent screen')
                 self.wipe()

@@ -164,7 +164,7 @@ def test_wipe_forgets_everything():
     run(eng, clock, 25, BUSY)
     eng.handle(P.make(P.SENSOR, {"kind": "keys", "text": "my secret"}), "phone")
     words = eng.machine.visit.answers
-    assert words == ["my secret"]
+    assert words == [9]                      # only the character count is kept, never the text
     eng.handle(P.make(P.CONTROL, {"cmd": "wipe"}), "control")
     assert words == []                       # the old list was emptied in place
     assert eng.machine.visit.answers == [] and eng.machine.visit.ocean is None

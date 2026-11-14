@@ -36,7 +36,7 @@ class TestVoice(unittest.TestCase):
         phone, words = voice.clean_words("1. stay, the screen is warmer now.\n2. subject lingers\n3. HOLDS DEVICE CLOSE\n4. wants to be seen")
         self.assertEqual(phone, "stay, the screen is warmer now")
         self.assertEqual(words, ["SUBJECT LINGERS", "HOLDS DEVICE CLOSE", "WANTS TO BE SEEN"])
-        d = voice.clean_dossier("you came close.\nwe called you a performer.\nthe scrawl worked.\nmostly a guess.")
+        d = voice.clean_dossier("you came close.\nwe called you a performer.\nthe writing worked.\nmostly a guess.")
         self.assertIn("deleted", d[-1])
 
 
