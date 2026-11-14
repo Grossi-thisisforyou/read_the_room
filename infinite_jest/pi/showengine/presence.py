@@ -35,13 +35,16 @@ class Presence:
     _raw: float = 0.0
 
     def score_of(self, d: dict) -> float:
-        s = self.raw_score(d)
-        if self.cfg.handheld and "presence" not in d:
-            # handheld: the camera and the mic alone only half-count; holding the phone counts
-            cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0)
-            hand = Presence.raw_score({k: d[k] for k in ("held", "shake", "kind", "proximity") if k in d})
-            s = max(hand, min(cam, 0.4))
-        return s
+        if not self.cfg.handheld:
+            return self.raw_score(d)
+        # handheld: the camera and the mic alone only half-count; holding the phone counts.
+        # That includes the phone's own "presence" guess: the N900 agent mixes voice (0.7)
+        # and camera motion into it, so people chatting next to the plinth would otherwise
+        # start visit after visit with nobody holding the phone.
+        cam = max(min(1.0, Presence._num_motion(d) * 1.6), 0.9 if num(d.get("faces"), 0, 0, None) >= 1 else 0.0,
+                  num(d.get("presence")))
+        hand = Presence.raw_score({k: d[k] for k in ("held", "shake", "kind", "proximity") if k in d})
+        return max(hand, min(cam, 0.4))
 
     @staticmethod
     def _num_motion(d: dict) -> float:

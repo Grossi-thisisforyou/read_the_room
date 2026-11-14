@@ -58,3 +58,26 @@ def test_status_reports_the_soc_temperature(tmp_path):
     assert cpu_temp(tmp_path / "missing") is None
     f.write_text("junk")
     assert cpu_temp(f) is None
+
+
+def test_handheld_chatter_next_to_the_plinth_does_not_start_visits():
+    """The N900 agent's own 'presence' mixes in voice (0.7) and camera motion.
+    In handheld mode it used to win outright, so a chatty lounge started visit
+    after visit with nobody touching the phone (seen in soak: idle never held)."""
+    clock = [0.0]
+    eng = Engine(load(None), clock=lambda: clock[0])
+    assert eng.mode == "handheld"
+    lying = {"kind": "phone", "held": False, "presence": 0.7, "shake": 0.0,
+             "audio": {"level": 0.4, "voiced": True}, "motion": 0.2, "proximity": {"near": False}}
+    for _ in range(3000):                      # 5 minutes of talk around an untouched phone
+        clock[0] += 0.1
+        eng.handle(P.make(P.SENSOR, dict(lying)), "phone")
+    assert eng.stats["visits"] == 0 and eng.machine.phase == "idle"
+    for i in range(100):                       # someone picks it up
+        clock[0] += 0.1
+        eng.handle(P.make(P.SENSOR, _reading(i)), "phone")
+    assert eng.stats["visits"] == 1 and eng.machine.phase in ("approach", "profiling")
+    for _ in range(400):                       # puts it down, the chatter goes on: the visit still ends
+        clock[0] += 0.1
+        eng.handle(P.make(P.SENSOR, dict(lying, presence=0.1, audio={"level": 0.05, "voiced": False}, motion=0.0)), "phone")
+    assert eng.machine.phase == "idle" and eng.stats["visits"] == 1
