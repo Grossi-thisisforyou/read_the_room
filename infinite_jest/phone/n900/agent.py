@@ -29,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from compat import clamp, log, exc, loads, to_text, queue_mod  # noqa: E402
+from compat import clamp, log, exc, loads, to_text, queue_mod, string_types, finite  # noqa: E402
 from transport import WSClient, UDPSender, WSClosed  # noqa: E402
 from sensors import Sensors, available  # noqa: E402
 from capture import Camera, Mic  # noqa: E402
@@ -128,7 +128,7 @@ class Peak(object):
         self.t = time.time()
 
     def __call__(self, x, t):
-        dt = t - self.t
+        dt = max(0.0, t - self.t)   # the N900 clock can jump backwards
         self.t = t
         self.v = max(x, self.v - self.fall * dt)
         return self.v
@@ -156,7 +156,10 @@ class Agent(object):
         self.presence = Peak(0.12)
         self.touch_t = 0.0
         self.near_since = None
+        self.prox_armed = False     # proximity must read 'open' once before an opt-out
         self.opted_out = False
+        self.clock_offset = None    # Pi clock minus N900 clock, from the engine's state ts
+        self.mode = 'handheld'      # contract default; the engine's state.mode overrides
         self.lock = threading.Lock()
         self.listeners = []
         self.prompts = load_prompts()
@@ -191,10 +194,36 @@ class Agent(object):
         finally:
             self.lock.release()
 
+    def now(self):
+        """Unix time on the Pi's clock (the contract's reference).
+
+        After a battery pull the N900 clock can be years off, so outgoing `ts`
+        uses the offset learned from the engine's own `state` timestamps."""
+        t = time.time()
+        if self.clock_offset is not None:
+            t += self.clock_offset
+        return t
+
+    def learn_clock(self, ts):
+        try:
+            ts = float(ts)
+        except (TypeError, ValueError):
+            return
+        if not finite(ts) or ts < 1.0e9:
+            return  # ts 0 / junk: not a clock reading
+        off = ts - time.time()
+        if self.clock_offset is None or abs(off - self.clock_offset) > 2.0:
+            if abs(off - (self.clock_offset or 0.0)) > 60:
+                log('clock: N900 differs from the Pi by %.1f s' % off)
+            self.clock_offset = off
+        else:
+            # smooth out network jitter
+            self.clock_offset += 0.1 * (off - self.clock_offset)
+
     def emit(self, typ, data):
         if self.opted_out and data.get('kind') in ('choice', 'keys', 'touch'):
             return
-        msg = {'type': typ, 'ts': time.time(), 'data': data}
+        msg = {'type': typ, 'ts': self.now(), 'data': data}
         try:
             self.events.put_nowait(msg)
         except Exception:
@@ -239,25 +268,38 @@ class Agent(object):
 
     # ------------------------------------------------- engine messages --
     def handle(self, msg):
+        if not isinstance(msg, dict):
+            return
         typ = msg.get('type')
         data = msg.get('data') or {}
+        if not isinstance(data, dict):
+            return
         if typ == 'state':
+            self.learn_clock(msg.get('ts'))
+            if data.get('mode') in ('handheld', 'fixed'):
+                self.mode = data['mode']
             self.ui_update(state=data)
             if data.get('phase') == 'idle' and self.ui_snapshot()['screen'] == 'live':
                 pass  # the engine's idle doesn't kick a visitor who is typing
         elif typ == 'phone':
             kw = {'last_pi_phone_t': time.time()}
-            if data.get('text'):
-                kw['text'] = data['text']
+            text = _short(data.get('text'), 160)
+            if text:
+                kw['text'] = text
                 kw['text_t'] = time.time()
-            if data.get('ask') and len(data.get('options') or []) >= 2:
-                kw['prompt'] = {'prompt_id': data.get('prompt_id'), 'ask': data['ask'],
-                                'options': list(data['options'])[:2], 't': time.time()}
+            opts = data.get('options')
+            if isinstance(opts, string_types) or not isinstance(opts, (list, tuple)):
+                opts = []
+            opts = [_short(o, 32) for o in opts[:2]]
+            ask = _short(data.get('ask'), 100)
+            if ask and len(opts) >= 2 and opts[0] and opts[1]:
+                kw['prompt'] = {'prompt_id': _short(data.get('prompt_id'), 64), 'ask': ask,
+                                'options': opts, 't': time.time()}
             self.ui_update(**kw)
         elif typ == 'wipe':
-            self.wipe()
+            self.wipe(from_engine=True)
 
-    def wipe(self):
+    def wipe(self, from_engine=False):
         log('wipe')
         if self.camera:
             self.camera.wipe()
@@ -266,8 +308,18 @@ class Agent(object):
                 self.events.get_nowait()
             except Exception:
                 break
+        if (from_engine and self.opted_out
+                and time.time() - self.ui_snapshot()['last_presence_t'] < 10.0):
+            # The engine ends the visit soon after an opt-out (the phone stops
+            # sending readings), but the same visitor may still be holding the
+            # phone. "The eye is closed until you leave": stay closed; the
+            # local idle reset reopens it once the phone has been put down.
+            self.ui_update(text='', prompt=None, state={}, reading={}, wiped_t=time.time())
+            return
         self.opted_out = False
         self.near_since = None
+        self.prox_armed = False   # phone still face-down on the plinth must not re-opt-out
+        self._pause_capture(False)
         self.ui_update(screen='consent', text='', prompt=None, state={},
                        reading={}, wiped_t=time.time(), optout=False)
 
@@ -288,30 +340,54 @@ class Agent(object):
         near = r.get('proximity', {}).get('near') and 1.0 or 0.0
         touched = (t - self.touch_t) < 3.0 and 1.0 or 0.0
         voiced = r.get('audio', {}).get('voiced') and 0.7 or 0.0
-        p = self.presence(max(clamp(motion * 3.0), handling, near, touched, voiced,
-                              r.get('held') and 0.8 or 0.0), t)
+        held = r.get('held') and 0.8 or 0.0
+        # A covered proximity sensor only means "a hand" while the phone is
+        # being held; lying face-down on the plinth it is just the plinth.
+        hand = max(handling, touched, held, held and near or 0.0)
+        room = max(clamp(motion * 3.0), voiced)
+        if self.mode != 'fixed':
+            # handheld (contract default): people walking past the camera or
+            # talking in the lounge are not a visitor until someone picks the
+            # phone up -- same rule as the engine's Presence (max 0.4)
+            room = min(room, 0.4)
+        p = self.presence(max(hand, room), t)
         r['presence'] = round(p, 3)
         r['kind'] = 'phone'
         # Opt-out: covering the proximity sensor ("the eye") for 3 s stops all
-        # reading of this visitor until the next wipe.
+        # reading of this visitor until the next wipe. After a wipe the sensor
+        # has to read open once first, so a phone left face-down does not
+        # opt every following visit out in a loop.
         if near:
-            if self.near_since is None:
+            if self.near_since is None and self.prox_armed:
                 self.near_since = t
-            elif not self.opted_out and t - self.near_since >= 3.0:
+            elif (self.near_since is not None and not self.opted_out
+                  and t - self.near_since >= 3.0):
                 self.opt_out()
         else:
             self.near_since = None
+            self.prox_armed = True
         if self.opted_out:
+            if handling > 0.05 or touched:
+                # still in someone's hands: stay closed. Only the accelerometer
+                # and touch are used for this, never the camera or the mic.
+                self.ui_update(last_presence_t=t)
             return {'kind': 'phone', 'optout': True}
         return r
 
     def opt_out(self):
         log('visitor opted out')
         self.opted_out = True
+        self._pause_capture(True)
         if self.camera:
             self.camera.wipe()
         self.emit('sensor', {'kind': 'optout'})
         self.ui_update(optout=True, prompt=None, text='')
+
+    def _pause_capture(self, paused):
+        if self.camera:
+            self.camera.paused = paused
+        if self.mic:
+            self.mic.paused = paused
 
     def net_loop(self):
         hosts = [h.strip() for h in str(self.conf['hosts']).split(',') if h.strip()]
@@ -335,7 +411,7 @@ class Agent(object):
                 self.ws = ws
                 self.set_link('ws', h)
                 try:
-                    ws.send_json({'type': 'hello', 'ts': time.time(),
+                    ws.send_json({'type': 'hello', 'ts': self.now(),
                                   'data': {'role': 'phone', 'device': 'n900',
                                            'name': self.conf['name'], 'version': VERSION}})
                     self.reader(ws)
@@ -344,6 +420,8 @@ class Agent(object):
                 self.ws = None
                 ws.close()
                 self.set_link('udp', h)
+                if self.udp is not None:
+                    self.udp.close()
                 self.udp = UDPSender(h, self.conf['udp_port'])
             time.sleep(backoff)
             backoff = min(backoff * 1.7, 10.0)
@@ -397,9 +475,9 @@ class Agent(object):
                 next_t = t + period
                 r = self.reading(t)
                 self.ui_update(reading=r)
-                if r.get('presence', 0) > 0.3:
+                if r.get('presence', 0) > 0.45:   # the engine's on_threshold
                     self.ui_update(last_presence_t=t)
-                self.send({'type': 'sensor', 'ts': t, 'data': r})
+                self.send({'type': 'sensor', 'ts': self.now(), 'data': r})
                 self.local_director(t)
             if (self.camera and int(self.conf['frames']) and self.link == 'ws'
                     and t - last_frame_t >= frame_period):
@@ -410,7 +488,7 @@ class Agent(object):
                     if frame is not None and seq != last_seq:
                         last_seq = seq
                         last_frame_t = t
-                        self.send({'type': 'frame', 'ts': t, 'data': {
+                        self.send({'type': 'frame', 'ts': self.now(), 'data': {
                             'w': self.camera.w, 'h': self.camera.h, 'fmt': 'gray8',
                             'b64': to_text(base64.b64encode(frame))}}, allow_udp=False)
             time.sleep(0.02)
@@ -418,7 +496,9 @@ class Agent(object):
     def local_director(self, t):
         """When the Pi is silent, the phone keeps the visitor company itself."""
         snap = self.ui_snapshot()
-        if snap['screen'] == 'live':
+        if snap['last_presence_t'] > t + 5:
+            self.ui_update(last_presence_t=t)   # the N900 clock jumped backwards
+        if snap['screen'] == 'live' or self.opted_out:
             if t - snap['last_presence_t'] > float(self.conf['idle_reset_s']):
                 log('nobody here, back to the consent screen')
                 self.wipe()
@@ -433,9 +513,12 @@ class Agent(object):
 
     def keep_awake_loop(self):
         """Keep the display on and unlocked for hours (Maemo MCE over D-Bus)."""
-        if int(self.conf['wifi_powersave_off']):
-            _run('/sbin/iwconfig wlan0 power off')
+        n = 0
         while self.running:
+            if int(self.conf['wifi_powersave_off']) and n % 6 == 0:
+                # again every minute: a Wi-Fi reconnect turns power saving back on
+                _run('/sbin/iwconfig wlan0 power off')
+            n += 1
             _run('dbus-send --system --type=method_call --dest=com.nokia.mce '
                  '/com/nokia/mce/request com.nokia.mce.request.req_display_blanking_pause')
             _run('dbus-send --system --type=method_call --dest=com.nokia.mce '
@@ -469,12 +552,26 @@ class Agent(object):
             self.ws.close()
 
 
+def _short(v, n):
+    """Engine text for the screen: a string, at most n characters."""
+    if v is None or isinstance(v, bool):
+        return ''
+    if not isinstance(v, string_types):
+        if isinstance(v, (dict, list, tuple)):
+            return ''
+        v = str(v)
+    return v[:n]
+
+
 def _run(cmd):
+    devnull = None
     try:
         devnull = open(os.devnull, 'w')
         subprocess.call(cmd, shell=True, stdout=devnull, stderr=devnull)
     except Exception:
         pass
+    if devnull is not None:
+        devnull.close()
 
 
 def main(argv):
