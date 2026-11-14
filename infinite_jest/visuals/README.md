@@ -160,6 +160,9 @@ Config keys:
 |---|---|---|
 | `internal_size` | `(640, 360)` | the painting resolution; scaled up smoothly (words are always drawn at full size) |
 | `smooth_scale` | `True` | smooth upscale; False is faster and blockier |
+| `frame_budget_ms` | `28` | the quality governor's budget (see Speed); 0 turns it off |
+| `upscale_full` | `False` | True: one full smoothscale to the output size instead of half size then 2x (about 1.5 ms slower, a hair softer) |
+| `stroke_cap` | `4` | most new brush strokes per frame; the rest carry over to the next frames |
 | `figure_w`, `figure_h` | `160`, `180` | size of the figure buffer |
 | `bank_dir` | `visuals/bank` | the image library |
 | `bank_max_per_hook` | `40` | how many library pictures to load per hook |
@@ -177,13 +180,29 @@ environment variable `IJ_VISUALS_STRICT=1` to see the error instead).
 
 ## Speed
 
-Measured on the cloud machine it was built on (x86, one core, 1920x1080 output):
-about 11 ms per frame median, 13 to 16 ms at the 95th percentile. By hook: flesh 11,
-scrawl 11, inverted 11, mirror 10, void 8. About 4 ms of that is the final smooth
-upscale. On a Pi 5 the hook frames measured 30 to 45 ms at 1080p (22 to 30 fps). The knobs,
-in order: first `smooth_scale` False (about 25% less), then also `internal_size`
-`(480, 270)`. `python3 -m infinite_jest.visuals.bench` measures both and prints
-the config to use.
+Measured on the cloud machine it was built on (x86 Xeon 2.3 GHz, one core, 1920x1080
+output, default settings) with the realistic show harness
+`python3 -m infinite_jest.visuals.profile_show --quick`: idle, three visitors through
+every phase with camera frames at 4 fps, a 200-picture bank, reveals, shakes, an
+opt-out. About 6.5 ms per frame median, 11 ms at the 95th percentile, 14 to 16 ms at
+the 99th (it was 13 / 22 / 26 ms before the speed pass). The slowest phases are the hook
+and the release. The final upscale (smooth to half size, then 2x) costs about 1.8 ms.
+`--cprofile` and `--tracemalloc` show where the time and memory go, `--level N` pins
+a quality level, and `--slow X` makes every frame X times slower to try the governor.
+
+**The quality governor** keeps the frame time under `frame_budget_ms` (default 28 ms,
+about 30 fps with headroom on a Pi 5 that also runs the language model). When the
+median render time over the last ~3 s is over budget, it steps down one notch:
+1 fewer brush strokes and 3 smear taps, 2 `smooth_scale` off, 3 internal picture
+480x270. When the median stays under 65% of the budget for 30 s, it steps back up.
+There are never two changes within 10 s, and a step up that has to be undone within a
+minute doubles the wait before the next try (up to 10 min), so it cannot see-saw. Each
+change is printed to stderr (`visuals: t=..s median .. ms over budget ..: quality 0 -> 1
+...`). On this machine, the levels measure (median / 99th percentile): 0 6.5 / 15,
+1 6.2 / 15, 2 5.9 / 14, 3 4.5 / 11.5 ms. On a Pi 5 the hook frames measured 30 to 45 ms
+at full quality before the speed pass, so expect the governor to settle at 2 or 3
+there. `python3 -m infinite_jest.visuals.bench` (governor off) measures the fixed
+settings and prints the config to use.
 
 ## Privacy
 

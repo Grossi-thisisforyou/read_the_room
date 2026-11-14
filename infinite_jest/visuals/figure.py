@@ -58,8 +58,9 @@ def _resize(img, w, h):
     xs = np.clip(xs, 0, iw - 1.001)
     y0 = ys.astype(np.int32); x0 = xs.astype(np.int32)
     fy = (ys - y0)[:, None]; fx = (xs - x0)[None, :]
-    a = g[y0][:, x0]; b = g[y0][:, x0 + 1]; c = g[y0 + 1][:, x0]; d = g[y0 + 1][:, x0 + 1]
-    out = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+    # separable: rows first, then columns (the same bilinear values, fewer passes)
+    rows = g[y0] * (1 - fy) + g[y0 + 1] * fy
+    out = rows[:, x0] * (1 - fx) + rows[:, x0 + 1] * fx
     return np.ascontiguousarray(out.T)
 
 
@@ -95,7 +96,27 @@ def _erode(m):
 
 def _down2(a):
     w, h = a.shape[0] // 2 * 2, a.shape[1] // 2 * 2
-    return a[:w, :h].reshape(w // 2, 2, h // 2, 2).mean((1, 3))
+    r = a[0:w:2, :h] + a[1:w:2, :h]          # 2x2 block means, as strided adds (fast)
+    out = r[:, 0::2] + r[:, 1::2]
+    out *= 0.25
+    return out
+
+
+def _percentiles(x, qs):
+    """np.percentile(x, qs) (linear interpolation) via a partial sort."""
+    x = np.asarray(x).ravel()
+    n = x.size
+    pos = [q / 100.0 * (n - 1) for q in qs]
+    ks = sorted({int(math.floor(p)) for p in pos} | {min(n - 1, int(math.floor(p)) + 1) for p in pos})
+    part = np.partition(x, ks)
+    out = []
+    for p in pos:
+        k = int(math.floor(p))
+        t = p - k
+        a = float(part[k])
+        b = float(part[min(n - 1, k + 1)])
+        out.append(a + (b - a) * t)
+    return out
 
 
 def _up2(a, w, h):
@@ -238,6 +259,19 @@ class Figure:
         d = np.repeat(np.repeat(d, 2, 0), 6, 1)[:w, :h]
         d = np.roll(d, 3, 1) * 0.5 + d * 0.5
         self.dither = (_blur(d, 1) - 0.5) * 1.2 + 0.5
+        # render() works in these buffers, allocated once (no per-frame churn)
+        self._x1 = np.arange(w, dtype=np.float32)
+        self._y1 = np.arange(h, dtype=np.float32)
+        self._x2 = np.arange(w // 2, dtype=np.float32)
+        self._y2 = np.arange(h // 2, dtype=np.float32)
+        n = w * h
+        self._f = [np.empty((w, h), np.float32) for _ in range(8)]
+        self._i = [np.empty((w, h), np.int32) for _ in range(2)]
+        self._c = [np.empty(n, np.complex64) for _ in range(3)]
+        self._big = np.empty((w, h // 4), np.float32)
+        self._pix = np.empty((w, h), np.uint32)
+        self._lut_src = None
+        self.shifts = (16, 8, 0, 24)   # R, G, B, A bit positions of packed pixels (pygame's usual)
         self.wipe()
 
     # ---- state ----
@@ -250,7 +284,7 @@ class Figure:
         self.mask2 = np.zeros((self.w // 2, self.h // 2), np.float32)
         self.g2 = None
         self.mask = np.zeros((self.w, self.h), np.float32)
-        self.trail_rgb = None
+        self.trail_pix = None       # the cooled ghost of the body, packed RGB (uint32)
         self.trail_a = np.zeros((self.w, self.h), np.float32)
         self.frames_seen = 0
         self.face = (self.w / 2, self.h * 0.3)
@@ -265,10 +299,12 @@ class Figure:
         self.edge = np.zeros((self.w // 2, self.h // 2), np.float32)
         self.orient = np.zeros((self.w // 2, self.h // 2), np.float32)
         self.gain = 1.0
-        self.last_rgb = None
+        self.last_pix = None
         self.last_a = None
         self._pfx = (self.w / 4, self.h * 0.21)
-        self.tm = np.zeros((self.w * self.h, 2), np.float32)
+        # tone and mask of the last two camera frames, as one complex number per
+        # pixel (tone + i mask): one gather fetches both
+        self.tm = np.zeros(self.w * self.h, np.complex64)
         self.prev_tm = self.tm
         self.present = True        # the engine says a visitor should be there
 
@@ -354,12 +390,15 @@ class Figure:
         # tone stretch inside the body, stored with the mask for render()
         inside = self.mask2 > 0.3
         if inside.sum() > 10:
-            lo, hi = np.percentile(g2[inside], (3, 97))
+            lo, hi = _percentiles(g2[inside], (3, 97))
         else:
             lo, hi = 40.0, 200.0
         tone = (g - lo) * (1.0 / max(10.0, hi - lo))
         self.prev_tm = self.tm
-        self.tm = np.stack([tone.ravel(), self.mask.ravel()], 1).astype(np.float32)
+        tm = np.empty(w * h, np.complex64)
+        tm.real = tone.ravel()
+        tm.imag = self.mask.ravel()
+        self.tm = tm
         if self.frames_seen == 1:
             self.prev_tm = self.tm
         self._update_trail()
@@ -448,97 +487,238 @@ class Figure:
         lut2 is a (zones, 256, 3) table from flesh_luts(): luminance picks the
         column, a slow noise field picks the row, so shadows wander between
         violet, green and raw red while highlights stay bone white."""
+        pix = self.render_packed(t, dt, smear, twist, swipe_angle, lut2, alpha, flip_v, flip_h,
+                                 taps, trail, contrast, planes)
+        rgb = self.unpack(pix)
+        a = ((pix >> np.uint32(self.shifts[3])) & np.uint32(255)).astype(np.uint8)
+        return rgb, a
+
+    def unpack(self, pix):
+        """Packed pixels (any shape) -> [..., 3] uint8 RGB."""
+        r, g, b = (((pix >> np.uint32(sh)) & np.uint32(255)).astype(np.uint8) for sh in self.shifts[:3])
+        return np.stack([r, g, b], -1)
+
+    def _pack_lut(self, lut2):
+        if self._lut_src is not lut2:
+            sr, sg, sb = (np.uint32(x) for x in self.shifts[:3])
+            l = lut2.reshape(-1, 3).astype(np.uint32)
+            self._lut32 = (l[:, 0] << sr) | (l[:, 1] << sg) | (l[:, 2] << sb)
+            self._lut_src = lut2
+        return self._lut32
+
+    def render_packed(self, t, dt, smear, twist, swipe_angle, lut2, alpha, flip_v=False, flip_h=False,
+                      taps=4, trail=0.5, contrast=0.6, planes=0.0):
+        """The figure as packed 32-bit pixels [w, h] uint32 (RGB at self.shifts,
+        alpha in the top byte): write it straight into a pygame surface with
+        surfarray.pixels2d. Same picture as render(), in preallocated buffers."""
         w, h = self.w, self.h
+        w2, h2 = w // 2, h // 2
         self.push_age += dt
         k = min(1.0, self.push_age / 0.25)
+        f0, f1, f2, f3, f4, f5, f6, f7 = self._f
+        i0, i1 = self._i
+        both, vbuf, acc = self._c
         # glide from the previous camera frame to the latest one (tone already
         # stretched at push time)
-        both = self.prev_tm + (self.tm - self.prev_tm) * k  # (w*h, 2): tone, mask
+        np.subtract(self.tm, self.prev_tm, out=both)
+        both *= np.float32(k)
+        both += self.prev_tm
         # flow field at half resolution: a dominant swipe bent by slow noise;
-        # drag zones keep some regions crisp and pull others long
-        X2, Y2 = self.X2, self.Y2
-        # X2, Y2 are float32: reduce the time phases mod 2 pi in float64 first.
-        # Added raw, t * 0.6 loses its fraction in float32 after days of uptime
-        # (t = 5 days: the smear moves in uneven steps; 2 weeks: every other
-        # frame is frozen). Same picture, exact.
+        # drag zones keep some regions crisp and pull others long.
+        # The time phases are reduced mod 2 pi in float64 first: added raw,
+        # t * 0.6 loses its fraction in float32 after days of uptime (t = 5 days:
+        # the smear moves in uneven steps; 2 weeks: every other frame is frozen).
+        # The field is separable (sin(a(x)) cos(b(y)), sin(a(x) + b(y))), so it
+        # is built from 1-D rows and columns.
         tau = 2 * math.pi
-        ang = (swipe_angle
-               + 0.8 * np.sin(X2 * 0.09 + (t * 0.6) % tau) * np.cos(Y2 * 0.06 - (t * 0.37) % tau)
-               + 0.5 * np.sin((X2 + Y2) * 0.04 + (t * 0.23) % tau))
-        ox = int(t * 1.0) % (w // 2)
-        oy = int(t * 0.7) % (h // 2)
-        mag = smear * np.clip(self.dragz2[ox:ox + w // 2, oy:oy + h // 2] * 2.2 - 0.55, 0.08, 1.4)
-        dx = np.repeat(np.repeat(np.cos(ang) * mag, 2, 0), 2, 1)
-        dy = np.repeat(np.repeat(np.sin(ang) * (mag * 0.5), 2, 0), 2, 1)
+        x2, y2 = self._x2, self._y2
+        p3 = (t * 0.23) % tau
+        sx = np.sin(x2 * np.float32(0.09) + np.float32((t * 0.6) % tau))
+        cy = np.cos(y2 * np.float32(0.06) - np.float32((t * 0.37) % tau))
+        ax = x2 * np.float32(0.04) + np.float32(p3)
+        by_ = y2 * np.float32(0.04)
+        ang = f0[:w2, :h2]
+        np.multiply((0.8 * sx)[:, None], cy[None, :], out=ang)
+        ang += (0.5 * np.sin(ax))[:, None] * np.cos(by_)[None, :]
+        ang += (0.5 * np.cos(ax))[:, None] * np.sin(by_)[None, :]
+        ang += np.float32(swipe_angle)
+        ox = int(t * 1.0) % w2
+        oy = int(t * 0.7) % h2
+        mag = f1[:w2, :h2]
+        np.multiply(self.dragz2[ox:ox + w2, oy:oy + h2], np.float32(2.2), out=mag)
+        mag -= np.float32(0.55)
+        np.clip(mag, 0.08, 1.4, out=mag)
+        mag *= np.float32(smear)
+        # repeat 2x2 by broadcasting into the full-size buffers
+        dx, dy = f2, f3
+        _up2_into(np.cos(ang) * mag, dx)
+        _up2_into(np.sin(ang) * (mag * np.float32(0.5)), dy)
         X, Y = self.X, self.Y
         if abs(twist) > 0.02:
             fx, fy = self.face
-            r2 = ((X - fx) ** 2 + (Y - fy) ** 2) * (1.0 / (self.face_size * 0.7) ** 2)
-            th = twist * np.exp(-r2)
-            c, s = np.cos(th), np.sin(th)
-            bx = fx + (X - fx) * c - (Y - fy) * s
-            by = fy + (X - fx) * s + (Y - fy) * c
+            inv = 1.0 / (self.face_size * 0.7) ** 2
+            rx = (self._x1 - np.float32(fx)) ** 2 * np.float32(inv)
+            ry = (self._y1 - np.float32(fy)) ** 2 * np.float32(inv)
+            th = f4
+            np.multiply((np.float32(twist) * np.exp(-rx))[:, None], np.exp(-ry)[None, :], out=th)
+            c, s = f5, f6
+            np.cos(th, out=c)
+            np.sin(th, out=s)
+            xs = (self._x1 - np.float32(fx))[:, None]
+            ys = (self._y1 - np.float32(fy))[None, :]
+            bx, by = f4, f7          # th is no longer needed
+            np.multiply(xs, c, out=bx)
+            bx -= ys * s
+            bx += np.float32(fx)
+            np.multiply(xs, s, out=by)
+            by += ys * c
+            by += np.float32(fy)
             np.clip(bx, 0, w - 1, out=bx)
             np.clip(by, 0, h - 1, out=by)
         else:
             bx, by = X, Y
-        ex = np.clip(bx + dx, 0, w - 1) - bx
-        ey = np.clip(by + dy, 0, h - 1) - by
-        acc = None
+        ex, ey = dx, dy              # ex = clip(bx + dx) - bx, in place
+        ex += bx
+        np.clip(ex, 0, w - 1, out=ex)
+        ex -= bx
+        ey += by
+        np.clip(ey, 0, h - 1, out=ey)
+        ey -= by
+        tx, ty = f0, f1              # ang and mag are spent
+        ii = i0.ravel()
         for i in range(taps):
-            f = i / max(1, taps - 1)
-            idx = (bx + ex * f).astype(np.int32) * h + (by + ey * f).astype(np.int32)
-            v = both[idx.ravel()]
-            acc = v if acc is None else acc + v
-        acc *= 1.0 / taps
-        g = acc[:, 0].reshape(w, h)
-        m = acc[:, 1].reshape(w, h)
+            f = np.float32(i / max(1, taps - 1))
+            np.multiply(ex, f, out=tx)
+            tx += bx
+            np.multiply(ey, f, out=ty)
+            ty += by
+            np.copyto(i0, tx, casting="unsafe")   # truncates, like astype(int32)
+            np.copyto(i1, ty, casting="unsafe")
+            i0 *= h
+            i0 += i1
+            if i == 0:
+                np.take(both, ii, out=acc, mode="clip")   # "raise" would buffer the output
+            else:
+                np.take(both, ii, out=vbuf, mode="clip")
+                acc += vbuf
+        acc *= np.float32(1.0 / taps)
+        g = f5
+        m = f6
+        g.ravel()[:] = acc.real
+        m.ravel()[:] = acc.imag
         # flatten big light/dark masses so a pale face does not sit like a mask
-        # on a dark torso; keep (and sharpen) the small modelling
-        big = np.repeat(np.repeat(g.reshape(w // 4, 4, h // 4, 4).mean((1, 3)), 4, 0), 4, 1)
-        big = _blur(big, 1)
-        g = big * (1 - contrast) + 0.52 * contrast + (g - big) * (1.35 + 0.4 * contrast)
+        # on a dark torso; keep (and sharpen) the small modelling. (The block
+        # means repeated 4x4 and box-blurred once, computed from the blocks.)
+        r4 = g[0::4] + g[1::4]
+        r4 += g[2::4]
+        r4 += g[3::4]
+        small = r4[:, 0::4] + r4[:, 1::4]
+        small += r4[:, 2::4]
+        small += r4[:, 3::4]
+        small *= np.float32(1 / 16)
+        big = f7
+        _expand4_blur(small, 0, self._big)
+        _expand4_blur(self._big, 1, big)
+        sk = 1.35 + 0.4 * contrast
+        g *= np.float32(sk)
+        big *= np.float32(1 - contrast - sk)
+        g += big
+        g += np.float32(0.52 * contrast)
         g *= self.brush
         if planes > 0:
             # flat planes of paint: the tone falls into a few values, with
             # stroke-shaped borders (the dither is dragged brush noise)
-            q = np.floor(g * 6.0 + self.dither) * (1 / 6.0)
-            g = g + (q - g) * planes
+            q = f7
+            np.multiply(g, np.float32(6.0), out=q)
+            q += self.dither
+            np.floor(q, out=q)
+            q *= np.float32(1 / 6.0)
+            q -= g
+            q *= np.float32(planes)
+            g += q
         np.clip(g, 0, 0.999, out=g)
         zx = int(t * 1.7) % w
         zy = int(t * 0.9) % h
-        zi = self.zones[zx:zx + w, zy:zy + h] * (lut2.shape[0] - 0.01)
-        rgb = lut2.reshape(-1, 3)[zi.astype(np.int32) * 256 + (g * 256).astype(np.int32)]
-        a = np.clip(m * 1.15, 0, 1) * self.border
+        np.multiply(self.zones[zx:zx + w, zy:zy + h], np.float32(lut2.shape[0] - 0.01), out=f7)
+        np.copyto(i0, f7, casting="unsafe")
+        i0 *= 256
+        g *= np.float32(256)
+        np.copyto(i1, g, casting="unsafe")
+        i0 += i1
+        pix = self._pix
+        np.take(self._pack_lut(lut2), i0, out=pix, mode="clip")
+        a = f4
+        np.multiply(m, np.float32(1.15), out=a)
+        np.clip(a, 0, 1, out=a)
+        a *= self.border
         # ghost of where the body just was: a dragged, cooled trail
-        if trail > 0 and self.trail_rgb is not None:
-            self.trail_a *= math.exp(-dt / 0.9)
-            ta = self.trail_a * trail
-            show = ta > a + 0.05
-            rgb = np.where(show[..., None], self.trail_rgb, rgb)
-            a = np.maximum(a, ta)
-        self.last_rgb, self.last_a = rgb, a
-        rgb = rgb.astype(np.uint8)
-        a = (a * (alpha * 255)).astype(np.uint8)
+        if trail > 0 and self.trail_pix is not None:
+            self.trail_a *= np.float32(math.exp(-dt / 0.9))
+            ta = f6
+            np.multiply(self.trail_a, np.float32(trail), out=ta)
+            show = ta > a + np.float32(0.05)
+            np.copyto(pix, self.trail_pix, where=show)
+            np.maximum(a, ta, out=a)
+        self.last_pix = pix.copy()
+        self.last_a = a.copy()
+        a *= np.float32(alpha * 255)
+        np.copyto(i0, a, casting="unsafe")
+        pix |= i0.view(np.uint32) << np.uint32(self.shifts[3])
+        out = pix
         if flip_v:
-            rgb = rgb[:, ::-1]; a = a[:, ::-1]
+            out = out[:, ::-1]
         if flip_h:
-            rgb = rgb[::-1]; a = a[::-1]
-        return np.ascontiguousarray(rgb), np.ascontiguousarray(a)
+            out = out[::-1]
+        return np.ascontiguousarray(out) if (flip_v or flip_h) else out
 
     def _update_trail(self):
         """At each new camera frame: remember the body as it was, cooled."""
-        rgb = getattr(self, "last_rgb", None)
-        if rgb is None:
+        pix = self.last_pix
+        if pix is None:
             return
         a = self.last_a
-        if self.trail_rgb is None:
-            self.trail_rgb = np.zeros(rgb.shape, np.float32)
+        rgb = self.unpack(pix).astype(np.float32)
         take = a > self.trail_a
         grey = rgb.mean(-1, keepdims=True)
         cooled = rgb * 0.5 + grey * 0.3 + np.array([44, 34, 70], np.float32) * 0.2
-        self.trail_rgb = np.where(take[..., None], cooled, self.trail_rgb)
+        c8 = np.clip(cooled, 0, 255).astype(np.uint32)
+        sr, sg, sb = (np.uint32(x) for x in self.shifts[:3])
+        packed = (c8[..., 0] << sr) | (c8[..., 1] << sg) | (c8[..., 2] << sb)
+        if self.trail_pix is None:
+            self.trail_pix = np.zeros((self.w, self.h), np.uint32)
+        np.copyto(self.trail_pix, packed, where=take)
         self.trail_a = np.where(take, a, self.trail_a)
+
+
+def _up2_into(v, out):
+    """repeat(repeat(v, 2, 0), 2, 1) written into out."""
+    out[0::2, 0::2] = v
+    out[0::2, 1::2] = v
+    out[1::2] = out[0::2]
+
+
+def _expand4_blur(v, axis, out):
+    """repeat(v, 4, axis) followed by one pass of _blur's 3-tap box filter
+    along that axis (edges replicated), computed from v directly."""
+    prev = np.empty_like(v)
+    nxt = np.empty_like(v)
+    sl = (lambda k: (slice(k, None, 4),)) if axis == 0 else (lambda k: (slice(None), slice(k, None, 4)))
+    if axis == 0:
+        prev[1:] = v[:-1]; prev[0] = v[0]
+        nxt[:-1] = v[1:]; nxt[-1] = v[-1]
+    else:
+        prev[:, 1:] = v[:, :-1]; prev[:, 0] = v[:, 0]
+        nxt[:, :-1] = v[:, 1:]; nxt[:, -1] = v[:, -1]
+    third = np.float32(1 / 3)
+    o0, o1, o2, o3 = (out[sl(k)] for k in range(4))
+    o1[...] = v
+    o2[...] = v
+    np.multiply(v, 2, out=o0)
+    o0 += prev
+    o0 *= third
+    np.multiply(v, 2, out=o3)
+    o3 += nxt
+    o3 *= third
 
 
 # ---------------------------------------------------------------- colour
