@@ -17,7 +17,7 @@ from .frames import FrameAnalyzer
 from .presence import Presence, PresenceConfig
 from .tilt import Tilt
 from .voice import Voice, load_corpus
-from .visit import VisitConfig, VisitMachine
+from .visit import VisitConfig, VisitMachine, visible_text
 
 log = logging.getLogger("showengine")
 
@@ -105,14 +105,14 @@ class Engine:
             if role != "profiler":
                 return   # a profile decides the hook and the words on the wall
             self.stats["profile"] += 1
-            if self._on_profile(d, now):     # only the current visitor's, and nothing after an opt-out
+            if self._on_profile(d, now):     # only the current visitor's, nothing after an opt-out
                 self.emit(self._fwd(msg), {"oracle"})
         elif t == P.ORACLE:
             if role in ("oracle", "profiler") and self.machine.on_oracle(d):
                 self.stats["oracle"] += 1
-                text = d.get("phone_text")
-                if isinstance(text, str) and text.strip():
-                    self.emit(P.make(P.PHONE, {"text": text.strip()[:120]}), {"phone"})
+                text = visible_text(d.get("phone_text"), 120)
+                if text:
+                    self.emit(P.make(P.PHONE, {"text": text}), {"phone"})
         elif t == P.REVEAL:
             if role != "profiler":
                 return
@@ -121,7 +121,7 @@ class Engine:
             if self.machine.visit.opted_out:
                 return   # opted out: their words go nowhere
             self.machine.on_answer(str(d.get("text", "")))
-            self.emit(self._fwd(msg), {"profiler"})
+            self._to_remote_profiler(msg)
         elif t == P.PHONE:
             if role in ("profiler", "control"):
                 self.emit(P.make(P.PHONE, d), {"phone"})
@@ -141,12 +141,11 @@ class Engine:
             return
         self.tick(now)
 
-    def wall(self) -> float:
-        """The one time base for the in-process profiler: the engine's own clock.
-        The N900 has no network time on the offline LAN, so its envelope ts can
-        be days off; mixing it (or time.time()) with engine times broke the
-        profiler's timers (instant auto-reveal, all hooks from the fallback)."""
-        return self.clock()
+    def _to_remote_profiler(self, msg: dict) -> None:
+        """Raw sensors, frames and answers go out over the network only when the profiler runs
+        as its own process. With the profiler in-process they never leave the engine."""
+        if self.profiler is None:
+            self.emit(self._fwd(msg), {"profiler"})
 
     def _fwd(self, msg: dict) -> dict:
         out = dict(msg)
@@ -160,17 +159,6 @@ class Engine:
         self.stats["sensor"] += 1
         self.last_sensor_ts = time.time()
         kind = d.get("kind", "phone")
-        if kind == "optout" or d.get("optout") is True or d.get("opt_out") is True:
-            # the N900 sends kind "optout" once, then {"kind": "phone", "optout": true, "held": ...}
-            # until the next wipe. The engine acts on it itself, profiler or not.
-            if not self.machine.visit.opted_out and self.machine.opt_out(now):
-                log.info("visitor opted out")
-                self._dropped_visitor()
-                self.emit(P.make(P.SENSOR, {"kind": "optout"}), {"profiler"})
-                if self.profiler is not None:
-                    self._from_profiler(plugins.call(self.profiler, "on_sensor", {"kind": "optout"}, self.wall()), now)
-            self.presence.feed({k: d[k] for k in ("held", "kind") if k in d}, now)   # only "still holding it?"
-            return
         if kind == "phone":
             clean = clean_sensor(d)
             self.sensor.update(clean)
@@ -188,14 +176,17 @@ class Engine:
             self.machine.on_answer(str(d.get("text", "")))
         elif kind == "choice" and not self.machine.visit.opted_out:
             self.machine.on_answer(str(d.get("option", "")))
-        self.presence.feed(d, now)
+        elif kind == "optout" or (kind == "phone" and d.get("optout") is True):
+            self._opt_out(now)   # the phone saw its sensor covered: works with or without a profiler
+        self.presence.feed(d, now)       # still needed after an opt-out: to see them leave
         if self.machine.visit.opted_out:
-            return                      # opted out: nothing about them goes to the profilers
+            return   # opted out: nothing more is read about them until the visit ends
         if self.machine.phase in ("approach", "profiling", "hook"):
             self.fallback.feed(d)
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, self.wall()), now)
-        self.emit(self._fwd(msg), {"profiler"})
+            # the engine's clock, not the sender's ts: the N900's clock can be years off
+            self._from_profiler(plugins.call(self.profiler, "on_sensor", d, now), now)
+        self._to_remote_profiler(msg)
 
     def _watch_cover(self, clean: dict, now: float) -> None:
         """Covering the proximity sensor for 3 s opts out. The profiler watches for it too;
@@ -203,15 +194,19 @@ class Engine:
         if "proximity" in clean:
             near = clean["proximity"]["near"]
             self._near_since = (self._near_since if self._near_since is not None else now) if near else None
+        if self._near_since is not None and now - self._near_since >= OPT_OUT_COVER_S:
+            self._opt_out(now)
+
+    def _opt_out(self, now: float) -> None:
         m = self.machine
-        if (self._near_since is not None and now - self._near_since >= OPT_OUT_COVER_S
-                and m.phase in ("approach", "profiling", "hook") and not m.visit.opted_out):
+        if m.phase in ("approach", "profiling", "hook") and not m.visit.opted_out:
             vid = m.visit.visitor_id
             self._on_profile({"visitor_id": vid, "phase": "opted_out", "wiped": True}, now)
             visit = {"visitor_id": vid, "phase": m.phase, "opt_out": True}
             self.emit(P.make(P.VISIT, visit), {"profiler"})
+            self._to_remote_profiler(P.make(P.SENSOR, {"kind": "optout"}))
             self.emit(P.make(P.PROFILE, {"visitor_id": vid, "phase": "opted_out", "wiped": True}), {"oracle"})
-            plugins.call(self.profiler, "on_visit", visit, self.wall())
+            plugins.call(self.profiler, "on_visit", visit, now)
 
     def _from_profiler(self, result: Any, now: float) -> None:
         """What an in-process profiler hands back: a profile, a reveal, or None."""
@@ -229,14 +224,11 @@ class Engine:
         was_out = self.machine.visit.opted_out
         ok = self.machine.on_profile(d, now)
         if self.machine.visit.opted_out and not was_out:
-            self._dropped_visitor()
-        return bool(ok) and not self.machine.visit.opted_out
-
-    def _dropped_visitor(self) -> None:
-        # covered the phone: the frames and the figure drawn from them go now, not at the end
-        self.frames.reset()
-        self.fallback.reset()
-        plugins.call(self.visuals, "on_wipe")
+            # covered the phone: the frames and the figure drawn from them go now, not at the end
+            self.frames.reset()
+            self.fallback.reset()
+            plugins.call(self.visuals, "on_wipe")
+        return ok and not self.machine.visit.opted_out
 
     def _on_frame_msg(self, msg: dict, now: float) -> None:
         if self.blackout or self.machine.visit.opted_out:
@@ -244,9 +236,9 @@ class Engine:
         if now - self._last_frame_in < 0.09:
             return   # the phone sends at most 4 fps; a flood shouldn't eat the Pi's CPU
         self._last_frame_in = now
-        self.emit(self._fwd(msg), {"profiler"})
+        self._to_remote_profiler(msg)
         if self.profiler is not None:
-            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], self.wall()), now)
+            self._from_profiler(plugins.call(self.profiler, "on_frame", msg["data"], now), now)
         rgb = self.frames.decode(msg["data"])
         if rgb is not None:
             self._use_frame(rgb, now)
@@ -344,10 +336,9 @@ class Engine:
                 visit["reveal"] = True
             self.emit(P.make(P.VISIT, visit), {"profiler"})
             if self.profiler is not None:
-                self._from_profiler(plugins.call(self.profiler, "on_visit", visit, self.wall()), now)
-        if not m.visit.opted_out:           # an opted-out visitor is left alone until the wipe
-            for line in self.voice.on_phase(new, m, now):
-                self.emit(P.make(P.PHONE, line), {"phone"})
+                self._from_profiler(plugins.call(self.profiler, "on_visit", visit, now), now)   # one clock for every profiler call
+        for line in self.voice.on_phase(new, m, now):
+            self.emit(P.make(P.PHONE, line), {"phone"})
         if new == "wipe":
             self._wipe_everything(m.last_wiped_id)
 
@@ -355,7 +346,7 @@ class Engine:
         self._near_since = None
         self.fallback.reset()
         self.frames.reset()
-        for k in ("touch", "optout", "opt_out"):
+        for k in ("touch",):
             self.sensor.pop(k, None)
         self.override_scene = None
         self.emit(P.make(P.WIPE, {"visitor_id": visitor_id or ""}), None)

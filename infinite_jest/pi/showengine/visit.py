@@ -15,7 +15,9 @@ one, so nothing about the last visitor survives in the engine.
 """
 from __future__ import annotations
 
+import re
 import secrets
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -50,7 +52,7 @@ class Visit:
     hook_params: dict[str, Any] = field(default_factory=dict)
     words: list[str] = field(default_factory=list)
     reveal: dict[str, Any] | None = None
-    answers: list[str] = field(default_factory=list)
+    answers: list[int] = field(default_factory=list)   # character counts only, never the text
     opted_out: bool = False
     profile_extra: dict[str, Any] = field(default_factory=dict)   # evidence tuples etc. for the reveal
     oracle_words: list[str] = field(default_factory=list)
@@ -65,14 +67,38 @@ def clean_ocean(raw: Any) -> dict[str, float] | None:
 
 
 # Baby keeps the visual sources hidden from visitors: these never reach the wall or the phone.
-HIDDEN = ("bacon", "baselitz", "basquiat", "crown", "samo", "skull", "©", "(c)", "™")
+HIDDEN = re.compile(r"bacon|baselitz|basquiat|crown|skull|copyright|expressionis|jean[\s.-]*michel|"
+                    r"\bsamo\b|\bfrancis\b|\(c\)|\btm\b|\bscrawl", re.I)
+
+
+def visible_text(raw: Any, limit: int = 80) -> str:
+    """One line a visitor may read, or "" if it must not be shown.
+
+    Folds Unicode (full-width, accents, invisible characters) to plain ASCII
+    first, so a disguised source name is still caught, and drops what cannot be
+    folded (emoji, other scripts): the projector font has no glyphs for them
+    and the sources include symbols (crowns, skulls, copyright marks).
+    """
+    if not isinstance(raw, (str, int, float)) or isinstance(raw, bool):
+        return ""
+    t = str(raw)
+    if any(c in t for c in "\u00a9\u00ae\u2117\u2122\u24b8\u24d2\U0001f12f"):   # (c) (r) (tm) marks
+        return ""
+    t = unicodedata.normalize("NFKC", t)
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(" " if unicodedata.category(c) == "Cc" else c for c in t
+                if not unicodedata.combining(c) and unicodedata.category(c) not in ("Cf", "Co", "Cs", "Cn"))
+    t = " ".join(t.split())[:limit]
+    if not t or not t.isascii() or HIDDEN.search(t) or HIDDEN.search(re.sub(r"[^a-z]", "", t.lower())):
+        return ""
+    return t
 
 
 def clean_words(raw: Any, limit: int = 24, width: int = 80) -> list[str]:
     if not isinstance(raw, list):
         return []
-    out = [str(w)[:width] for w in raw if isinstance(w, (str, int, float))]
-    return [w for w in out if not any(h in w.lower() for h in HIDDEN)][:limit]
+    out = [visible_text(w, width) for w in raw]
+    return [w for w in out if w][:limit]
 
 
 class VisitMachine:
@@ -98,7 +124,10 @@ class VisitMachine:
         if vid is not None and vid != self.visit.visitor_id:
             return False  # stale message about someone already wiped
         if data.get("phase") == "opted_out" or data.get("wiped"):
-            self.opt_out(now)
+            # the visitor covered the phone: drop what we have, go quiet until they leave
+            self._forget_visitor()
+            self.visit.hook, self.visit.hook_since, self.visit.opted_out = "void", now, True
+            self.tick(now)
             return True
         if self.visit.opted_out:
             return False
@@ -113,25 +142,15 @@ class VisitMachine:
         for k in ("evidence", "trait_confidence", "segment_pole", "scenes_tried", "choices"):
             if k in data:
                 self.visit.profile_extra[k] = data[k]
-        ev = clean_words(data.get("words")) or clean_words(data.get("evidence"))
-        line = self.visit.hook_params.get("line")
-        if isinstance(line, str) and line:
-            ev = [line[:80]] + ev
+        ev = clean_words(data.get("words")) or clean_words(data.get("evidence"))   # readable lines first
+        line = visible_text(self.visit.hook_params.get("line"))
+        if line:
+            ev = [line] + ev
         if ev:
             self.visit.words = ev[:24]
         hook = data.get("hook")
         if isinstance(hook, str) and hook:
             self._propose_hook(hook[:40], now)
-        self.tick(now)
-        return True
-
-    def opt_out(self, now: float) -> bool:
-        """The visitor covered the phone's eye: drop what we have, go quiet until they leave."""
-        if self.phase not in ("approach", "profiling", "hook"):
-            return False
-        v = self.visit
-        self._forget_visitor()
-        v.hook, v.hook_since, v.opted_out = "void", now, True
         self.tick(now)
         return True
 
@@ -142,9 +161,9 @@ class VisitMachine:
         if self.visit.opted_out:
             return False
         self.visit.reveal = {
-            # reveal lines are whole sentences ("you held the device 75% of the time. ..."): don't cut them mid-word
+            # whole sentences: don't cut them mid-word
             "lines": clean_words(data.get("lines"), 12, 160),
-            "label": str(data.get("label", ""))[:80],
+            "label": visible_text(data.get("label", "")),
         }
         return True
 
@@ -165,7 +184,7 @@ class VisitMachine:
 
     def on_answer(self, text: str) -> None:
         if self.phase in ("approach", "profiling", "hook") and text:
-            self.visit.answers = (self.visit.answers + [str(text)[:200]])[-8:]
+            self.visit.answers = (self.visit.answers + [len(str(text))])[-8:]   # the count, not the words
 
     def force(self, phase: str, now: float) -> None:
         """Operator override (from the control role)."""

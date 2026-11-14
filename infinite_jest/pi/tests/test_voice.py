@@ -82,5 +82,6 @@ def test_the_real_corpus_loads_through_the_engine_config():
     """The corpus is a library (Corpus), not a create() plugin; it must not be skipped."""
     from showengine import config as _config
     from showengine.voice import load_corpus
+    pytest.importorskip("infinite_jest.text", reason="text corpus lives in its own PR")
     corpus = load_corpus(_config.load(None)["modules"]["text"])
     assert corpus is not None

@@ -37,7 +37,8 @@ async def visitors(seed: int | None = None, gap: tuple[float, float] = (6, 15),
             d = {"kind": "phone", "motion": min(1, motion), "light": 0.25,
                  "audio": {"level": min(1, 0.1 + 0.5 * energy * rnd.random()), "voiced": rnd.random() < energy * 0.3},
                  "tilt": {"alpha": 0, "beta": 20 * math.sin(t * nerves * 3), "gamma": 10 * math.cos(t)},
-                 "proximity": {"near": rnd.random() < 0.05}, "held": rnd.random() < curious * 0.2}
+                 "proximity": {"near": rnd.random() < 0.05}, "held": True,   # handheld: the visitor picks the phone up
+                 "shake": min(1.0, nerves * rnd.random() * 0.5)}
             yield P.make(P.SENSOR, d)
             if rnd.random() < curious * 0.04:
                 yield P.make(P.SENSOR, {"kind": "touch", "x": rnd.random(), "y": rnd.random(), "down": True})
