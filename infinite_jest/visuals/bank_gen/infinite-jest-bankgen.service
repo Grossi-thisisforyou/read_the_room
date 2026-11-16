@@ -1,0 +1,47 @@
+# systemd unit: run the INFINITE JEST image generator in the background on the Pi.
+#
+# It starts at boot, generates only in its night-time window (22:00-08:00 by
+# default), freezes while a visitor is present, and restarts itself if it crashes.
+#
+# Install (once; adjust the path in ExecStart if the repo lives elsewhere):
+#     sudo cp infinite-jest-bankgen.service /etc/systemd/system/
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now infinite-jest-bankgen
+#
+# Everyday commands:
+#     systemctl status infinite-jest-bankgen       # is it running?
+#     journalctl -u infinite-jest-bankgen -f       # watch its log (Ctrl+C to stop watching)
+#     sudo systemctl stop infinite-jest-bankgen    # stop for now
+#     sudo systemctl disable infinite-jest-bankgen # don't start at boot any more
+
+[Unit]
+Description=INFINITE JEST image bank generator (stable-diffusion.cpp, low priority)
+After=local-fs.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/read_the_room/infinite_jest/visuals/bank_gen
+Environment=PYTHONUNBUFFERED=1
+# --theme auto: a different theme each night, so a night's images belong together.
+# Add options at the end, e.g. --hours 23-7, --postprocess,
+# or --state-file /tmp/infinite_jest_state.json
+ExecStart=/usr/bin/python3 /home/pi/read_the_room/infinite_jest/visuals/bank_gen/generate.py --theme auto
+
+# Stay out of the way of the renderer and audio.
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+# Optional hard ceiling on memory (the renderer needs some too). Uncomment to use.
+#MemoryMax=8G
+
+# Do NOT add PrivateTmp=yes: the generator must see /tmp/infinite_jest_busy.
+
+Restart=on-failure
+RestartSec=60
+# On stop, generate.py ends the image it is working on; give it a moment.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
