@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""ij-room: the room itself as the input, no phone needed.
+
+Listens through a microphone and, if one is plugged in, watches through a USB
+camera, and tells the show engine what it notices, exactly like the phone would:
+
+  microphone -> loudness, audio.level, audio.voiced     (UDP 8766, 10 times a second)
+  camera     -> small JPEGs on TCP 8767 (the engine finds motion and faces itself),
+                plus where the movement is, as a "tilt" that steers picture and sound
+
+Nothing is recorded or saved: sound is turned into one number per tenth of a
+second and thrown away; camera pictures go to the engine in memory only.
+
+    ij-room                 run (the ij-room service does this)
+    ij-room --check         list microphones and cameras, listen 3 s, print levels
+    ij-room --mic hw:2,0    use that microphone (see: arecord -l)
+    ij-room --no-camera     sound only
+
+Settings can also live in /etc/infinite-jest/room.conf (KEY=value lines):
+MIC=auto  CAMERA=auto  GAIN=1.0
+"""
+from __future__ import annotations
+
+import argparse
+import array
+import json
+import math
+import os
+import re
+import socket
+import subprocess
+import sys
+import threading
+import time
+
+ENGINE = "127.0.0.1"
+UDP_PORT = 8766
+TCP_PORT = 8767
+RATE = 16000
+CHUNK = RATE // 10          # 100 ms
+CONF = "/etc/infinite-jest/room.conf"
+
+
+def log(*a):
+    print("ij-room:", *a, flush=True)
+
+
+# ------------------------------------------------------------------ microphone
+def list_mics() -> list[tuple[str, str]]:
+    """[(device, description)] from `arecord -l`, USB ones first."""
+    try:
+        out = subprocess.run(["arecord", "-l"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return parse_arecord(out)
+
+
+def parse_arecord(out: str) -> list[tuple[str, str]]:
+    found = []
+    for m in re.finditer(r"^card (\d+): (\S+) \[([^\]]*)\], device (\d+): [^\[]*\[([^\]]*)\]", out, re.M):
+        card, cid, cname, dev, dname = m.groups()
+        found.append((f"plughw:CARD={cid},DEV={dev}", f"{cname} / {dname}"))
+    found.sort(key=lambda x: 0 if "usb" in x[1].lower() or "usb" in x[0].lower() else 1)
+    return found
+
+
+def rms_level(samples) -> tuple[float, float]:
+    """(level 0..1 on a log scale, zero-crossing rate) for one chunk of int16 samples."""
+    n = len(samples)
+    if n == 0:
+        return 0.0, 0.0
+    s = 0
+    zc = 0
+    prev = samples[0]
+    for v in samples:
+        s += v * v
+        if (v >= 0) != (prev >= 0):
+            zc += 1
+        prev = v
+    rms = math.sqrt(s / n) / 32768.0
+    db = 20 * math.log10(rms + 1e-9)          # silence ~ -80, speech ~ -35..-15, loud ~ -5
+    level = min(1.0, max(0.0, (db + 60) / 50))
+    return level, zc / n
+
+
+class Ears:
+    """Turns the mic into level + voiced, with a slowly learning noise floor."""
+
+    def __init__(self, gain: float = 1.0):
+        self.gain = gain
+        self.floor = None
+        self.level = 0.0
+        self.voiced = False
+        self._voice_until = 0.0
+
+    def feed(self, samples, now: float) -> None:
+        lvl, zcr = rms_level(samples)
+        lvl = min(1.0, lvl * self.gain)
+        if self.floor is None:
+            self.floor = lvl
+        # the floor follows quiet quickly and loud slowly, so steady hum (fans, traffic) fades out
+        self.floor += (lvl - self.floor) * (0.05 if lvl < self.floor else 0.002)
+        above = max(0.0, lvl - self.floor - 0.03)
+        self.level = min(1.0, above * 2.5)
+        # speech: clearly above the room, zero-crossings in the voice range (not hiss, not rumble)
+        if above > 0.12 and 0.02 < zcr < 0.25:
+            self._voice_until = now + 0.6
+        self.voiced = now < self._voice_until
+
+
+def mic_loop(dev: str, ears: Ears, stop: threading.Event) -> None:
+    while not stop.is_set():
+        cmd = ["arecord", "-q", "-D", dev, "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"]
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            log("cannot start arecord:", e)
+            stop.wait(10)
+            continue
+        log("listening on", dev)
+        try:
+            while not stop.is_set():
+                buf = p.stdout.read(CHUNK * 2)
+                if not buf or len(buf) < 2:
+                    break
+                a = array.array("h")
+                a.frombytes(buf[: len(buf) // 2 * 2])
+                if sys.byteorder == "big":
+                    a.byteswap()
+                ears.feed(a, time.monotonic())
+        finally:
+            p.kill()
+            p.wait()
+        if not stop.is_set():
+            log("microphone stopped (unplugged?); trying again in 5 s")
+            ears.level, ears.voiced = 0.0, False
+            stop.wait(5)
+
+
+# ------------------------------------------------------------------ camera
+class Eyes:
+    def __init__(self):
+        self.x = 0.0          # -1 left .. 1 right, where the movement is
+        self.y = 0.0
+        self.motion = 0.0
+        self.ok = False
+
+
+def camera_loop(index, eyes: Eyes, stop: threading.Event, fps: float = 5.0) -> None:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        log("no OpenCV: camera off (sound only)")
+        return
+    sock = None
+    prev = None
+    while not stop.is_set():
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2) if isinstance(index, int) else cv2.VideoCapture(index)
+        if not cap.isOpened():
+            eyes.ok = False
+            stop.wait(10)
+            continue
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        log("watching through camera", index)
+        eyes.ok = True
+        fails = 0
+        while not stop.is_set():
+            t0 = time.monotonic()
+            ok, img = cap.read()
+            if not ok:
+                fails += 1
+                if fails > 20:
+                    break
+                time.sleep(0.1)
+                continue
+            fails = 0
+            small = cv2.resize(img, (160, 120))
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.int16)
+            if prev is not None:
+                diff = np.abs(gray - prev) > 25
+                eyes.motion = float(diff.mean())
+                if diff.sum() > 40:
+                    ys, xs = np.nonzero(diff)
+                    tx, ty = xs.mean() / 80.0 - 1.0, ys.mean() / 60.0 - 1.0
+                    eyes.x += (tx - eyes.x) * 0.3
+                    eyes.y += (ty - eyes.y) * 0.3
+            prev = gray
+            ok, jpg = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if ok:
+                try:
+                    if sock is None:
+                        sock = socket.create_connection((ENGINE, TCP_PORT), timeout=2)
+                    sock.sendall(jpg.tobytes())
+                except OSError:
+                    if sock:
+                        sock.close()
+                    sock = None      # engine restarting: try again next frame
+            stop.wait(max(0.0, 1.0 / fps - (time.monotonic() - t0)))
+        cap.release()
+        eyes.ok = False
+        log("camera gone; looking again in 10 s")
+        stop.wait(10)
+
+
+def find_camera():
+    for i in range(0, 10):
+        p = f"/dev/video{i}"
+        if not os.path.exists(p):
+            continue
+        # skip the Pi 5's own decoder/ISP nodes: a USB camera says uvcvideo
+        drv = ""
+        try:
+            drv = os.path.basename(os.readlink(f"/sys/class/video4linux/video{i}/device/driver"))
+        except OSError:
+            pass
+        if drv == "uvcvideo":
+            return i
+    return None
+
+
+# ------------------------------------------------------------------ main
+def read_conf() -> dict:
+    out = {}
+    try:
+        for line in open(CONF):
+            m = re.match(r"\s*([A-Z_]+)\s*=\s*(.*?)\s*$", line)
+            if m:
+                out[m.group(1)] = m.group(2).strip('"')
+    except OSError:
+        pass
+    return out
+
+
+def envelope(ears: Ears, eyes: Eyes, seq: int) -> bytes:
+    d = {"kind": "phone", "loudness": round(ears.level, 3),
+         "audio": {"level": round(ears.level, 3), "voiced": ears.voiced}}
+    if eyes.ok:
+        # where the movement is steers the picture like tilting the phone would (+-30 degrees)
+        d["tilt"] = {"alpha": 0.0, "beta": round(eyes.y * 30, 1), "gamma": round(eyes.x * 30, 1)}
+    return json.dumps({"type": "sensor", "ts": time.time(), "seq": seq, "data": d}).encode()
+
+
+def main() -> int:
+    conf = read_conf()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--mic", default=conf.get("MIC", "auto"))
+    ap.add_argument("--camera", default=conf.get("CAMERA", "auto"))
+    ap.add_argument("--no-camera", action="store_true")
+    ap.add_argument("--gain", type=float, default=float(conf.get("GAIN", "1.0") or 1.0))
+    ap.add_argument("--check", action="store_true")
+    a = ap.parse_args()
+
+    mics = list_mics()
+    mic = a.mic
+    if mic in ("", "auto"):
+        mic = mics[0][0] if mics else None
+    cam = None
+    if not a.no_camera and a.camera not in ("off", "none", "no"):
+        cam = find_camera() if a.camera in ("", "auto") else (int(a.camera) if a.camera.isdigit() else a.camera)
+
+    if a.check:
+        print("Microphones:", *([f"  {d}  ({n})" for d, n in mics] or ["  none found (plug in a USB mic or sound card)"]), sep="\n")
+        print("Camera:", f"/dev/video{cam}" if isinstance(cam, int) else (cam or "none (USB camera optional)"))
+        if mic:
+            ears, stop = Ears(a.gain), threading.Event()
+            t = threading.Thread(target=mic_loop, args=(mic, ears, stop), daemon=True)
+            t.start()
+            print(f"Listening on {mic} for 6 s: talk or clap.")
+            for _ in range(30):
+                time.sleep(0.2)
+                bar = "#" * int(ears.level * 40)
+                print(f"\r  level {ears.level:4.2f} {'VOICE' if ears.voiced else '     '} {bar:<40}", end="", flush=True)
+            print()
+            stop.set()
+        return 0 if mic else 1
+
+    stop = threading.Event()
+    ears, eyes = Ears(a.gain), Eyes()
+    if mic:
+        threading.Thread(target=mic_loop, args=(mic, ears, stop), daemon=True).start()
+    else:
+        log("no microphone found; plug one in and run: sudo systemctl restart ij-room")
+    if cam is not None:
+        threading.Thread(target=camera_loop, args=(cam, eyes, stop), daemon=True).start()
+    else:
+        log("no USB camera (optional): sound only")
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    seq = 0
+    try:
+        while True:
+            seq += 1
+            try:
+                udp.sendto(envelope(ears, eyes, seq), (ENGINE, UDP_PORT))
+            except OSError:
+                pass
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        stop.set()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

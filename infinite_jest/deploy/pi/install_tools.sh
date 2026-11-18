@@ -7,6 +7,9 @@ WHO="${1:-${SUDO_USER:-pi}}"
 install -m 755 "$HERE/ij-doctor" /usr/local/bin/ij-doctor
 install -m 755 "$HERE/ij-watchdog" /usr/local/sbin/ij-watchdog
 install -m 755 "$HERE/ij-blackout" /usr/local/sbin/ij-blackout
+install -m 755 "$HERE/ij-room" /usr/local/bin/ij-room
+install -d /etc/infinite-jest
+[[ -f /etc/infinite-jest/room.conf ]] || printf "# ij-room settings (then: sudo systemctl restart ij-room)\n# MIC=auto or a device from: arecord -l   e.g. MIC=plughw:CARD=Device,DEV=0\nMIC=auto\n# CAMERA=auto, off, or a number (0 = /dev/video0)\nCAMERA=auto\n# GAIN: raise if the room reacts too little to voices, lower if too much\nGAIN=1.0\n" > /etc/infinite-jest/room.conf
 echo "    ij-doctor installed (type: ij-doctor)"
 if [[ -d /run/systemd/system ]]; then
   install -m 644 "$HERE/systemd/ij-watchdog.service" "$HERE/systemd/ij-blackout.service" /etc/systemd/system/
@@ -22,9 +25,12 @@ if [[ -d /run/systemd/system ]]; then
   systemctl restart systemd-journald 2>/dev/null || true
   echo "    logs kept in memory only (nothing about the room stays on the card)"
   systemctl daemon-reload
-  systemctl enable ij-watchdog.service ij-blackout.service >/dev/null 2>&1
+  sed "s/@USER@/$WHO/" "$HERE/systemd/ij-room.service" > /etc/systemd/system/ij-room.service
+  systemctl daemon-reload
+  systemctl enable ij-watchdog.service ij-blackout.service ij-room.service >/dev/null 2>&1
   systemctl restart ij-watchdog.service || true
-  echo "    watchdog and blackout services on"
+  systemctl restart ij-room.service || true
+  echo "    watchdog, blackout and room listener (microphone + USB camera) services on"
 fi
 # Quiet boot: no boot text or blinking cursor on the projector.
 CMD=/boot/firmware/cmdline.txt; [[ -f $CMD ]] || CMD=/boot/cmdline.txt
