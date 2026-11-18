@@ -1,0 +1,12 @@
+# INFINITE JEST phone settings. Copied to /home/user/.ij-phone.conf on install.
+# One "key = value" per line. Anything left out uses the default in agent.py.
+
+hosts = 192.168.1.10, inartwetrust.local   # the Pi, tried in order
+ws_port = 8765
+udp_port = 8766
+rate_hz = 20            # sensor messages per second (tilt drives the picture)
+frame_fps = 4           # camera frames per second to the Pi (max 4)
+camera_device = /dev/video1   # front camera; /dev/video0 is the rear one
+frames_after_consent = 0      # 1 = camera frames only after the visitor taps in
+local_prompts = 1       # either/or questions when the Pi sends none
+idle_reset_s = 90       # back to the first screen after this long with nobody

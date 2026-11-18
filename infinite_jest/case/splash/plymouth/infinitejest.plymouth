@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Infinite Jest
+Description=Boot splash for the Infinite Jest installation: a smeared figure in a cage, scrawled caps, near-black.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/infinitejest
+ScriptFile=/usr/share/plymouth/themes/infinitejest/infinitejest.script

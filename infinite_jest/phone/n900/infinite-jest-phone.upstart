@@ -1,0 +1,15 @@
+# /etc/event.d/infinite-jest-phone  (Maemo 5 upstart job, installed by install.sh)
+# Starts the INFINITE JEST phone agent full screen after the desktop is up,
+# as user "user", and restarts it if it ever exits.
+description "INFINITE JEST phone agent"
+start on started hildon-desktop
+stop on starting shutdown
+console none
+respawn
+
+script
+    sleep 20
+    # Wi-Fi power saving drops packets; this needs root, so it runs here, not in the agent
+    /sbin/iwconfig wlan0 power off || true
+    exec su - user -c "DISPLAY=:0 /usr/bin/run-standalone.sh /usr/bin/python2.5 /opt/infinite-jest-phone/agent.py >> /home/user/.ij-phone.log 2>&1"
+end script
