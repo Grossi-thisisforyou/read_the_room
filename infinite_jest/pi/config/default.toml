@@ -24,6 +24,9 @@ width = 1920                  # Full HD
 height = 1080
 fps = 30
 show_debug = false            # D on a keyboard toggles it
+second_screen = true          # HDMI 1 shows the room telemetry; skipped quietly if only one screen is plugged in
+second_display = 1
+second_fps = 10
 retry_s = 5                   # projector off or unplugged: try to open it again this often
 
 # When does the room count as occupied?

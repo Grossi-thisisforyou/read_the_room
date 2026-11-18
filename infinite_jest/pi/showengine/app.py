@@ -85,6 +85,11 @@ class Runner:
         self.display_retry = float(cfg["display"].get("retry_s", 5.0))
         self._next_display_try = 0.0
         self._hdmi_was: bool | None = None
+        self.screen2 = None
+        if cfg["display"].get("second_screen", True) and cfg["display"].get("enabled", True):
+            from .second_screen import SecondScreen
+            self.screen2 = SecondScreen(int(cfg["display"].get("second_display", 1)),
+                                        float(cfg["display"].get("second_fps", 10)))
 
     def _open_display(self) -> tuple[int, int] | None:
         d = self.cfg["display"]
@@ -98,13 +103,16 @@ class Runner:
             pygame.font.init()
             if d.get("fullscreen", True):
                 # exactly the configured mode (1920x1080 by default), not whatever the projector reports
-                self.screen = pygame.display.set_mode((int(d["width"]), int(d["height"])), pygame.FULLSCREEN)
+                self.screen = pygame.display.set_mode((int(d["width"]), int(d["height"])), pygame.FULLSCREEN,
+                                                      display=int(d.get("main_display", 0)))
             else:
                 self.screen = pygame.display.set_mode((int(d["width"]), int(d["height"])))
             pygame.display.set_caption("Infinite Jest")
             pygame.mouse.set_visible(False)
             self.font = pygame.font.Font(None, 28)
             log.info("display %dx%d via %s", *self.screen.get_size(), pygame.display.get_driver())
+            if self.screen2 is not None:
+                self.screen2.reset()            # pygame.display was re-initialised: open it again
             return self.screen.get_size()
         except Exception as e:
             plugins.report(log, "display", f"no display ({e}); running without picture, "
@@ -219,6 +227,8 @@ class Runner:
                         pygame.display.flip()
                     except pygame.error as e:
                         self._lost_display(str(e))
+                    if self.screen2 is not None and self.screen is not None:
+                        self.screen2.update(engine.state, lambda: self._status2(engine, hub), now)
                 frames += 1
                 hub.last_frame_ts = time.time()
                 if now - fps_t >= 2.0:
@@ -238,6 +248,13 @@ class Runner:
             if self.screen is not None:
                 pygame.display.quit()
             log.info("stopped")
+
+    @staticmethod
+    def _status2(engine: Engine, hub: Hub) -> dict:
+        roles: dict[str, int] = {}
+        for r in hub.clients.values():
+            roles[r] = roles.get(r, 0) + 1
+        return {**engine.status(), "fps": round(hub.fps, 1), "clients": roles}
 
     def stop(self) -> None:
         self.running = False

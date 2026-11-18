@@ -29,7 +29,10 @@ DEFAULTS: dict[str, Any] = {
         "width": 1920,
         "height": 1080,
         "fps": 30,
-        "show_debug": False,   # overlay with phase / presence; also toggled with D
+        "show_debug": False,
+        "second_screen": True,  # HDMI 1: the room's telemetry; skipped quietly if there's no second display
+        "second_display": 1,
+        "second_fps": 10,   # overlay with phase / presence; also toggled with D
         "retry_s": 5.0,        # no display (projector off): try again this often
     },
     "presence": {},            # see presence.PresenceConfig
