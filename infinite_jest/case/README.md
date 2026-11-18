@@ -47,6 +47,26 @@ openscad -D 'part="lid"'  -o cage_lid.stl  cage_case.scad
 Not yet test-printed: print the lid first (cheap, quick) and check the screw
 holes line up before printing the base.
 
+## Alternative printed case: The Smear (print/smear_*)
+
+A head sliced into 16 thin vertical fins. Each fin drifts sideways, bobs and
+twists a little more than the last, so the head is a motion blur frozen in
+plastic: from the front it resolves into a face, from an angle it smears.
+The mouth is open in a scream and the Pi glows inside it. The gaps between
+fins are the ventilation.
+
+| File | Size | Notes |
+| --- | --- | --- |
+| `print/smear_head.stl` | 124 x 147 x 147 mm | Base plate + fins, prints upright, no supports. About 380 cm3, a 12-16 h print. |
+| `print/smear_sled.stl` | 112 x 61 x 12 mm | The Pi screws onto it and it slides into the mouth from the back. About 1 h. |
+| `print/smear_head.scad` | OpenSCAD source | `smear_amp`, `lift`, `tilt` change how violent the smear is. |
+
+Needs a printer bed of at least 130 x 125 mm and 150 mm of height. PETG or
+ASA, matte black, 0.2 mm layers, 20 % infill. Fins are 2.2 mm, so they print
+solid. Hardware: 4x M2.5 x 6 mm (Pi to sled), 2x M3 x 10 mm (sled to base).
+Ports: USB and Ethernet out the back of the head, USB-C and micro-HDMI
+through the open side, microSD through the mouth.
+
 ## Backup case: the junction box
 
 A steel electrical pull box, 12 x 12 x 4 in, painted matte black and scrawled
