@@ -44,7 +44,7 @@ conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$KIT/hotspot.tx
 SSID=$(conf WIFI_NAME); PSK=$(conf WIFI_PASSWORD)
 online() {
   if command -v curl >/dev/null; then curl -sSk -I -m 30 -o /dev/null https://pypi.org/simple/ 2>/dev/null
-  else python3 -c "import urllib.request,ssl;urllib.request.urlopen(urllib.request.Request("https://pypi.org/simple/",method="HEAD"),timeout=30,context=ssl._create_unverified_context())" 2>/dev/null; fi
+  else python3 -c "import urllib.request,ssl;urllib.request.urlopen(urllib.request.Request('https://pypi.org/simple/',method='HEAD'),timeout=30,context=ssl._create_unverified_context())" 2>/dev/null; fi
 }
 command -v rfkill >/dev/null && rfkill unblock wifi
 if ! online && [[ -n $SSID ]]; then
