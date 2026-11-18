@@ -281,7 +281,15 @@ def main() -> int:
     if mic:
         threading.Thread(target=mic_loop, args=(mic, ears, stop), daemon=True).start()
     else:
-        log("no microphone found; plug one in and run: sudo systemctl restart ij-room")
+        log("no microphone yet; plug one in, it is picked up within 10 s")
+
+        def wait_for_mic():
+            while not stop.wait(10):
+                found = list_mics()
+                if found:
+                    mic_loop(found[0][0], ears, stop)
+                    return
+        threading.Thread(target=wait_for_mic, daemon=True).start()
     if cam is not None:
         threading.Thread(target=camera_loop, args=(cam, eyes, stop), daemon=True).start()
     else:
