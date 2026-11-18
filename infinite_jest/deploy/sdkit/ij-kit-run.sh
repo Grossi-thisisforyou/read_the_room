@@ -42,7 +42,10 @@ else
 # ---- 1b. no stick: internet, once
 conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$KIT/hotspot.txt" | tr -d '\r' | sed 's/^"\(.*\)"$/\1/' | head -n1; }
 SSID=$(conf WIFI_NAME); PSK=$(conf WIFI_PASSWORD)
-online() { curl -sS -m 8 -o /dev/null https://pypi.org/simple/ 2>/dev/null || curl -sSk -m 8 -o /dev/null https://pypi.org/simple/; }
+online() {
+  if command -v curl >/dev/null; then curl -sSk -m 8 -o /dev/null https://pypi.org/simple/ 2>/dev/null
+  else python3 -c "import urllib.request,ssl;urllib.request.urlopen('https://pypi.org/simple/',timeout=8,context=ssl._create_unverified_context())" 2>/dev/null; fi
+}
 command -v rfkill >/dev/null && rfkill unblock wifi
 if ! online && [[ -n $SSID ]]; then
   say "Joining the Wi-Fi '$SSID'"
@@ -63,6 +66,7 @@ online || finish FAIL "NO INTERNET. Check the Wi-Fi name and password in ij-kit/
 d=$(curl -sSkI -m 8 https://pypi.org/ | sed -n 's/^[Dd]ate: //p' | tr -d '\r')
 [[ -n $d ]] && date -s "$d" >/dev/null && echo "   clock: $(date)"
 echo "   online."
+command -v curl >/dev/null || { apt-get update -q && apt-get install -y -q curl ca-certificates; }
 
 # ---- 2. download onto the Pi itself (packages come from apt during the install)
 . /etc/os-release
