@@ -684,6 +684,9 @@ def main():
                     help="also the on-Pi image generator: stable-diffusion.cpp + SD-Turbo (5.2 GB)")
     ap.add_argument("--no-faces", action="store_true", help="skip OpenCV (saves about 150 MB)")
     ap.add_argument("--no-models", action="store_true", help="skip model downloads (testing)")
+    ap.add_argument("--online", action="store_true",
+                    help="made ON the Pi while it has internet: no .deb files, INSTALL.sh "
+                         "installs the system packages from the Pi's own package servers")
     a = ap.parse_args()
 
     for tool in ("curl",):
@@ -716,7 +719,7 @@ def main():
                 info("The Pi's SD card is in this Mac: image from %s, so %s only." % (m.group(0), rel))
                 releases = [rel]
 
-    need = (700 << 20) * len(releases) + (0 if a.no_llm or a.no_models else 1300 << 20) + \
+    need = (0 if a.online else 700 << 20) * len(releases) + (0 if a.no_llm or a.no_models else 1300 << 20) + \
            (5600 << 20 if a.images and not a.no_models else 0)
     if free_bytes(out) < need:
         die("Not enough free space in %s: need about %s, have %s." % (out, human(need), human(free_bytes(out))))
@@ -735,7 +738,17 @@ def main():
                 "made_on": platform.platform(), "releases": {}, "options": {
                     "llm": not a.no_llm, "images": a.images, "faces": not a.no_faces}}
     for rel in releases:
-        manifest["releases"][rel] = do_debs(bundle, rel, cache, groups)
+        if a.online:
+            d = os.path.join(bundle, "debs", rel)
+            os.makedirs(d, exist_ok=True)
+            names = [n for g in groups for n in APT_PACKAGES[g]]
+            with open(os.path.join(d, "wanted.txt"), "w") as f:
+                f.write("\n".join(names) + "\n")
+            open(os.path.join(d, "ONLINE"), "w").close()
+            manifest["releases"][rel] = {"online": True, "wanted": names}
+            info("%s: system packages will come from the Pi's own package servers" % rel)
+        else:
+            manifest["releases"][rel] = do_debs(bundle, rel, cache, groups)
     which = ([] if a.no_llm else ["llama"]) + (["sd"] if a.images else [])
     manifest["sources"] = do_sources(bundle, which) if which else {}
     manifest["models"] = {} if a.no_models else do_models(bundle, None if a.no_llm else a.model, a.images)

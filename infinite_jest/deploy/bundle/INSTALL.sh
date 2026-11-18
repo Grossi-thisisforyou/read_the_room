@@ -118,7 +118,8 @@ fi
 RELEASE="${IJ_RELEASE:-${VERSION_CODENAME:-unknown}}"
 info "System:  ${PRETTY_NAME:-unknown} ($RELEASE)"
 DEBS="$BUNDLE/debs/$RELEASE"
-if [[ $CODE_ONLY == 0 && ! -f "$DEBS/Packages" ]]; then
+ONLINE=0; [[ -f "$DEBS/ONLINE" ]] && ONLINE=1
+if [[ $CODE_ONLY == 0 && $ONLINE == 0 && ! -f "$DEBS/Packages" ]]; then
   have="$(ls "$BUNDLE/debs" 2>/dev/null | tr '\n' ' ')"
   stop "The stick has packages for: ${have:-nothing}, but this Pi runs '$RELEASE'." \
     "    On the Mac run:  python3 make_bundle.py --release $RELEASE   and try again."
@@ -136,7 +137,17 @@ fi
 ok "Pi checked ($RELEASE, $ARCH, ${free_gb} GB free)"
 
 # ------------------------------------------------------------------ 2. packages
-if [[ $CODE_ONLY == 0 ]]; then
+if [[ $CODE_ONLY == 0 && $ONLINE == 1 ]]; then
+  say "2. Installing system packages from the internet (made on this Pi)"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -q || stop "apt could not reach the package servers. Is the Pi online?"
+  # shellcheck disable=SC2046
+  if apt-get install -q -y --no-install-recommends $(cat "$DEBS/wanted.txt"); then
+    ok "System packages ($(wc -l < "$DEBS/wanted.txt") wanted)"
+  else
+    stop "Installing the system packages failed." "    Read: $LOG"
+  fi
+elif [[ $CODE_ONLY == 0 ]]; then
   say "2. Installing system packages from the stick (no internet)"
   mkdir -p "$CACHE/debs" "$CACHE/lists/partial" "$CACHE/empty.d"
   info "Copying $(ls "$DEBS"/*.deb | wc -l) packages to the Pi..."
