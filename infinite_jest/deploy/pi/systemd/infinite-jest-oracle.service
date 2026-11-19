@@ -1,0 +1,19 @@
+# The oracle: asks the local language model (llama-server) for the words on the
+# wall and the phone, and sends them to the show engine. INSTALL.sh fills in @...@.
+[Unit]
+Description=Infinite Jest oracle (local language model -> show words)
+After=infinite-jest.service llama-server.service
+Wants=llama-server.service
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@REPO@
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m infinite_jest.oracle --ws ws://127.0.0.1:8765/ws
+Nice=5
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

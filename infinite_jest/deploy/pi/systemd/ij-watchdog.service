@@ -1,0 +1,17 @@
+# Keeps the show alive unattended: restarts a frozen engine or language model,
+# pauses the image generator when memory is low, nightly fresh start at 06:00.
+[Unit]
+Description=Infinite Jest watchdog
+After=infinite-jest.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/ij-watchdog
+Environment=PYTHONUNBUFFERED=1
+# Hour for the nightly fresh start while the room is empty; -1 = never
+Environment=IJ_FRESH_START_HOUR=6
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

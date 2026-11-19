@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# ij-blackout: whenever the show isn't drawing, the projector shows pure black.
+#
+# The Pi's text console is moved to an empty screen (virtual terminal 8): no
+# login prompt, no boot messages, no cursor. The engine draws straight to the
+# projector on top of it; if the engine stops, black is what's left.
+# A keyboard plugged into the Pi still gets a login with Ctrl+Alt+F1.
+#
+#   ij-blackout          park the console on the black screen (done at boot)
+#   ij-blackout --off    go back to the normal console (tty1)
+VT=8
+if [[ ${1:-} == --off ]]; then chvt 1; exit 0; fi
+# an empty, black, cursorless terminal
+openvt -c "$VT" -f -- true 2>/dev/null || true
+if [[ -w /dev/tty$VT ]]; then
+  printf '\033[?25l\033[40m\033[30m\033[2J\033[H' > /dev/tty$VT
+  setterm --cursor off --blank 0 --powersave off > /dev/tty$VT 2>/dev/null < /dev/tty$VT || true
+fi
+[[ -w /sys/class/graphics/fbcon/cursor_blink ]] && echo 0 > /sys/class/graphics/fbcon/cursor_blink
+chvt "$VT" 2>/dev/null || true

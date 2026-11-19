@@ -1,0 +1,14 @@
+# Keeps 192.168.1.10 on whichever show connection is live (cable first, Wi-Fi second).
+[Unit]
+Description=Infinite Jest network guard (show address 192.168.1.10)
+After=network-pre.target NetworkManager.service
+Wants=network-pre.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/ij-netguard
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
