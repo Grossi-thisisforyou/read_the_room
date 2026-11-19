@@ -93,9 +93,12 @@ class Ears:
         self.voiced = False
         self._voice_until = 0.0
 
+    raw = 0.0      # input level before the noise floor (for --check)
+
     def feed(self, samples, now: float) -> None:
         lvl, zcr = rms_level(samples)
         lvl = min(1.0, lvl * self.gain)
+        self.raw = lvl
         if self.floor is None:
             self.floor = lvl
         # the floor follows quiet quickly and loud slowly, so steady hum (fans, traffic) fades out
@@ -108,7 +111,28 @@ class Ears:
         self.voiced = now < self._voice_until
 
 
+def unmute_capture(dev: str) -> None:
+    """USB adapters often start with the mic muted or at 0: switch capture on, gain up."""
+    m = re.search(r"CARD=([^,]+)", dev) or re.search(r"hw:(\w+)", dev)
+    if not m:
+        return
+    card = m.group(1)
+    try:
+        out = subprocess.run(["amixer", "-c", card, "scontrols"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    for name in re.findall(r"'([^']+)'", out):
+        low = name.lower()
+        if "mic" in low or "capture" in low:
+            subprocess.run(["amixer", "-q", "-c", card, "sset", name, "80%", "cap", "unmute"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if "auto gain" in low:
+            subprocess.run(["amixer", "-q", "-c", card, "sset", name, "on"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def mic_loop(dev: str, ears: Ears, stop: threading.Event) -> None:
+    unmute_capture(dev)
     while not stop.is_set():
         cmd = ["arecord", "-q", "-D", dev, "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"]
         try:
@@ -271,7 +295,7 @@ def main() -> int:
             for _ in range(30):
                 time.sleep(0.2)
                 bar = "#" * int(ears.level * 40)
-                print(f"\r  level {ears.level:4.2f} {'VOICE' if ears.voiced else '     '} {bar:<40}", end="", flush=True)
+                print(f"\r  input {ears.raw:4.2f}  level {ears.level:4.2f} {'VOICE' if ears.voiced else '     '} {bar:<40}", end="", flush=True)
             print()
             stop.set()
         return 0 if mic else 1
