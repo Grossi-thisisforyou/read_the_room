@@ -22,6 +22,9 @@ sudo tar -C "$R" -czf /var/cache/infinite-jest/code-before-update-$STAMP.tgz --e
 cp -a /tmp/ij-new/infinite_jest/. "$R/infinite_jest/"
 rm -rf /tmp/ij-new
 sudo bash "$R/infinite_jest/deploy/pi/install_tools.sh" "$USER" >/dev/null 2>&1 || true
+# the room's spoken voice (small; skipped quietly if there's no internet)
+command -v espeak-ng >/dev/null || sudo apt-get install -y -q espeak-ng >/dev/null 2>&1 || { timeout 300 sudo apt-get update -q >/dev/null 2>&1; timeout 300 sudo apt-get install -y -q espeak-ng >/dev/null 2>&1; } \
+  || echo "(espeak-ng could not be installed now: the room stays silent in words, everything else works)"
 sudo systemctl daemon-reload
 sudo systemctl restart infinite-jest ij-room ij-watchdog
 sleep 8

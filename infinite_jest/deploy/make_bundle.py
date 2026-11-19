@@ -52,7 +52,7 @@ BUNDLE_FORMAT = 1
 
 # apt packages the Pi needs, by job. Names are the same on bookworm and trixie.
 APT_PACKAGES = {
-    "engine": ["python3-aiohttp", "python3-pygame", "python3-numpy", "alsa-utils"],
+    "engine": ["python3-aiohttp", "python3-pygame", "python3-numpy", "alsa-utils", "espeak-ng"],
     "faces": ["python3-opencv", "opencv-data"],
     "build": ["build-essential", "cmake", "curl", "ca-certificates"],
     "tools": ["rfkill", "iw", "wireless-regdb", "exfatprogs", "kbd"],

@@ -205,7 +205,7 @@ def camera_loop(index, eyes: Eyes, stop: threading.Event, fps: float = 5.0) -> N
             if prev is not None:
                 diff = np.abs(gray - prev) > 25
                 eyes.motion = float(diff.mean())
-                if diff.sum() > 40:
+                if diff.sum() > 400:
                     ys, xs = np.nonzero(diff)
                     tx, ty = xs.mean() / 80.0 - 1.0, ys.mean() / 60.0 - 1.0
                     eyes.x += (tx - eyes.x) * 0.3
