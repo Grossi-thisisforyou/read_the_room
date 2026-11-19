@@ -1,0 +1,18 @@
+# The local language model (Qwen via llama.cpp) for the oracle. install.sh --with-llm fills in the @...@ values.
+# Kept polite on purpose: 2 threads, low priority, pinned to CPU cores 2-3, so the
+# picture and the sound never stutter while it writes.
+[Unit]
+Description=Infinite Jest local language model (llama.cpp llama-server)
+After=local-fs.target
+
+[Service]
+Type=simple
+User=@USER@
+Nice=10
+CPUAffinity=2 3
+ExecStart=@HOME@/llama.cpp/build/bin/llama-server --model @MODEL@ --host 127.0.0.1 --port 8080 --threads 2 --ctx-size 2048 --parallel 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,78 @@
+# Infinite Jest show engine settings.
+# The installer copies this file to ~/.config/infinite-jest/engine.toml on the Pi.
+# Edit THAT copy, then: sudo systemctl restart infinite-jest
+# Anything you leave out uses the built-in default.
+
+log_level = "INFO"
+state_hz = 10                 # how often the engine tells everyone the current state
+mode = "handheld"             # handheld: picking up the N900 starts a visit, putting it down 8 s ends it. "fixed": the room itself counts
+
+[network]
+host = "0.0.0.0"
+port = 8765                   # WebSocket at /ws, control page at /, health at /status
+udp_port = 8766               # N900 sensor fast lane (0 = off)
+tcp_port = 8767               # N900 camera JPEG stream (0 = off)
+# Who may connect as "control" (wipe, blackout), "oracle" or "profiler" (both put text on
+# the wall). Addresses or networks. Anyone else asking for those roles is treated as a phone.
+# Tighter: ["127.0.0.1", "::1", "192.168.1.X"] with X = Baby's laptop's reserved address.
+privileged_from = ["127.0.0.1", "::1", "192.168.1.0/24"]
+
+[display]
+enabled = true
+fullscreen = true             # the projector, via HDMI 0, at exactly width x height
+width = 1920                  # Full HD
+height = 1080
+fps = 30
+show_debug = false            # D on a keyboard toggles it
+second_screen = true          # HDMI 1 shows the room telemetry; skipped quietly if only one screen is plugged in
+second_display = 1
+second_fps = 10
+retry_s = 5                   # projector off or unplugged: try to open it again this often
+
+# When does the room count as occupied?
+[presence]
+on_threshold = 0.45           # 0..1 score needed to count as "someone is here"
+off_threshold = 0.2
+on_hold = 1.0                 # seconds above the threshold before a visit starts
+off_hold = 8.0                # seconds of nothing before the visitor counts as gone
+stale_after = 3.0             # phone silent this long = nobody there
+
+# The shape of one visit, in seconds.
+[visit]
+approach_time = 3.0
+min_profiling = 6.0
+profiling_timeout = 20.0
+confidence_to_hook = 0.5
+hook_min_dwell = 8.0
+max_visit = 180.0
+release_time = 50.0           # the confession, line by line
+wipe_time = 12.0              # the dossier struck out, last line held 2 s
+
+[modules]
+visuals = "infinite_jest.visuals"
+audio = "infinite_jest.audio"
+profiler = "infinite_jest.profiler"
+text = "infinite_jest.text"     # the voice of the room; [phone_lines] below are the fallback
+use_fallbacks = true          # built-in picture and sound if a module is missing
+profiler_in_process = true
+
+# What the N900 screen says at each phase. text = words; ask = a question
+# the visitor can answer on the slide-out keyboard.
+[phone_lines.approach]
+text = "I see you."
+[phone_lines.profiling]
+ask = "What do you never tell anyone?"
+[phone_lines.hook]
+text = "This part was made for you."
+[phone_lines.release]
+text = "Thank you for your data."
+[phone_lines.wipe]
+text = "Deleted. Nothing about you was kept."
+
+[audio]
+audio_device = "default"      # "default" = HDMI to the projector; a USB DAC is usually "plughw:1,0" (see: aplay -l)
+volume = 0.8
+
+[visuals]
+
+[profiler]
