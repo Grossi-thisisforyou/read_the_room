@@ -15,6 +15,7 @@ from . import director, plugins, protocol as P
 from .fallback_profile import FallbackProfiler
 from .frames import FrameAnalyzer
 from .presence import Presence, PresenceConfig
+from .room import Ambient, Listen
 from .tilt import Tilt
 from .voice import Voice, load_corpus
 from .visit import VisitConfig, VisitMachine, visible_text
@@ -71,6 +72,10 @@ class Engine:
         pcfg = PresenceConfig(**_dataclass_kwargs(PresenceConfig, cfg.get("presence", {})))
         pcfg.handheld = self.mode == "handheld"
         self.presence = Presence(pcfg)
+        room = cfg.get("room") if isinstance(cfg.get("room"), dict) else {}
+        self.ambient = Ambient(room)    # the room's own background: hum, the speaker, camera flicker
+        self.listen = Listen(room)      # the room answers a voice (level and voiced only)
+        self._heard_line: str | None = None
         self.machine = VisitMachine(VisitConfig(**_dataclass_kwargs(VisitConfig, cfg.get("visit", {}))), now)
         self.fallback = FallbackProfiler()
         self.frames = FrameAnalyzer()
@@ -162,9 +167,18 @@ class Engine:
         kind = d.get("kind", "phone")
         if kind == "phone":
             clean = clean_sensor(d)
+            visiting = self.machine.phase in ("approach", "profiling", "hook")
+            self.ambient.sensor(clean, now, frozen=visiting)   # only what stands out of the background
+            if self.mode == "fixed" and "tilt" in clean and not self.ambient.moving(now):
+                # fixed mode: the "tilt" is where the camera sees movement; with nothing
+                # moving it is flicker, and the picture shouldn't drift after it
+                clean.pop("tilt")
+                d = {k: v for k, v in d.items() if k != "tilt"}
             self.sensor.update(clean)
             self._watch_cover(clean, now)
             d = {**d, **clean}            # the modules get the contract fields in their contract shapes
+            if self.listen.feed(clean.get("audio"), now, visiting and not self.machine.visit.opted_out):
+                self._heard_line = self.voice.heard(self.machine, now) or ""
             msg = {**msg, "data": d}
             self.tilt.feed(d, now)
             plugins.call(self.visuals, "on_sensor", d)
@@ -257,6 +271,9 @@ class Engine:
         self._last_frame_t = now
         self.stats["frame"] += 1
         feats = self.frames.analyze(rgb)
+        if "motion" in feats:
+            visiting = self.machine.phase in ("approach", "profiling", "hook")
+            feats["motion"] = self.ambient.camera(feats["motion"], now, frozen=visiting)
         # camera cues join the phone's reading; the explicit "presence" from the phone still wins
         merged = dict(self.sensor)
         for k, v in feats.items():
@@ -278,6 +295,7 @@ class Engine:
             if self.blackout:
                 self.presence.reset()
                 self.tilt.reset()
+                self.listen.reset()
                 self.sensor.clear()
                 self.frames.reset()
         elif cmd == "scene":
@@ -305,6 +323,7 @@ class Engine:
                                           self.tilt.state(), round(self.tilt.shake, 3))
         self.state["steer"] = self.tilt.steer()
         self.state["mode"] = self.mode
+        self._listening(self.state, now)
         for line in self.voice.tick(self.machine, now, self.state["steer"], self.machine.phase_t(now)):
             self.emit(P.make(P.PHONE, line), {"phone"})
         self.voice.apply(self.state, self.machine, now)
@@ -315,6 +334,28 @@ class Engine:
             self._last_state_emit = now
             self.emit(P.make(P.STATE, self.state), None)
         return self.state
+
+    def _listening(self, st: dict, now: float) -> None:
+        """The room answering a sound: a jolt in picture and sound (steer.shake makes the
+        visuals glitch and cut, the music stutter), a little more drive, and the whispered
+        line spoken in the room's voice. Asks once if a visitor stays silent."""
+        m = self.machine
+        if (m.phase == "hook" and not m.visit.opted_out and self.listen.heard_n == 0
+                and self.listen.quiet_for(now) >= float(self.cfg.get("invite_after_s", 25.0))
+                and not self.voice.invited):
+            line = self.voice.invite(m, now)
+            if line:
+                self._heard_line = line
+        if self._heard_line is not None:
+            line, self._heard_line = self._heard_line, None
+            if line and self.cfg.get("speak", True):
+                plugins.call(self.audio, "say", line)
+        pulse = self.listen.tick(now)
+        st["heard"] = round(pulse, 3)
+        if pulse > 0.0:
+            st["intensity"] = round(min(1.0, st["intensity"] + 0.3 * pulse), 3)
+            steer = st["steer"]
+            steer["shake"] = round(max(float(steer.get("shake", 0.0)), 0.8 * pulse), 3)
 
     def _background(self, st: dict, now: float) -> None:
         """Discreet mode: the reading is gathered in the background. Before the
@@ -348,6 +389,7 @@ class Engine:
         m = self.machine
         if new == "approach":
             self.stats["visits"] += 1
+            self.listen.reset()
             self.fallback.reset()
         if new == "hook" and m.visit.hook is None:
             prof = self.fallback.profile()
@@ -373,6 +415,8 @@ class Engine:
 
     def _wipe_everything(self, visitor_id: str | None) -> None:
         self._near_since = None
+        self.listen.reset()
+        self._heard_line = None
         self.fallback.reset()
         self.frames.reset()
         for k in ("touch",):

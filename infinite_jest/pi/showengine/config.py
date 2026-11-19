@@ -57,6 +57,8 @@ DEFAULTS: dict[str, Any] = {
     "profiler": {},
     "mode": "handheld",        # "handheld": picking the N900 up starts a visit; "fixed": camera/room cues do
     "discreet": True,          # gather in the background; show what it learned only in the confession
+    "speak": True,             # the room says its answers aloud (audio module + espeak-ng; silent without)
+    "invite_after_s": 25.0,    # a silent visitor is asked to speak once, this long into the hook
     "build_s": 90.0,           # seconds for the visitor's figure to come together (state.build 0..1)
     "state_hz": 10,            # how often "state" goes out
     "log_level": "INFO",

@@ -49,6 +49,13 @@ def load_corpus(module_name: str | None) -> Any | None:
         return None
 
 
+# the room answering a sound (Baby, 2026-11-19: "make it listen and have an interaction
+# with me"). Lowercase whispers: they tell the visitor it hears them, never what it learned.
+HEARD = ("i heard that.", "again.", "say it again.", "go on.", "closer.", "i'm listening.",
+         "louder.", "yes.", "i know.", "keep talking.", "don't stop.", "i hear you.")
+INVITE = ("say something.", "talk to me.", "you can speak.", "i can hear you.", "say anything.")
+
+
 class Voice:
     def __init__(self, corpus: Any | None, phone_lines: dict | None = None, rng: random.Random | None = None,
                  discreet: bool = True):
@@ -84,6 +91,7 @@ class Voice:
         self.opted_out = False            # left alone until the wipe: no lines, no reveal
         self.hook_started: float | None = None
         self.visit_started: float | None = None
+        self.invited = False
 
     def _pick(self, ctx: dict | None = None, **tags) -> str | None:
         if self.v is None:
@@ -333,3 +341,25 @@ class Voice:
 
     def wipe(self) -> None:
         self._reset_visit()
+
+    # ------------------------------------------------------------------ listening
+    def heard(self, m, now: float) -> str | None:
+        """Someone spoke or made a sound: one whispered answer on the wall (and in the
+        room's voice). Only the fact of a sound is used, never what was said."""
+        return self._say(HEARD, m, now)
+
+    def invite(self, m, now: float) -> str | None:
+        """Nobody has spoken for a while: ask, once per visit."""
+        if self.invited:
+            return None
+        self.invited = True
+        return self._say(INVITE, m, now)
+
+    def _say(self, pool: tuple, m, now: float) -> str | None:
+        if self.opted_out or m.visit.opted_out or m.phase not in ("approach", "profiling", "hook"):
+            return None
+        options = [x for x in pool if x not in self.wall[-3:]] or list(pool)
+        line = self.rng.choice(options)
+        self.wall = (self.wall + [line])[-6:]
+        self._next_wall = max(self._next_wall, now + 5.0)   # let it stand a moment
+        return line
