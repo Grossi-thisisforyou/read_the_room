@@ -12,7 +12,7 @@ fi
 [[ -n $PI ]] || { echo "Can't reach the Pi (tried inartwetrust.local, 192.168.0.10). Is it on and on the same Wi-Fi?"; exit 1; }
 echo "Pi found at $PI. Sending the new code..."
 ssh "pi@$PI" 'rm -rf /tmp/ij-new && mkdir -p /tmp/ij-new' || exit 1
-COPYFILE_DISABLE=1 tar -C "$HERE" -czf - infinite_jest | ssh "pi@$PI" 'tar -C /tmp/ij-new -xzf -' || { echo "Copy failed."; exit 1; }
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$HERE" -czf - infinite_jest 2>/dev/null | ssh "pi@$PI" 'tar --warning=no-unknown-keyword --warning=no-timestamp -m -C /tmp/ij-new -xzf -' || { echo "Copy failed."; exit 1; }
 ssh "pi@$PI" 'bash -s' <<'REMOTE'
 set -e
 R=$HOME/read_the_room
