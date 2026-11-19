@@ -26,6 +26,12 @@ if [[ -d /run/systemd/system ]]; then
   echo "    logs kept in memory only (nothing about the room stays on the card)"
   systemctl daemon-reload
   sed "s/@USER@/$WHO/" "$HERE/systemd/ij-room.service" > /etc/systemd/system/ij-room.service
+  # Raspberry Pi OS with desktop: the desktop takes the screens and the sound from
+  # the show a few seconds after boot. Boot to the console instead.
+  if [[ "$(systemctl get-default 2>/dev/null)" == graphical.target ]]; then
+    systemctl set-default multi-user.target >/dev/null 2>&1 && \
+      echo "    desktop switched off at boot (it took the screens from the show); back: sudo systemctl set-default graphical.target"
+  fi
   systemctl daemon-reload
   systemctl enable ij-watchdog.service ij-blackout.service ij-room.service >/dev/null 2>&1
   systemctl restart ij-watchdog.service || true
