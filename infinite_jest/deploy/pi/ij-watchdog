@@ -17,6 +17,7 @@ parked on an empty screen (see ij-blackout), so no text or login prompt ever
 reaches the wall. Everything it does is logged: journalctl -u ij-watchdog
 """
 
+import glob
 import json
 import os
 import pwd
@@ -102,7 +103,8 @@ def usb_cards():
     try:
         for line in open("/proc/asound/cards"):
             m = re.match(r"\s*(\d+)\s+\[(\S+)\s*\]:\s*USB-Audio", line)
-            if m:
+            # only cards that can PLAY: a USB microphone has capture only (pcm0c)
+            if m and glob.glob("/proc/asound/card%s/pcm*p" % m.group(1)):
                 out.append(m.group(2))
     except OSError:
         pass
