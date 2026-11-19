@@ -78,7 +78,8 @@ class Engine:
         mods = cfg.get("modules", {})
         if corpus is None:
             corpus = load_corpus(mods.get("text"))
-        self.voice = Voice(corpus, cfg.get("phone_lines", {}))
+        self.discreet = bool(cfg.get("discreet", True))
+        self.voice = Voice(corpus, cfg.get("phone_lines", {}), discreet=self.discreet)
         self.visuals, self.audio, self.profiler = visuals, audio, profiler
         self.sensor: dict[str, Any] = {}       # latest periodic reading (merged)
         self.blackout = False
@@ -307,12 +308,40 @@ class Engine:
         for line in self.voice.tick(self.machine, now, self.state["steer"], self.machine.phase_t(now)):
             self.emit(P.make(P.PHONE, line), {"phone"})
         self.voice.apply(self.state, self.machine, now)
+        self._background(self.state, now)
         plugins.call(self.visuals, "on_state", self.state)
         plugins.call(self.audio, "on_state", self.state)
         if changes or now - self._last_state_emit >= self._state_period:
             self._last_state_emit = now
             self.emit(P.make(P.STATE, self.state), None)
         return self.state
+
+    def _background(self, st: dict, now: float) -> None:
+        """Discreet mode: the reading is gathered in the background. Before the
+        confession nothing it concluded is put on show: no dossier, no evidence or
+        oracle lines (they wait), and st["discreet"] tells the visuals and the second
+        screen to keep the profile out of sight. The OCEAN guess stays in the state:
+        picture and sound still bend to it quietly.
+
+        st["build"] (0..1) is how far the visitor's figure has come together: it
+        builds up over the visit and is complete when the confession starts."""
+        m = self.machine
+        p = m.phase
+        hidden = self.discreet and p in ("approach", "profiling", "hook")
+        st["discreet"] = hidden
+        if hidden:
+            st["dossier"] = []
+            if self.voice.corpus is None:
+                st["words"] = []
+        build_s = float(self.cfg.get("build_s", 90.0))
+        started = m.visit.started
+        if p in ("approach", "profiling", "hook") and started is not None and build_s > 0:
+            x = min(1.0, max(0.0, (now - started) / build_s))
+            st["build"] = round(x * x * (3 - 2 * x), 3)
+        elif p == "release":
+            st["build"] = 1.0
+        else:
+            st["build"] = 0.0
 
     def _on_phase(self, old: str, new: str, now: float) -> None:
         log.info("phase %s -> %s", old, new)   # no visitor ids in the log

@@ -56,6 +56,8 @@ DEFAULTS: dict[str, Any] = {
     "audio": {"audio_device": "default", "volume": 0.8},
     "profiler": {},
     "mode": "handheld",        # "handheld": picking the N900 up starts a visit; "fixed": camera/room cues do
+    "discreet": True,          # gather in the background; show what it learned only in the confession
+    "build_s": 90.0,           # seconds for the visitor's figure to come together (state.build 0..1)
     "state_hz": 10,            # how often "state" goes out
     "log_level": "INFO",
 }

@@ -50,8 +50,13 @@ def load_corpus(module_name: str | None) -> Any | None:
 
 
 class Voice:
-    def __init__(self, corpus: Any | None, phone_lines: dict | None = None, rng: random.Random | None = None):
+    def __init__(self, corpus: Any | None, phone_lines: dict | None = None, rng: random.Random | None = None,
+                 discreet: bool = True):
         self.corpus = corpus
+        # discreet (Baby, 2026-11-18): the reading happens in the background. Until the
+        # confession the wall only whispers; no measurements, guesses, matches or named
+        # behaviour. Everything it learned comes out at once, at the end.
+        self.discreet = discreet
         self.phone_lines = phone_lines or {}
         self.rng = rng or random.Random()
         self.visits_today = 0
@@ -141,7 +146,9 @@ class Voice:
             seq = self._sequence(ctx, surface="phone", beat="consent")
             if seq:
                 phone.append({"text": "\n".join(seq)})
-            self.wall = [w for w in (self._pick(ctx, surface="wall", beat="calibration", register="log"),) if w]
+            first = (self._pick(ctx, surface="wall", beat="testing", register="whisper") if self.discreet
+                     else self._pick(ctx, surface="wall", beat="calibration", register="log"))
+            self.wall = [w for w in (first,) if w]
         elif new == "hook":
             self.hook_started = now
             self.hinge_at = now + self.rng.uniform(*HINGE_AT)
@@ -226,17 +233,21 @@ class Voice:
             return phone
         ctx = self._ctx(m, now)
         if p == "profiling" and now >= self._next_wall:
-            w = self._pick(ctx, surface="wall", beat="testing", register="log")
+            w = self._pick(ctx, surface="wall", beat="testing", register="whisper" if self.discreet else "log")
             if w:
                 self.wall = (self.wall + [w])[-6:]
-            self._next_wall = now + self.rng.uniform(4, 6)
+            self._next_wall = now + self.rng.uniform(4, 6) * (2.5 if self.discreet else 1)
         if p == "hook":
             hook = m.visit.hook
             if hook and (not self.last_hooks or self.last_hooks[-1] != hook):
                 self.last_hooks.append(hook)
             if now >= self._next_wall:
-                w = self._pick(ctx, surface="wall", beat="testing", hook=hook, register=("log", "whisper")) \
-                    or self._pick(ctx, surface="wall", beat="tailored", hook=hook)
+                if self.discreet:
+                    w = (self._pick(ctx, surface="wall", beat="testing", hook=hook, register="whisper")
+                         or self._pick(ctx, surface="wall", beat="testing", register="whisper"))
+                else:
+                    w = self._pick(ctx, surface="wall", beat="testing", hook=hook, register=("log", "whisper")) \
+                        or self._pick(ctx, surface="wall", beat="tailored", hook=hook)
                 if w:
                     self.wall = (self.wall + [w])[-6:]
                 self._next_wall = now + self.rng.uniform(8, 12)
@@ -246,7 +257,7 @@ class Voice:
                     phone.append({"text": t})
                 self._next_phone = now + self.rng.uniform(15, 25)
             # lock: the same hook came back after another was tried
-            if not self.lock_done and len(self.last_hooks) >= 3 and self.last_hooks[-1] == self.last_hooks[-3]:
+            if not self.discreet and not self.lock_done and len(self.last_hooks) >= 3 and self.last_hooks[-1] == self.last_hooks[-3]:
                 self.lock_done = True
                 w = self._pick(ctx, surface="wall", beat="lock")
                 if w:
@@ -259,17 +270,17 @@ class Voice:
                 self.still_said = False
                 if self.big and now >= self.hinge_until:
                     self.big = None
-            if steer.get("flip") and not self.flip_prev:
+            if steer.get("flip") and not self.flip_prev and not self.discreet:
                 w = self._pick(ctx, surface="wall", beat="flip")
                 if w:
                     self.wall = (self.wall + [w])[-6:]
             self.flip_prev = bool(steer.get("flip"))
-            if float(steer.get("shake", 0) or 0) > 0.7 and now >= self._next_wall - 6:
+            if not self.discreet and float(steer.get("shake", 0) or 0) > 0.7 and now >= self._next_wall - 6:
                 w = self._pick(ctx, surface="wall", beat="shake")
                 if w:
                     self.wall = (self.wall + [w])[-6:]
             # the hinge: once, only if the profile is solid enough (ARC: a wrong hinge is worse than none)
-            if (not self.hinge_done and self.hinge_at is not None and now >= self.hinge_at
+            if (not self.discreet and not self.hinge_done and self.hinge_at is not None and now >= self.hinge_at
                     and m.visit.confidence >= 0.4 and not m.visit.opted_out):
                 self.hinge_done = True
                 line = self._pick(ctx, surface="wall", beat="hinge")
@@ -292,7 +303,10 @@ class Voice:
             return
         if m.visit.opted_out:
             return
-        if p in ("profiling", "hook") and not m.visit.oracle_words and self.wall:
+        if self.discreet and p in ("approach", "profiling", "hook"):
+            # in the background: only the room's whispers; what it gathered waits for the confession
+            state["words"] = list(self.wall)[-3:]
+        elif p in ("profiling", "hook") and not m.visit.oracle_words and self.wall:
             state["words"] = list(self.wall) + list(state.get("words") or [])[:2]
         if self.big:
             state["big_line"] = self.big

@@ -176,8 +176,10 @@ class SecondScreen:
         # profile, right column
         rx, ry = int(w * 0.54), int(200 * u)
         rw = w - rx - m
-        self._text(surf, "PROFILE (GUESSED, NOT KNOWN)", (rx, ry), px_s, DIM)
-        ocean = st.get("ocean") or {}
+        sealed = bool(st.get("discreet"))
+        self._text(surf, "PROFILE  SEALED UNTIL THE END" if sealed else "PROFILE (GUESSED, NOT KNOWN)", (rx, ry), px_s,
+                   RED if sealed else DIM)
+        ocean = {} if sealed else (st.get("ocean") or {})
         conf = float(st.get("confidence", 0) or 0)
         for i, (k, name) in enumerate(TRAITS):
             y = ry + int(40 * u) + i * int(52 * u)
@@ -185,13 +187,21 @@ class SecondScreen:
             self._text(surf, name, (rx, y), px_s, BONE)
             bar = pygame.Rect(rx, y + int(24 * u), rw - int(110 * u), int(14 * u))
             pygame.draw.rect(surf, (30, 30, 30), bar)
-            if isinstance(v, (int, float)):
+            if sealed:
+                # the reading is happening, but it isn't shown: a redaction that fills as it builds
+                b = float(st.get("build", 0) or 0)
+                pygame.draw.rect(surf, (52, 52, 52), (bar.x, bar.y, int(bar.w * b), bar.h))
+                self._text(surf, "####", (bar.right + int(14 * u), y + int(14 * u)), px_s, DIM)
+            elif isinstance(v, (int, float)):
                 pygame.draw.rect(surf, RED, (bar.x, bar.y, int(bar.w * max(0, min(1, v))), bar.h))
                 self._text(surf, f"{v:.3f}", (bar.right + int(14 * u), y + int(14 * u)), px_s, BONE)
             else:
                 self._text(surf, "----", (bar.right + int(14 * u), y + int(14 * u)), px_s, DIM)
         y = ry + int(40 * u) + 5 * int(52 * u) + int(10 * u)
-        self._text(surf, f"CONFIDENCE {conf:.2f}   SOURCE {st.get('profile_source') or '-'}", (rx, y), px_s, GOLD)
+        if not sealed:
+            self._text(surf, f"CONFIDENCE {conf:.2f}   SOURCE {st.get('profile_source') or '-'}", (rx, y), px_s, GOLD)
+        else:
+            self._text(surf, f"READING {int(100 * float(st.get('build', 0) or 0))}%", (rx, y), px_s, GOLD)
 
         # words / dossier / reveal lines
         y += int(50 * u)

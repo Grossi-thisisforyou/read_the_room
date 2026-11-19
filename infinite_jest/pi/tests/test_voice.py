@@ -112,3 +112,42 @@ def test_reveal_names_what_was_really_shown():
         assert "1 scenes" not in text and "the mirror" in text
     run(eng, clock, 30, {"kind": "phone", "held": False})
     assert not eng.machine.visit.dwell, "forgotten with the visitor"
+
+
+def test_discreet_reading_stays_in_the_background_until_the_confession():
+    """Baby, 2026-11-18: the knowledge is gained in the background, not shown as it is gathered."""
+    corpus = _corpus()
+    eng, clock, sent = make_engine(mode="fixed", short_ending=False, discreet=True, corpus=corpus)
+    busy = {"kind": "phone", "motion": 0.7, "audio": {"level": 0.4}}
+    run(eng, clock, 25, busy)
+    assert eng.state["phase"] == "hook" and eng.state["discreet"] is True
+    vid = eng.state["visitor_id"]
+    eng.handle(P.make(P.PROFILE, {"visitor_id": vid, "confidence": 0.8, "hook": "flesh",
+                                  "ocean": {"O": .6, "C": .4, "E": .7, "A": .5, "N": .6},
+                                  "words": ["YOU TURNED IT THROUGH 140 DEGREES  O+"]}), "profiler")
+    eng.handle(P.make(P.ORACLE, {"visitor_id": vid, "words": ["SUBJECT LINGERS"], "dossier": ["approached fast"]}), "oracle")
+    seen = set()
+    for _ in range(1300):                       # two minutes of hook: past where the hinge used to be
+        clock.t += 0.1
+        eng.handle(P.make(P.SENSOR, dict(busy)), "phone")
+        seen.update(eng.state["words"])
+        assert eng.state["dossier"] == [] and not eng.state.get("hinge")
+        assert eng.state["ocean"] is not None                  # still steering picture and sound
+    assert "SUBJECT LINGERS" not in seen and not any("DEGREES" in w for w in seen)
+    assert not any(w.isupper() for w in seen), seen          # no log-register readouts, only whispers
+    assert 0.99 <= eng.state["build"] <= 1.0
+    run(eng, clock, 12, EMPTY)
+    assert eng.state["phase"] == "release" and eng.state["discreet"] is False
+    assert eng.state["reveal"]["lines"]                       # it all comes out now
+
+
+def test_build_grows_over_the_visit():
+    eng, clock, _ = make_engine(mode="fixed", discreet=True)
+    run(eng, clock, 3, EMPTY)
+    assert eng.state["build"] == 0.0
+    run(eng, clock, 5, BUSY)
+    early = eng.state["build"]
+    run(eng, clock, 40, BUSY)
+    mid = eng.state["build"]
+    run(eng, clock, 60, BUSY)
+    assert 0 < early < mid < eng.state["build"] <= 1.0
