@@ -111,6 +111,13 @@ def usb_cards():
     return out
 
 
+def card_present(name):
+    try:
+        return any(re.match(r"\s*\d+\s+\[%s\s*\]" % re.escape(name), l) for l in open("/proc/asound/cards"))
+    except OSError:
+        return False
+
+
 def pick_audio(cur, cards):
     """New audio_device value, or None to leave it.
 
@@ -121,8 +128,8 @@ def pick_audio(cur, cards):
     if not cards:
         return None
     named = re.search(r"CARD=([^,]+)", cur)
-    if named and named.group(1) in cards:
-        return None
+    if named and (named.group(1) in cards or card_present(named.group(1))):
+        return None     # a card chosen by name that is there (USB or HDMI): leave it
     if not (cur in ("", "default") or named or re.match(r"^(plug)?hw:\d", cur)):
         return None
     return "plughw:CARD=%s,DEV=0" % cards[0]
