@@ -4,7 +4,7 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"; IJ="$(cd "$HERE/../.." && pwd)"
 OUT="${1:?out dir}"; D="$OUT/ij-update"
 rm -rf "$D"; mkdir -p "$D"
-cp "$HERE/update-mac.sh" "$D/update-mac.sh"; cp "$HERE/update-arm.sh" "$D/arm.sh"; cp "$HERE/update-apply.sh" "$D/apply.sh"
+cp "$HERE/update-mac.sh" "$D/update-mac.sh"; cp "$HERE/update-ssh.sh" "$D/update-ssh.sh"; cp "$HERE/update-arm.sh" "$D/arm.sh"; cp "$HERE/update-apply.sh" "$D/apply.sh"
 cp -r "$IJ" "$D/infinite_jest"
 find "$D" \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +
 rm -rf "$D/infinite_jest/case/print"      # STLs: not needed on the Pi
