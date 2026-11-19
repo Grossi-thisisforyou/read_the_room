@@ -67,6 +67,23 @@ solid. Hardware: 4x M2.5 x 6 mm (Pi to sled), 2x M3 x 10 mm (sled to base).
 Ports: USB and Ethernet out the back of the head, USB-C and micro-HDMI
 through the open side, microSD through the mouth.
 
+## Third printed case: The Black Box (print/black_box*)
+
+A faceted black stone split along its horizon. The top floats 7 mm above the
+bottom on three pillars, so a thin line of the Pi's light runs all the way
+round, and a jagged crack across the top glows too.
+
+| File | Size | Notes |
+| --- | --- | --- |
+| `print/black_box_bowl.stl` | 164 x 146 x 53 mm | Foot down. Pi standoffs, pillars, cable notches. No supports. |
+| `print/black_box_dome.stl` | 168 x 147 x 69 mm | Flat cut face down. Solid in the model, prints with sparse infill. No supports. |
+| `print/black_box.scad` | OpenSCAD source | Change `seed` for a different stone, `jitter` for rougher facets. |
+
+Bed at least 170 x 150 mm. PETG or ASA, matte black, 15 % infill.
+Hardware: 4x M2.5 x 6 mm (Pi), 3x M3 x 16 mm pan head (dome to pillars,
+down the three holes in the top). Plug the cables in with the dome off and
+lay them in the two notches, then put the dome on.
+
 ## Backup case: the junction box
 
 A steel electrical pull box, 12 x 12 x 4 in, painted matte black and scrawled
