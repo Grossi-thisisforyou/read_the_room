@@ -43,6 +43,8 @@ class Decoder:
         zs = meta.get("z_std")
         self.z_mean = np.asarray(meta.get("z_mean") or np.zeros(self.latent), np.float32)
         self.z_std = np.asarray(zs if zs else np.ones(self.latent), np.float32)
+        anc = meta.get("anchors")
+        self.anchors = np.asarray(anc, np.float32) if anc else None   # points that decode to real pictures
 
     @classmethod
     def load(cls, path: str) -> "Decoder":

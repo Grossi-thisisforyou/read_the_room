@@ -116,3 +116,67 @@ def test_demo_button_pretends_a_visitor():
     eng.handle(P.make(P.CONTROL, {"cmd": "demo"}), "control")
     run(eng, clock, 80)
     assert eng.machine.phase in ("release", "wipe", "idle")
+
+
+def test_live_words_from_a_local_model(monkeypatch):
+    import http.server
+    import json as J
+    import threading
+    import time as T
+    from showengine.duet import LiveWords, clean_lines
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            body = J.dumps({"choices": [{"message": {"content":
+                    "1. You hold still for me.\n- \"i see the second face\"\nThis line is far too long to ever be shown on the wall of the room ok\n"}}]})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    w = LiveWords(f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", timeout=5)
+    w.ask({"themes": ["hold still"], "words": ["SHOWS NOTHING"]})
+    for _ in range(100):
+        if not w.busy:
+            break
+        T.sleep(0.05)
+    srv.shutdown()
+    assert w.lines == ["you hold still for me.", "i see the second face"]
+    assert clean_lines("") == []
+
+
+def test_material_shows_the_newest_painting_and_footage(tmp_path):
+    import shutil
+    import subprocess
+    import time as T
+    pygame = pytest.importorskip("pygame")
+    from showengine.duet import Material
+    paint = tmp_path / "bank" / "void"
+    paint.mkdir(parents=True)
+    surf = pygame.Surface((64, 64))
+    surf.fill((200, 10, 10))
+    pygame.image.save(surf, str(paint / "a.png"))
+    m = Material([str(tmp_path / "bank")], [str(tmp_path / "none")], every_s=1)
+    m.update(0.0)
+    for _ in range(100):
+        if m.kind:
+            break
+        T.sleep(0.02)
+    assert m.kind == "paint" and m.img.shape == (64, 64, 3)
+    if shutil.which("ffmpeg"):
+        vid = tmp_path / "foot"
+        vid.mkdir()
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10", "-t", "30",
+                        str(vid / "clip.mp4")], check=True)
+        m2 = Material([str(tmp_path / "nopaint")], [str(tmp_path)], every_s=1)
+        m2.update(0.0)
+        for _ in range(200):
+            if m2.kind:
+                break
+            T.sleep(0.05)
+        assert m2.kind == "footage" and m2.img.shape == (180, 320, 3)

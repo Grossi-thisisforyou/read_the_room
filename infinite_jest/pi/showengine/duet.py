@@ -130,6 +130,8 @@ class Dreamer:
         self._thread: threading.Thread | None = None
         self.frames = 0
         self.ms = 0.0
+        self._from = self._to = self._z = None
+        self._tau = 0.0
 
     def set_decoder(self, dec: Any) -> None:
         self.dec = dec
@@ -142,9 +144,34 @@ class Dreamer:
     def stop(self) -> None:
         self._stop.set()
 
+    def _anchors(self):
+        a = getattr(self.dec, "anchors", None)
+        return a if a is not None and len(a) >= 2 else None
+
+    def jolt(self, amount: float) -> None:
+        """Something happened: swerve, and head for a different picture."""
+        self.walk.jolt(amount)
+        if self._anchors() is not None and self._z is not None:
+            self._from, self._to, self._tau = self._z.copy(), None, 0.0
+
     def make(self, dt: float) -> np.ndarray:
         u = self.walk.step(dt, self.speed)
-        z = self.dec.z_mean + self.dec.z_std * u * self.scale
+        anc = self._anchors()
+        if anc is None:
+            z = self.dec.z_mean + self.dec.z_std * u * self.scale
+        else:
+            # from one remembered picture to the next, with a live wobble on top
+            if self._to is None:
+                self._to = anc[int(self.rng.integers(len(anc)))]
+                if self._from is None:
+                    self._from = anc[int(self.rng.integers(len(anc)))]
+            self._tau += min(0.5, dt) * self.speed * 0.22
+            if self._tau >= 1.0:
+                self._from, self._to, self._tau = self._to, None, 0.0
+                return self.make(0.0)
+            k = self._tau * self._tau * (3 - 2 * self._tau)
+            z = self._from * (1 - k) + self._to * k + self.dec.z_std * u * 0.3 * self.scale
+        self._z = z
         t0 = time.perf_counter()
         img = self.dec(z)
         self.ms = self.ms * 0.9 + (time.perf_counter() - t0) * 100.0
@@ -199,7 +226,7 @@ class FaceModel:
         self.snaps = [net.Decoder.load(os.path.join(steps_dir, s)) for s in idx["steps"]]
         last = self.snaps[-1]
         for s in self.snaps:                  # every snapshot walks where the finished face lives
-            s.z_mean, s.z_std = last.z_mean, last.z_std
+            s.z_mean, s.z_std, s.anchors = last.z_mean, last.z_std, last.anchors
         self.latent = last.latent
         self.z_mean, self.z_std = last.z_mean, last.z_std
         self._p = -1.0
@@ -224,6 +251,7 @@ class GrowingFace:
         self.progress = 0.0
         self.latent = model.latent
         self.z_mean, self.z_std = model.z_mean, model.z_std
+        self.anchors = model.snaps[-1].anchors
 
     def __call__(self, z):
         return self.model.at(self.progress)(z)
@@ -263,6 +291,12 @@ class Duet:
                     break
         except Exception:
             plugins.report(log, "dream-load", "could not load the dreaming networks")
+        self.words = LiveWords(str(d.get("llm_url", "http://127.0.0.1:8080/v1/chat/completions")))
+        self.material = Material([d.get("paint_dir") or os.path.join(IJ, "visuals", "bank")],
+                                 list(d.get("footage_dirs", ["/mnt/ij-stick"])),
+                                 float(d.get("material_every_s", 40.0)))
+        self.busy_file = str(d.get("busy_file", "/tmp/infinite_jest_busy"))
+        self._busy_on = False
         log.info("duet: wall network %s, face network %s, guest %s", "yes" if self.wall else "NO",
                  "yes" if self.face else "NO", "yes" if self.guest else "none")
         self.reset()
@@ -320,6 +354,7 @@ class Duet:
         for dr in (self.wall, self.face_dreamer):
             if dr is not None:
                 dr.stop()
+        self._busy(False)
 
     # ---------------------------------------------------------- logic
     def _say(self, text: str | None, now: float, show: bool = True) -> None:
@@ -342,6 +377,8 @@ class Duet:
         if in_room and not self._was_in:
             self.reset()
             self._was_in = True
+            self.words.ask(self.guest)            # new lines for this visit from the local model
+        self.material.update(self.wake)
         heard = float(state.get("heard", 0.0) or 0.0)
         motion = float((state.get("sensor") or {}).get("motion", 0.0) or 0.0)
 
@@ -352,7 +389,7 @@ class Duet:
             self.wall.speed = 0.12 + 0.55 * self.wake + 1.5 * heard + 1.2 * motion
             self.wall.scale = 0.8 + 0.5 * self.wake
             if heard > 0.9 and now - self._last_heard > 1.0:
-                self.wall.walk.jolt(1.2)
+                self.wall.jolt(1.2)
                 self._last_heard = now
 
         # the TV
@@ -388,7 +425,9 @@ class Duet:
                 self.progress = min(1.0, self.progress + 0.01)     # every sound you make, it learns a little
             if now >= self._next_address:
                 lines = self.lines["address"]
-                if self._address_i == 0 and self.lines.get("greeting"):
+                if self.words.lines and self._address_i % 2 == 1:
+                    self._say(self.words.lines.pop(0), now)       # written for this visit, just now
+                elif self._address_i == 0 and self.lines.get("greeting"):
                     self._say(self.lines["greeting"], now)
                 elif lines:
                     self._say(lines[(self._address_i - 1) % len(lines)] if self.lines.get("greeting")
@@ -405,6 +444,7 @@ class Duet:
             self.face.progress = self.progress
         if phase == "idle":
             self._was_in = False
+        self._busy(self.tv in ("hello", "face"))
 
         # the sound follows the dream: in an empty room the network's picture leads the music
         if self.wall is not None and self.wall.cur is not None:
@@ -418,6 +458,19 @@ class Duet:
             state["steer"] = steer
         state["duet"] = {"tv": self.tv, "wake": round(self.wake, 3), "progress": round(self.progress, 3)}
         state["words"] = []                       # no wall text in this show
+
+    def _busy(self, on: bool) -> None:
+        """While the face grows, the background painter pauses (it watches this file)."""
+        if on == self._busy_on:
+            return
+        self._busy_on = on
+        try:
+            if on:
+                open(self.busy_file, "w").close()
+            elif os.path.exists(self.busy_file):
+                os.remove(self.busy_file)
+        except OSError:
+            pass
 
     # ---------------------------------------------------------- drawing
     def _font(self, px: int):
@@ -468,6 +521,18 @@ class Duet:
         if self._fb is None or self._fb.get_size() != (w, h):
             self._fb = pygame.Surface((w, h))
             self._fb.fill((0, 0, 0))
+        a = self.material.alpha()
+        if a > 0.0:
+            kind, m = self.material.frame()
+            if m is not None:
+                f = m.astype(np.float32)
+                if kind == "footage":                         # a memory: grey, dark, a little warm
+                    g = f.mean(axis=2, keepdims=True)
+                    f = (g * 0.85 + f * 0.15) * np.array([1.0, 0.92, 0.85], np.float32) * 0.8
+                ms = pygame.surfarray.make_surface(np.clip(f, 0, 255).astype(np.uint8).swapaxes(0, 1))
+                ms = pygame.transform.smoothscale(ms, (sw, sh))
+                ms.set_alpha(int(255 * a * (0.55 if kind == "footage" else 0.7)))
+                big.blit(ms, (0, 0))
         big.set_alpha(int(255 * (0.35 + 0.4 * self.wake)))     # trails: the old dream lingers
         self._fb.blit(big, (-ox, -oy))
         surf.blit(self._fb, (0, 0))
@@ -579,3 +644,239 @@ class WallScreen(SecondScreen):
             ws = self.window.get_surface()
             pygame.transform.scale(self.surface, ws.get_size(), ws)
             self.window.flip()
+
+
+# ------------------------------------------------------------------ the local language model
+class LiveWords:
+    """New lines for each visit from the local Qwen (llama-server on 127.0.0.1:8080).
+    Runs in a thread; if the model isn't there or is slow, the guest file's lines are used."""
+
+    def __init__(self, url: str = "http://127.0.0.1:8080/v1/chat/completions", timeout: float = 40.0):
+        self.url = url
+        self.timeout = timeout
+        self.lines: list[str] = []
+        self.busy = False
+        self.asked = 0
+
+    def ask(self, guest: dict | None) -> None:
+        if self.busy:
+            return
+        self.busy, self.lines = True, []
+        self.asked += 1
+        threading.Thread(target=self._run, args=(guest,), name="ij-words", daemon=True).start()
+
+    def _prompt(self, g: dict | None) -> list:
+        about = ""
+        if g:
+            bits = [", ".join(g.get("themes") or []), ", ".join(w.lower() for w in (g.get("words") or []))]
+            about = "What the room knows about this visitor: " + "; ".join(b for b in bits if b) + "."
+        return [
+            {"role": "system", "content": "You write the voice of a dark art installation that watches one visitor. "
+             "Lowercase. Cold and intimate. Each line at most nine words. No names, no brands, no artists, "
+             "no emojis, no quotation marks."},
+            {"role": "user", "content": f"{about} Their face is slowly appearing on a screen in front of them. "
+             "Write six different lines the room says to them, one per line, no numbering."},
+        ]
+
+    def _run(self, guest: dict | None) -> None:
+        import urllib.request
+        try:
+            body = json.dumps({"messages": self._prompt(guest), "max_tokens": 160, "temperature": 1.05,
+                               "top_p": 0.95, "seed": random.randint(0, 2 ** 31 - 1)}).encode()
+            req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                text = json.load(r)["choices"][0]["message"]["content"]
+            self.lines = clean_lines(text)
+            log.info("duet: %d new lines from the local model", len(self.lines))
+        except Exception as e:
+            log.info("duet: local model not available (%s); using the guest file's lines", type(e).__name__)
+        finally:
+            self.busy = False
+
+
+def clean_lines(text: str) -> list[str]:
+    out = []
+    for raw in str(text).splitlines():
+        s = raw.strip().lstrip("-*0123456789.) ").strip().strip('"\'').strip().lower()
+        if not s or len(s) > 70 or len(s.split()) > 12:
+            continue
+        try:
+            from .visit import visible_text
+            s = visible_text(s)
+        except Exception:
+            pass
+        if s:
+            out.append(s)
+    return out[:8]
+
+
+# ------------------------------------------------------------------ material that drifts through the dream
+VIDEO_EXT = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mpg", ".mts", ".3gp")
+IMAGE_EXT = (".png", ".jpg", ".jpeg")
+
+
+class Material:
+    """Every so often something surfaces in the wall's dream: the newest painting the Pi
+    made (stable-diffusion.cpp, painting in the background), or a few seconds of the
+    donated footage, ghostly and grey. Everything is read where it lies; nothing is copied."""
+
+    def __init__(self, paint_dirs: list[str], footage_dirs: list[str], every_s: float = 40.0):
+        self.paint_dirs = [os.path.expanduser(p) for p in paint_dirs]
+        self.footage_dirs = [os.path.expanduser(p) for p in footage_dirs]
+        self.every_s = every_s
+        self.rng = random.Random()
+        self.kind = None             # "paint" | "footage" | None
+        self.img = None              # numpy frame (H, W, 3) uint8
+        self.t0 = 0.0
+        self.dur = 0.0
+        self.next_t = 0.0
+        self._videos: list[str] = []
+        self._videos_t = -1e9
+        self._seen_paint: set = set()
+        self._lock = threading.Lock()
+        self._busy = False
+
+    def alpha(self) -> float:
+        if self.kind is None or self.img is None:
+            return 0.0
+        t = time.monotonic() - self.t0
+        if t < 0 or t > self.dur:
+            return 0.0
+        return min(1.0, t / 3.0, (self.dur - t) / 3.0)
+
+    def update(self, wake: float) -> None:
+        now = time.monotonic()
+        if self.kind is not None and now - self.t0 > self.dur:
+            with self._lock:
+                self.kind, self.img = None, None
+            self.next_t = now + self.every_s * self.rng.uniform(0.6, 1.3) * (1.4 - 0.6 * wake)
+        if self.kind is None and now >= self.next_t and not self._busy:
+            self.next_t = now + 10.0
+            self._busy = True
+            threading.Thread(target=self._pick, args=(now,), name="ij-material", daemon=True).start()
+
+    def _newest_painting(self) -> str | None:
+        best, best_t = None, 0.0
+        for d in self.paint_dirs:
+            for root, dirs, files in os.walk(d):
+                dirs[:] = [x for x in dirs if x != "derived"]
+                for f in files:
+                    if f.lower().endswith(IMAGE_EXT):
+                        p = os.path.join(root, f)
+                        try:
+                            t = os.path.getmtime(p)
+                        except OSError:
+                            continue
+                        if t > best_t and p not in self._seen_paint:
+                            best, best_t = p, t
+        return best
+
+    def _list_videos(self) -> list[str]:
+        if time.monotonic() - self._videos_t > 600:
+            found = []
+            for d in self.footage_dirs:
+                for root, dirs, files in os.walk(d):
+                    dirs[:] = [x for x in dirs if not x.startswith(".") and x != "ij-offline"]
+                    found += [os.path.join(root, f) for f in files
+                              if f.lower().endswith(VIDEO_EXT) and not f.startswith("._")]
+                    if len(found) > 5000:
+                        break
+            self._videos, self._videos_t = found, time.monotonic()
+        return self._videos
+
+    def _pick(self, now: float) -> None:
+        try:
+            p = self._newest_painting()
+            vids = self._list_videos()
+            if p and (not vids or self.rng.random() < 0.6):
+                self._seen_paint.add(p)
+                self._show_painting(p, now)
+            elif vids:
+                self._play(self.rng.choice(vids), now)
+        except Exception:
+            log.info("duet: material skipped", exc_info=True)
+        finally:
+            self._busy = False
+
+    def _show_painting(self, path: str, now: float) -> None:
+        import pygame
+        s = pygame.image.load(path)
+        a = pygame.surfarray.array3d(s).swapaxes(0, 1)
+        with self._lock:
+            self.kind, self.img, self.t0, self.dur = "paint", a, time.monotonic(), 14.0
+
+    def _play(self, path: str, now: float) -> None:
+        """A few seconds of one clip, from a random point, at 8 fps and 320x180 (ffmpeg)."""
+        import shutil
+        import subprocess
+        ff = shutil.which("ffmpeg")
+        dur = self.rng.uniform(8.0, 14.0)
+        if ff is None:
+            return self._play_cv2(path, dur)
+        start = self.rng.uniform(0, 1) * self._length(path)
+        w, h = 320, 180
+        cmd = [ff, "-v", "error", "-ss", f"{start:.1f}", "-i", path, "-t", f"{dur:.1f}", "-an",
+               "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps=8",
+               "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        first = True
+        try:
+            while True:
+                buf = p.stdout.read(w * h * 3)
+                if len(buf) < w * h * 3:
+                    break
+                frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+                with self._lock:
+                    if first:
+                        self.kind, self.t0, self.dur, first = "footage", time.monotonic(), dur, False
+                    self.img = frame
+                time.sleep(0.12)
+        finally:
+            p.kill()
+
+    def _play_cv2(self, path: str, dur: float) -> None:
+        try:
+            import cv2
+        except ImportError:
+            return
+        cap = cv2.VideoCapture(path)
+        try:
+            n = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            if n > fps * 20:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(self.rng.uniform(0, n - fps * 16)))
+            step = max(1, int(round(fps / 8)))
+            t_end, first, i = time.monotonic() + dur, True, 0
+            while time.monotonic() < t_end:
+                ok, fr = cap.read()
+                if not ok:
+                    break
+                i += 1
+                if i % step:
+                    continue
+                fr = cv2.resize(fr, (320, 180))[:, :, ::-1].copy()
+                with self._lock:
+                    if first:
+                        self.kind, self.t0, self.dur, first = "footage", time.monotonic(), dur, False
+                    self.img = fr
+                time.sleep(0.1)
+        finally:
+            cap.release()
+
+    @staticmethod
+    def _length(path: str) -> float:
+        import shutil
+        import subprocess
+        fp = shutil.which("ffprobe")
+        if fp is None:
+            return 0.0
+        try:
+            out = subprocess.run([fp, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                 capture_output=True, text=True, timeout=10).stdout
+            return max(0.0, float(out.strip()) - 15.0)
+        except Exception:
+            return 0.0
+
+    def frame(self):
+        with self._lock:
+            return self.kind, self.img
