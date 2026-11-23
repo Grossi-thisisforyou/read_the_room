@@ -76,6 +76,7 @@ class Engine:
         self.ambient = Ambient(room)    # the room's own background: hum, the speaker, camera flicker
         self.listen = Listen(room)      # the room answers a voice (level and voiced only)
         self._heard_line: str | None = None
+        self.state_hooks: list = []
         self.machine = VisitMachine(VisitConfig(**_dataclass_kwargs(VisitConfig, cfg.get("visit", {}))), now)
         self.fallback = FallbackProfiler()
         self.frames = FrameAnalyzer()
@@ -328,6 +329,11 @@ class Engine:
             self.emit(P.make(P.PHONE, line), {"phone"})
         self.voice.apply(self.state, self.machine, now)
         self._background(self.state, now)
+        for hook in self.state_hooks:      # e.g. the two-screen show (duet.py) shaping the state
+            try:
+                hook(self.state, now)
+            except Exception:
+                plugins.report(log, "state-hook", "a state hook failed")
         plugins.call(self.visuals, "on_state", self.state)
         plugins.call(self.audio, "on_state", self.state)
         if changes or now - self._last_state_emit >= self._state_period:
@@ -428,7 +434,8 @@ class Engine:
         plugins.call(self.profiler, "reset")
 
     def status(self) -> dict:
-        return {
+        extra = getattr(self, 'extra_status', None)
+        out = {
             "phase": self.machine.phase,
             "phase_t": round(self.machine.phase_t(self.clock()), 1),
             "present": self.presence.present,
@@ -442,3 +449,9 @@ class Engine:
                 "profiler": type(self.profiler).__module__ if self.profiler else None,
             },
         }
+        if callable(extra):
+            try:
+                out["duet"] = extra()
+            except Exception:
+                pass
+        return out

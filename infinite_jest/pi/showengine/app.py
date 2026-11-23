@@ -49,7 +49,7 @@ def load_modules(cfg: dict, size: tuple[int, int] | None, want_audio: bool) -> t
     mods = cfg["modules"]
     fallbacks = mods.get("use_fallbacks", True)
     visuals = audio = profiler = None
-    if size is not None:
+    if size is not None and str(cfg.get("show", "duet")) != "duet":
         visuals = load_visuals(cfg, size)
     if want_audio:
         mod = plugins.load(mods.get("audio"))
@@ -86,7 +86,16 @@ class Runner:
         self._next_display_try = 0.0
         self._hdmi_was: bool | None = None
         self.screen2 = None
-        if cfg["display"].get("second_screen", True) and cfg["display"].get("enabled", True):
+        self.show = str(cfg.get("show", "duet"))
+        self.duet = None
+        if self.show == "duet":
+            # two screens: TV (channel 1) = the face, projector (channel 2) = the wall
+            for k, v in (("max_visit", 300.0), ("release_time", 40.0), ("wipe_time", 8.0)):
+                cfg.setdefault("visit", {}).setdefault(k, v)
+            cfg["speak"] = False             # the duet speaks for itself, only once the TV is on
+            d = cfg.get("duet") if isinstance(cfg.get("duet"), dict) else {}
+            cfg["display"]["main_display"] = int(d.get("tv_display", cfg["display"].get("main_display", 0)))
+        elif cfg["display"].get("second_screen", True) and cfg["display"].get("enabled", True):
             from .second_screen import SecondScreen
             self.screen2 = SecondScreen(int(cfg["display"].get("second_display", 1)),
                                         float(cfg["display"].get("second_fps", 10)))
@@ -134,7 +143,7 @@ class Runner:
         if size is None:
             return
         log.info("display is back")
-        if engine.visuals is None:
+        if engine.visuals is None and self.duet is None:
             engine.visuals = load_visuals(self.cfg, size)
 
     def _hdmi_reconnected(self, now: float) -> bool:
@@ -183,6 +192,15 @@ class Runner:
         visuals, audio, profiler = load_modules(self.cfg, size, self.want_audio)
         sdnotify.notify("WATCHDOG=1")
         engine = self.engine = Engine(self.cfg, visuals=visuals, audio=audio, profiler=profiler)
+        if self.show == "duet":
+            from .duet import Duet, WallScreen
+            self.duet = Duet(self.cfg, engine)
+            engine.state_hooks.append(self.duet.update)
+            d = self.cfg.get("duet") if isinstance(self.cfg.get("duet"), dict) else {}
+            if self.cfg["display"].get("enabled", True):
+                self.screen2 = WallScreen(self.duet, int(d.get("wall_display", 1)), float(d.get("wall_screen_fps", 30)))
+            engine.extra_status = self.duet.status
+            self.duet.start()
         hub = Hub(engine, self.cfg)
         await hub.start()
         sdnotify.notify("READY=1")
@@ -220,6 +238,9 @@ class Runner:
                         self._events(engine)
                         if engine.blackout:
                             self.screen.fill((0, 0, 0))
+                        elif self.duet is not None:
+                            wall_here = self.screen2 is None or self.screen2.failed
+                            self.duet.draw_tv(self.screen, now, wall_here=wall_here)
                         elif engine.visuals is not None:
                             plugins.call(engine.visuals, "render", self.screen, dt)
                         if self.debug:
@@ -243,6 +264,8 @@ class Runner:
             if sim_task:
                 sim_task.cancel()
             engine.machine.wipe()                 # nothing survives a shutdown either
+            if self.duet is not None:
+                self.duet.stop()
             plugins.call(audio, "stop")
             await hub.stop()
             if self.screen is not None:
@@ -255,6 +278,9 @@ class Runner:
         for r in hub.clients.values():
             roles[r] = roles.get(r, 0) + 1
         return {**engine.status(), "fps": round(hub.fps, 1), "clients": roles}
+
+    def status_extra(self) -> dict:
+        return self.duet.status() if self.duet is not None else {}
 
     def stop(self) -> None:
         self.running = False

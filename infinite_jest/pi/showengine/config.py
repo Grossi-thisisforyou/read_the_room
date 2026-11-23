@@ -56,6 +56,16 @@ DEFAULTS: dict[str, Any] = {
     "audio": {"audio_device": "default", "volume": 0.8},
     "profiler": {},
     "mode": "handheld",        # "handheld": picking the N900 up starts a visit; "fixed": camera/room cues do
+    "show": "duet",            # "duet": TV (channel 1) face + projector (channel 2) wall; "classic": one projector
+    "duet": {
+        "tv_display": 0,       # HDMI 0 (next to the power socket): the TV
+        "wall_display": 1,     # HDMI 1: the projector on the wall
+        "tv_at_s": 45.0,       # seconds of someone being there before the TV wakes up
+        "grow_s": 150.0,       # seconds for the grey face to become the guest
+        "guest": "001",        # the guest file used for this run ("" for none)
+        "wall_fps": 8.0,       # new frames per second from the wall network (cross-faded to 30)
+        "face_fps": 6.0,
+    },
     "discreet": True,          # gather in the background; show what it learned only in the confession
     "speak": True,             # the room says its answers aloud (audio module + espeak-ng; silent without)
     "invite_after_s": 25.0,    # a silent visitor is asked to speak once, this long into the hook
