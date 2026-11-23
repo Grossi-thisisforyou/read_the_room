@@ -106,3 +106,13 @@ def test_guest_file_past_its_date_is_not_used(tmp_path, monkeypatch):
     assert load_guest("009", datetime.date(2026, 12, 1))["name_spoken"] == "Kim"
     assert load_guest("009", datetime.date(2026, 12, 24)) is None
     assert Duet._lines({"name_spoken": "Kim"})["hello"] == "hello, kim."
+
+
+def test_demo_button_pretends_a_visitor():
+    eng, clock, duet, audio = duet_engine()
+    eng.handle(P.make(P.CONTROL, {"cmd": "demo"}), "control")
+    run(eng, clock, 60)
+    assert eng.machine.phase in ("profiling", "hook") and duet.tv in ("hello", "face")
+    eng.handle(P.make(P.CONTROL, {"cmd": "demo"}), "control")
+    run(eng, clock, 80)
+    assert eng.machine.phase in ("release", "wipe", "idle")

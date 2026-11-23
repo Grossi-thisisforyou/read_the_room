@@ -77,6 +77,7 @@ class Engine:
         self.listen = Listen(room)      # the room answers a voice (level and voiced only)
         self._heard_line: str | None = None
         self.state_hooks: list = []
+        self.demo_until = 0.0
         self.machine = VisitMachine(VisitConfig(**_dataclass_kwargs(VisitConfig, cfg.get("visit", {}))), now)
         self.fallback = FallbackProfiler()
         self.frames = FrameAnalyzer()
@@ -287,7 +288,13 @@ class Engine:
     def _on_control(self, d: dict, now: float) -> None:
         cmd, arg = d.get("cmd"), d.get("arg")
         log.info("control: %s %s", cmd, "" if arg is None else arg)
-        if cmd == "wipe":
+        if cmd == "demo":
+            # "pretend someone is here" from the control page: test the show with no camera or mic
+            on = (now >= self.demo_until) if arg is None else bool(arg)
+            self.demo_until = now + float(self.cfg.get("demo_s", 300.0)) if on else 0.0
+            if not on:
+                self.presence.reset()
+        elif cmd == "wipe":
             self.machine.force("wipe", now)
         elif cmd == "next":
             self.machine.next(now)
@@ -311,6 +318,8 @@ class Engine:
     # ------------------------------------------------------------------ clock
     def tick(self, now: float | None = None) -> dict:
         now = self.clock() if now is None else now
+        if now < self.demo_until and not self.blackout:
+            self.presence.feed({"presence": 1.0}, now)
         flip = self.presence.tick(now)
         if flip is not None:
             log.info("presence %s (score %.2f)", "on" if flip else "off", self.presence.score)
