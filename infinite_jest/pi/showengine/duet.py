@@ -132,6 +132,7 @@ class Dreamer:
         self.ms = 0.0
         self._from = self._to = self._z = None
         self._tau = 0.0
+        self.active = True
 
     def set_decoder(self, dec: Any) -> None:
         self.dec = dec
@@ -181,6 +182,10 @@ class Dreamer:
         last = time.monotonic()
         while not self._stop.is_set():
             t0 = time.monotonic()
+            if not self.active:                 # nobody sees it: leave the CPU to the rest
+                last = t0
+                self._stop.wait(0.2)
+                continue
             try:
                 img = self.make(t0 - last)
             except Exception:
@@ -289,6 +294,7 @@ class Duet:
                     self.face = GrowingFace(FaceModel(sd, net))
                     self.face_dreamer = Dreamer(self.face, float(d.get("face_fps", 6.0)), reach=0.9)
                     self.face_dreamer.speed = 0.35
+                    self.face_dreamer.active = False
                     break
         except Exception:
             plugins.report(log, "dream-load", "could not load the dreaming networks")
@@ -445,7 +451,10 @@ class Duet:
             self.face.progress = self.progress
         if phase == "idle":
             self._was_in = False
-        self._busy(self.tv in ("hello", "face"))
+        # the painter pauses while someone is here (the picture and the face get the CPU)
+        self._busy(in_room or self.tv in ("hello", "face", "reveal"))
+        if self.face_dreamer is not None:          # the face is only dreamt while the TV shows it
+            self.face_dreamer.active = self.tv in ("hello", "face", "reveal", "gone")
         if self.wall is not None:                 # while the face grows, the wall dreams a little slower (CPU)
             self.wall.fps = self.wall_fps * (0.6 if self.tv in ("hello", "face", "reveal") else 1.0)
 

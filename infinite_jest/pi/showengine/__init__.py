@@ -8,3 +8,10 @@ wiped when they go.
 """
 
 __version__ = "0.1.0"
+
+import os as _os
+
+# Two small dreaming networks, the painter and the sound share four cores: numpy's
+# math library must not start four threads per call on top of that.
+for _k in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS"):
+    _os.environ.setdefault(_k, "2")
