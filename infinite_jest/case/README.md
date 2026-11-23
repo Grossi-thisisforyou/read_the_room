@@ -84,6 +84,19 @@ Hardware: 4x M2.5 x 6 mm (Pi), 3x M3 x 16 mm pan head (dome to pillars,
 down the three holes in the top). Plug the cables in with the dome off and
 lay them in the two notches, then put the dome on.
 
+## Hidden case: The Wall Box (print/wall_box*), chosen direction
+
+Baby's direction since Nov 23: hide the Pi in plain sight in room 401. This
+is a plain white surface-mount electrical box, 170 x 122 x 64 mm. A real,
+store-bought 3-gang keystone wall plate screws onto it (standard US screw
+spacing), with real HDMI, Cat6 and USB keystone couplers, so the projector,
+router and speaker plug into "the wall". The Pi sits inside on standoffs.
+Power leaves through a slot in the bottom to the outlet beside it. Air slots
+sit on the top and bottom faces, close to the wall.
+
+Print back-down, white PETG, no supports. Sizes follow standard plates and
+are not yet checked against the plates in the room.
+
 ## Backup case: the junction box
 
 A steel electrical pull box, 12 x 12 x 4 in, painted matte black and scrawled
