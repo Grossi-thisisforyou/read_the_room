@@ -48,6 +48,7 @@ def main():
     torch.manual_seed(2)
     spec = train.SPECS[a.kind]
     name = a.name or a.kind
+    os.makedirs(a.out, exist_ok=True)
     paths = sorted(glob.glob(os.path.join(a.data, "*.png")) + glob.glob(os.path.join(a.data, "*.jpg")))
     n = a.n or (600 if a.kind == "face" else 256)
     sampler = train.wall_samples if a.kind == "wall" else train.face_samples
