@@ -274,6 +274,7 @@ class Duet:
         self.lines = self._lines(self.guest)
         net = None
         self.wall = self.face = None
+        self.wall_fps = float(d.get("wall_fps", 8.0))
         self.face_dreamer = None
         models = d.get("models_dir") or os.path.join(IJ, "dream", "models")
         try:
@@ -445,6 +446,8 @@ class Duet:
         if phase == "idle":
             self._was_in = False
         self._busy(self.tv in ("hello", "face"))
+        if self.wall is not None:                 # while the face grows, the wall dreams a little slower (CPU)
+            self.wall.fps = self.wall_fps * (0.6 if self.tv in ("hello", "face", "reveal") else 1.0)
 
         # the sound follows the dream: in an empty room the network's picture leads the music
         if self.wall is not None and self.wall.cur is not None:

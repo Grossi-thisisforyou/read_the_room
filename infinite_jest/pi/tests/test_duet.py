@@ -37,6 +37,14 @@ def duet_engine(**cfg):
     duet = Duet(eng.cfg, eng)
     duet.wall = Dreamer(FakeDec(), 8.0, seed=1)
     eng.state_hooks.append(duet.update)
+    from showengine import plugins
+    real = plugins.report
+
+    def loud(logger, key, text, *a, **k):        # a failing hook must fail the test, not hide
+        if key == "state-hook":
+            raise
+        return real(logger, key, text, *a, **k)
+    plugins.report = loud
     return eng, clock, duet, audio
 
 
