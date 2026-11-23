@@ -362,7 +362,7 @@ def test_projector_switched_on_late_and_flip_errors_reopen_the_display(monkeypat
     monkeypatch.setattr(pygame.display, "set_mode", set_mode)
     monkeypatch.setattr(pygame.display, "flip", flip)
     cfg = _cfg()
-    cfg = config.load(None, {"network": cfg["network"], "display": {"fullscreen": False, "width": 160, "height": 90,
+    cfg = config.load(None, {"show": "classic", "network": cfg["network"], "display": {"fullscreen": False, "width": 160, "height": 90,
                                                                     "retry_s": 0.1},
                              "modules": {"visuals": "", "audio": "", "profiler": ""}})
     runner = app.Runner(cfg, audio=False)
