@@ -84,6 +84,27 @@ Hardware: 4x M2.5 x 6 mm (Pi), 3x M3 x 16 mm pan head (dome to pillars,
 down the three holes in the top). Plug the cables in with the dome off and
 lay them in the two notches, then put the dome on.
 
+## The device case: Pavilion (print/pavilion*), current direction
+
+Since Nov 24 Baby wants the Pi treated openly as a device: easy to use,
+every port and the power button reachable, good cooling, safe, in a Mies van
+der Rohe style. A podium slab on a recessed plinth, a curtain wall of 1.2 mm
+mullions (the slots between them are the ventilation), four cruciform corner
+columns, and a 4 mm roof slab floating on a 3.5 mm shadow gap so warm air
+leaves all the way round.
+
+| Opening | What it serves |
+| --- | --- |
+| microSD end | power button, status LEDs, microSD card |
+| long side | USB-C power, micro-HDMI 0 and 1 |
+| short end | 4x USB, Ethernet |
+| roof | 4 countersunk M3 x 10 screws; lift it for GPIO and fan |
+
+`pavilion_base.stl` 115 x 82 x 35 mm, `pavilion_roof.stl` 105 x 76 x 4 mm,
+no supports. PETG or ASA, 0.12 mm layers for best quality. Port positions
+are from the Pi 5 layout and Baby's board photo; print the base once in
+draft to check the fit before the final print.
+
 ## Hidden case: The Wall Box (print/wall_box*), chosen direction
 
 Baby's direction since Nov 23: hide the Pi in plain sight in room 401. This
