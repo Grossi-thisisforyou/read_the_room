@@ -105,6 +105,16 @@ no supports. PETG or ASA, 0.12 mm layers for best quality. Port positions
 are from the Pi 5 layout and Baby's board photo; print the base once in
 draft to check the fit before the final print.
 
+## The device case, second take: Prairie (print/prairie*)
+
+The same functional brief as Pavilion (same three port openings, same
+standoffs, roof on four screws), after Frank Lloyd Wright: a long low
+plinth, walls of horizontal louvers (the ventilation), an L-shaped terrace
+cantilevered on 45 degree undersides, a ribbed stone chimney that doubles as
+a flue, and a double roof with a Prairie art-glass pattern cut over the fan.
+`prairie_base.stl` 115 x 84 x 51 mm, `prairie_roof.stl` 113 x 84 x 6 mm, no
+supports. Print the base in sand, the roof in brick red.
+
 ## Hidden case: The Wall Box (print/wall_box*), chosen direction
 
 Baby's direction since Nov 23: hide the Pi in plain sight in room 401. This
