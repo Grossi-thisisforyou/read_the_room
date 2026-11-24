@@ -1,0 +1,44 @@
+INFINITE JEST · "Stone" · Raspberry Pi 5 case
+Three printed parts: one tray, two shells that click onto it.
+
+PARTS
+  stone_tray.stl    124 x 97 x 13 mm   bottom face down
+  stone_work.stl    122 x 97 x 39 mm   TOP face down (the small flat facet on the bed)
+  stone_travel.stl  126 x 98 x 39 mm   TOP face down
+  stone.scad        OpenSCAD source (change `seed` for a differently cut stone)
+No supports for any part. Bed at least 130 x 100 mm.
+
+MATERIAL AND SETTINGS
+  PETG or ASA, matte black (not PLA: it softens next to a warm Pi)
+  0.12 mm layers for the best facets, 4 walls (perimeters), 20 % gyroid infill
+  Shells: 4 walls makes the 2.2 mm shell almost solid, which is what the click needs
+
+THE CLICK
+  The tray has a rim with a groove; each shell has small ridges inside its edge
+  that snap into it. Push the shell straight down until it clicks, pull straight
+  up to open.
+  PLEASE TEST FIRST: print the tray and the travel shell and try the click before
+  printing the work shell. Too tight: set clr = 0.35 (or bump_d = 0.4) in
+  stone.scad and export again. Too loose: bump_d = 0.7.
+
+HARDWARE
+  4x M2.5 x 6 mm self-tapping screws (Pi to the tray standoffs)
+    or brass heat-set inserts: set threads = "insert" in stone.scad
+  4x 8 mm self-adhesive rubber bumpers (seats are marked under the tray)
+  Official Raspberry Pi 5 Active Cooler (needed) and 27 W USB-C supply
+
+OPENINGS (work shell)
+  port end      4x USB, Ethernet
+  long side     USB-C power, micro-HDMI 0 and 1
+  microSD end   power button, status LEDs
+  tray          microSD card slot under the board; air slots in the floor
+  roof + GPIO side: ventilation slits over the fan
+The travel shell is closed and protects the ports in a bag.
+
+Port positions come from the Pi 5 drawings and are not yet checked on a print:
+please do one quick draft of the tray + work shell and try the board in it.
+
+Export:
+  openscad -D 'part="tray"'   -o stone_tray.stl   stone.scad
+  openscad -D 'part="work"'   -o stone_work.stl   stone.scad
+  openscad -D 'part="travel"' -o stone_travel.stl stone.scad

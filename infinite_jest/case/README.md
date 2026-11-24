@@ -84,7 +84,26 @@ Hardware: 4x M2.5 x 6 mm (Pi), 3x M3 x 16 mm pan head (dome to pillars,
 down the three holes in the top). Plug the cables in with the dome off and
 lay them in the two notches, then put the dome on.
 
-## The device case: Pavilion (print/pavilion*), current direction
+## Pocket case: Stone (print/stone*), current direction
+
+Since Nov 24 (later the same day): practical, best for the Pi, nice in the hand
+and in a bag. A geometric pebble of about 30 flat facets, softly rounded where
+they meet, on one flat bottom. Three parts:
+
+| File | Size | What it is |
+| --- | --- | --- |
+| `print/stone_tray.stl` | 124 x 97 x 13 mm | Flat bottom. Holds the Pi on four standoffs, microSD slot, air slots, click rim. |
+| `print/stone_work.stl` | 122 x 97 x 39 mm | Shell for working: vent slits over the fan and along the GPIO side, every connector and the power button open. |
+| `print/stone_travel.stl` | 126 x 98 x 39 mm | Shell for the bag: closed, protects the ports. |
+| `print/stone.scad` | OpenSCAD source | `seed` cuts a different stone, `clr` / `bump_d` tune the click. |
+
+Either shell clicks onto the tray (ridges in the shell snap into a groove in
+the tray's rim); pull straight up to open. Tray prints bottom down, shells
+print top down on their flat top facet, no supports. PETG or ASA, 0.12 mm
+layers, 4 walls. Spec: `print/stone_PRINT_SPEC.txt`. Not yet test-printed:
+print the tray and the travel shell first and try the click.
+
+## The device case: Pavilion (print/pavilion*)
 
 Since Nov 24 Baby wants the Pi treated openly as a device: easy to use,
 every port and the power button reachable, good cooling, safe, in a Mies van
