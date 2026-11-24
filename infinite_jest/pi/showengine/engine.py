@@ -97,6 +97,7 @@ class Engine:
         self._state_period = 1.0 / max(1.0, float(cfg.get("state_hz", 10)))
         self._last_state_emit = -1e9
         self._last_frame_t = -1e9
+        self.last_frame = None
         self._last_frame_in = -1e9
         self._near_since: float | None = None
         self._unknown_types: set[str] = set()
@@ -283,6 +284,7 @@ class Engine:
         merged.pop("kind", None)
         self.sensor.update(feats)
         self.presence.feed(merged, now)
+        self.last_frame = rgb            # the newest camera picture, in memory only; gone at the wipe
         plugins.call(self.visuals, "on_frame", rgb)
 
     def _on_control(self, d: dict, now: float) -> None:
@@ -306,6 +308,7 @@ class Engine:
                 self.listen.reset()
                 self.sensor.clear()
                 self.frames.reset()
+                self.last_frame = None
         elif cmd == "scene":
             self.override_scene = str(arg)[:40] if arg else None
         elif cmd == "hook":
@@ -430,6 +433,7 @@ class Engine:
 
     def _wipe_everything(self, visitor_id: str | None) -> None:
         self._near_since = None
+        self.last_frame = None
         self.listen.reset()
         self._heard_line = None
         self.fallback.reset()

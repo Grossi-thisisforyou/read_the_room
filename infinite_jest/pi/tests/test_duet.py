@@ -306,7 +306,7 @@ def test_collage_places_shifts_and_stitches_pieces(tmp_path):
         c.step(t, (960, 540), 0.0)
         t += 1 / 30
     few = len(c.pieces)
-    assert 1 <= few <= 3
+    assert 3 <= few <= 5
     c.burst()
     assert any(abs(o) > 0.1 for o in c.offsets)
     for _ in range(300):
@@ -324,7 +324,144 @@ def test_collage_places_shifts_and_stitches_pieces(tmp_path):
     for _ in range(30 * 80):
         c.step(t, (960, 540), 0.0)
         t += 1 / 30
-    assert len(c.pieces) <= 3                                                     # old pieces go
+    assert len(c.pieces) <= 5                                                     # old pieces go
     empty = Collage(None)
     empty.step(0.0, (320, 180), 1.0)
     empty.draw(s, 0.0, 1.0, front=False)
+
+
+def test_collage_mixes_family_footage_paintings_camera_and_photos(tmp_path):
+    pygame = pytest.importorskip("pygame")
+    from showengine.duet import Collage, Glitch
+    rng = np.random.default_rng(0)
+    for d in ("img", "bank"):
+        (tmp_path / d).mkdir()
+        for i in range(3):
+            a = rng.integers(0, 255, (240, 320, 3), dtype=np.uint8)
+            pygame.image.save(pygame.surfarray.make_surface(a), str(tmp_path / d / f"p{i}.png"))
+    foot = Glitch([], seed=1)
+    cam = {"f": rng.integers(0, 255, (120, 160, 3), dtype=np.uint8)}
+    c = Collage(str(tmp_path / "img"), seed=5, paint_dirs=[str(tmp_path / "bank")], footage=foot,
+                camera=lambda: cam["f"])
+    s = pygame.Surface((960, 540))
+    t = 0.0
+    for i in range(30 * 240):
+        if len(foot.clips) < 4:                                # the helper thread's job
+            foot.clips.append([np.full((180, 320, 3), (i + k * 9) % 255, np.uint8) for k in range(32)])
+        c.step(t, (960, 540), 0.8)
+        c.draw(s, t, 1.0, front=False)
+        c.draw(s, t, 1.0, front=True)
+        t += 1 / 30
+    assert all(c.counts[k] >= 1 for k in ("family", "photo", "paint", "camera")), c.counts
+    assert c.counts["family"] == max(c.counts.values())        # the family footage leads
+    moving = [p for p in c.pieces if p["clip"]]
+    assert moving
+    i0 = moving[0]["i"]
+    c.draw(s, t + 0.5, 1.0, front=moving[0]["front"])
+    assert moving[0]["i"] != i0                                 # it plays inside its piece
+    c.drop_camera()
+    assert not [p for p in c.pieces if p["kind"] == "camera"]
+    cam["f"] = None
+    c.step(t, (960, 540), 0.8)
+
+
+SPEAKS = {"kind": "phone", "motion": 0.6, "audio": {"level": 0.6, "voiced": True}}
+
+
+def test_it_never_says_the_same_sentence_twice():
+    eng, clock, duet, audio = duet_engine()
+    run(eng, clock, 40 * 60, HERE_DATA, hz=5)                  # forty minutes, no language model
+    said = [x for x in audio.said if x]
+    assert len(said) > 60
+    assert len(set(said)) == len(said)
+    run(eng, clock, 60, EMPTY, hz=5)                            # they leave; someone else comes
+    run(eng, clock, 5 * 60, HERE_DATA, hz=5)
+    again = [x for x in audio.said if x]
+    rep = [x for x in set(again) if again.count(x) > 1]
+    assert set(rep) <= {"hello.", duet.mood["today"]} | set(duet.lines["reveal"]) | set(duet.lines["address"])
+
+
+def test_it_asks_listens_and_answers_what_it_heard():
+    from showengine import talk
+    eng, clock, duet, audio = duet_engine()
+    run(eng, clock, 50, HERE_DATA)
+    kinds = []
+    for speak_s in (0.0, 1.0, 6.0):
+        for _ in range(1200):
+            run(eng, clock, 0.1, HERE_DATA)
+            if duet.asking:
+                break
+        q = duet.asking["q"]
+        assert q.endswith("?") and audio.said[-1] == q
+        n = len(audio.said)
+        while clock.t < duet.asking["from"] + 0.2:
+            run(eng, clock, 0.1, HERE_DATA)
+        assert eng.state["duet"]["listening"] == 1
+        if speak_s:
+            run(eng, clock, speak_s, SPEAKS)
+        for _ in range(200):
+            if not duet.asking:
+                break
+            run(eng, clock, 0.1, HERE_DATA)
+        assert not duet.asking and eng.state["duet"]["listening"] == 0
+        assert len(audio.said) == n + 1                          # one answer, nothing else in between
+        kinds.append(audio.said[-1])
+    assert kinds[0] in talk.REPLIES["none"] and kinds[1] in talk.REPLIES["short"] and kinds[2] in talk.REPLIES["long"]
+    assert duet.turns == 3
+
+
+def test_the_local_model_writes_statements_questions_and_answers():
+    import http.server
+    import json as J
+    import threading
+    import time as T
+    from showengine.duet import LiveWords
+    seen = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            req = J.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append(req["messages"][1]["content"])
+            text = ("i heard your breath, not the word.\nwho taught you to wait?" if "You asked the visitor" in seen[-1]
+                    else "i kept the tape running.\nwhat did you leave at home?\ni am not finished with you.")
+            body = J.dumps({"choices": [{"message": {"content": text}}]})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    w = LiveWords(f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", timeout=5)
+
+    def wait():
+        for _ in range(100):
+            if not w.busy:
+                return
+            T.sleep(0.05)
+
+    w.ask({"themes": ["hold still"]}, {"voice": "homesick"}, avoid=["stay."], facts=["trained as an electrician"])
+    wait()
+    assert w.lines == ["i kept the tape running.", "i am not finished with you."]
+    assert w.questions == ["what did you leave at home?"]
+    assert "electrician" in seen[0] and "homesick" in seen[0] and "stay." in seen[0]
+    w.answer("are you here alone?", "long", None, None)
+    wait()
+    srv.shutdown()
+    assert w.lines[0] == "i heard your breath, not the word." and w.questions[0] == "who taught you to wait?"
+    assert "spoke for a long time" in seen[1]
+
+
+def test_the_tide_builds_peaks_ebbs_and_builds_again():
+    eng, clock, duet, audio = duet_engine()
+    arc = []
+    for _ in range(25 * 60 // 5):
+        run(eng, clock, 5, HERE_DATA, hz=5)
+        arc.append(eng.state["duet"]["arc"])
+    peaks = [i for i in range(1, len(arc) - 1) if arc[i] > 0.65 and arc[i] >= arc[i - 1] and arc[i] > arc[i + 1]]
+    lows = [i for i in range(1, len(arc) - 1) if arc[i] < 0.15 and arc[i] <= arc[i - 1] and arc[i] < arc[i + 1]]
+    assert len(peaks) >= 3 and len(lows) >= 2
+    assert max(arc) > 0.7 and min(arc[12:]) < 0.15
+    assert 0.2 <= eng.state["intensity"] <= 0.95

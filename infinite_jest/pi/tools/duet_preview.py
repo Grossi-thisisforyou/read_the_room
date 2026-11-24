@@ -48,7 +48,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--seconds", type=float, default=540)
     ap.add_argument("--mood", help="force the mood of the day")
-    ap.add_argument("--footage", help="folder with clips for the glitches")
+    ap.add_argument("--footage", help="folder with clips (the family footage, or a stand-in)")
+    ap.add_argument("--paintings", help="folder with paintings (the Pi paints its own)")
     ap.add_argument("--states", help="write the show state per frame here (to render the music afterwards)")
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--models")
@@ -60,7 +61,9 @@ def main():
     pygame.display.set_mode((16, 16))
     over = {"mode": "fixed", "modules": {"text": None}, "show": "duet",
             "visit": {"max_visit": 1e9, "release_time": 40.0, "wipe_time": 8.0}, "speak": False}
-    over["duet"] = {"footage_dirs": [], "glitch_dirs": [a.footage] if a.footage else [], "mood_file": os.devnull}
+    over["duet"] = {"footage_dirs": [a.footage] if a.footage else [], "mood_file": os.devnull}
+    if a.paintings:
+        over["duet"]["paint_dir"] = a.paintings
     if a.models:
         over["duet"]["models_dir"] = a.models
     if a.mood:
@@ -90,7 +93,11 @@ def main():
         t = i * dt
         clock.t = 1000.0 + t
         here = 6.0 <= t < a.leave
-        voiced = here and (t % 23.0) < 0.6
+        voiced = here and (t % 47.0) < 0.6
+        q = duet.asking                      # the pretend visitor answers most questions, short or long
+        if here and q and clock.t >= q["from"] + 1.0:
+            talk_for = (0.0, 1.2, 5.0, 3.0)[hash(q["q"]) % 4]
+            voiced = clock.t < q["from"] + 1.0 + talk_for
         data = {"kind": "phone", "motion": (0.25 + 0.2 * rng.random()) if here else 0.0,
                 "audio": {"level": 0.5 if voiced else 0.0, "voiced": voiced}}
         eng.handle(P.make(P.SENSOR, data), "phone")

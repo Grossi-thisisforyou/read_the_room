@@ -48,6 +48,30 @@ if ! command -v espeak-ng >/dev/null && ls "$OFF"/debs/*.deb >/dev/null 2>&1; th
 fi
 command -v espeak-ng >/dev/null && say "voice: ok" || say "voice: missing (the TV still writes its words)"
 
+# the natural voice (Piper): its program comes with the update as wheels (they are zip files, so no
+# pip and no internet are needed); the voice files (*.onnx + *.onnx.json) come from the Mac into ~/voices
+HERE_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYLIB="$H/.local/share/infinite-jest/pylib"
+if ls "$HERE_DIR"/wheels/piper_tts-*.whl >/dev/null 2>&1; then
+  sudo -u "$WHO" mkdir -p "$PYLIB"
+  if sudo -u "$WHO" python3 - "$PYLIB" "$HERE_DIR"/wheels/*.whl <<'PY'
+import sys, zipfile
+dst = sys.argv[1]
+for w in sys.argv[2:]:
+    zipfile.ZipFile(w).extractall(dst)
+PY
+  then say "natural voice program: installed"; else say "!! natural voice program did not unpack"; fi
+fi
+sudo -u "$WHO" mkdir -p "$H/voices"
+if ls "$OFF"/voices/*.onnx >/dev/null 2>&1; then sudo -u "$WHO" cp -n "$OFF"/voices/*.onnx "$OFF"/voices/*.onnx.json "$H/voices/" 2>/dev/null; fi
+if ls "$H"/voices/*.onnx >/dev/null 2>&1; then
+  if sudo -u "$WHO" python3 -c "import sys; sys.path.append('$PYLIB'); sys.path.insert(0, '$H/read_the_room'); from infinite_jest.audio import speech; s = speech.render('hello'); assert s is not None and speech._piper['voice'] is not None" 2>/dev/null
+  then say "natural voice: ok ($(cat "$H/voices/use.txt" 2>/dev/null || ls "$H"/voices/*.onnx | head -1 | xargs basename))"
+  else say "!! natural voice did not load; the old voice is used"; fi
+else
+  say "natural voice: no voice file in ~/voices yet (the old voice is used until one is copied there)"
+fi
+
 # 3. the programs (built for the Pi 5 off the Pi; no compiler needed here)
 for b in ij-llama-server ij-sd; do
   [[ -f $HERE/bin/$b ]] && install -m 755 "$HERE/bin/$b" /usr/local/bin/$b
