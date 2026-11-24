@@ -57,4 +57,13 @@
 
 ## Artistic references
 
-Kept private by the artist.
+- **Francis Bacon**: the body as meat, figures caught in cage-like space frames.
+- **Georg Baselitz**: the inverted image, the picture turned upside down.
+- **Jean-Michel Basquiat**: writing as image, words crossed out and repeated.
+- **David Foster Wallace, *Infinite Jest* (1996)**: the title, and its entertainment
+  so perfectly made for its viewer that they cannot look away.
+- **Cambridge Analytica**: the psychographic method the piece performs in plain sight
+  (see [research](research.md)).
+
+These inform the imagery and the idea. They are not named in the room or on anything a
+visitor sees.
