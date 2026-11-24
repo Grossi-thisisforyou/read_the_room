@@ -115,6 +115,13 @@ a flue, and a double roof with a Prairie art-glass pattern cut over the fan.
 `prairie_base.stl` 115 x 84 x 51 mm, `prairie_roof.stl` 113 x 84 x 6 mm, no
 supports. Print the base in sand, the roof in brick red.
 
+v2 (Nov 24): 2.4 mm walls, corner piers moved outside the walls (v1's
+corner posts touched the board corners), heat-set insert holes (set
+`threads = "self"` for plain screws), gusseted standoffs, a 45 degree inner
+fillet where walls meet the podium, shorter 12 mm louver bridges, 0.5 mm
+more clearance on every opening, port labels engraved in the podium, and a
+`fitcheck` part that comes out empty when the board clears everything.
+
 ## Hidden case: The Wall Box (print/wall_box*), chosen direction
 
 Baby's direction since Nov 23: hide the Pi in plain sight in room 401. This

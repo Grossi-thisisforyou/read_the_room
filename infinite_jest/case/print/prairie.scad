@@ -20,8 +20,10 @@
 //   long side   : USB-C power, micro-HDMI 0 and 1
 //   short end   : 4x USB, Ethernet
 //   roof        : 4 countersunk M3 x 10 screws; lift for GPIO and fan
-// Hardware: 4x M2.5 x 6 mm (Pi), 4x M3 x 10 mm countersunk (roof),
-//           4x 8 mm rubber bumpers. Sizes in mm.
+// Hardware: 4x M2.5 heat-set inserts (4 mm long) + 4x M2.5 x 6 mm screws (Pi),
+//           4x M3 heat-set inserts (5 mm long) + 4x M3 x 10 mm countersunk (roof),
+//           4x 8 mm rubber bumpers. Set threads = "self" for plain
+//           self-tapping screws instead. Sizes in mm.
 // Board coordinates: x = 0 is the microSD end, y = 0 the HDMI edge.
 
 part = "assembly";   // "base", "roof", "assembly"
@@ -33,29 +35,35 @@ holes = [[3.5, 3.5], [61.5, 3.5], [3.5, 52.5], [61.5, 52.5]];
 
 // ---- levels ---------------------------------------------------------------
 plinth_h = 3; podium_t = 3; standoff = 5; clear_top = 19;
-wall = 2; gap = 1; shadow = 3.5;
+wall = 2.4; gap = 1; shadow = 3.5;     // 2.4 mm walls = 6 perimeters with a 0.4 nozzle
 podium_z = plinth_h + podium_t;
 pcb_z = podium_z + standoff;
 top_z = pcb_z + pcb_t;
 wall_z = top_z + clear_top;
 roof_z = wall_z + shadow;
-roof1_t = 3; roof2_t = 3;
+roof1_t = 3.5; roof2_t = 3;
+
+// threads: "self" = self-tapping screws straight into plastic,
+//          "insert" = brass heat-set inserts (stronger, survives many openings)
+threads = "insert";
+m25_hole = threads == "insert" ? 3.6 : 2.2;   // M2.5 x 4 mm insert, 3.5 mm OD
+m3_hole  = threads == "insert" ? 4.0 : 2.6;   // M3 x 5 mm insert, 4.0 mm OD
 
 wx0 = -gap - wall; wx1 = pcb_x + gap + wall;
 wy0 = -gap - wall; wy1 = pcb_y + gap + wall;
 
 // plinth: long and low, reaching past the walls at both ends
-px0 = wx0 - 10; px1 = wx1 + 14; py0 = wy0 - 6; py1 = wy1 + 16;
+px0 = wx0 - 10; px1 = wx1 + 14; py0 = wy0 - 9; py1 = wy1 + 16;
 
 // louvers
 louver_pitch = 4; louver_gap = 1.8;
-pier = 4;                                   // solid piers between louver bays
-bay = 21;                                   // bay width
+pier = 5;                                   // solid piers between louver bays
+bay = 17;                                   // bay width: louver bridges stay at 12 mm
 
 // openings (same as the Pavilion: they fit the board)
-open_ports = [[-2, pcb_y + 2], [top_z - 0.8, top_z + 17.2]];
-open_side  = [[2.5, 53], [top_z - 1.2, top_z + 8.5]];
-open_front = [[4, 42], [podium_z + 0.6, top_z + 7]];
+open_ports = [[-2.5, pcb_y + 2.5], [top_z - 1.2, top_z + 17.6]];
+open_side  = [[2, 53.5], [top_z - 1.6, top_z + 9]];
+open_front = [[3.5, 42.5], [podium_z + 2.2, top_z + 7.5]];   // starts above the inner fillet
 
 // terrace: an L-shaped cantilever round the microSD end and the GPIO side
 terrace_z = top_z + 8.5; terrace_t = 3; terrace_out = 8;
@@ -66,7 +74,10 @@ ch_x0 = 30; ch_w = 16; ch_d = 11; ch_top = roof_z + roof1_t + roof2_t + 10;
 // roof planes
 ov = 11;
 r1 = [wx0 - ov, wy0 - ov, wx1 + ov, wy1 + ov];            // lower, wide
-r2 = [44, wy0 - ov + 5, wx1 + ov, wy1 + ov - 9];          // upper, a second plane over the port end
+r2 = [44, wy0 - ov + 5, wx1 + ov, wy1 + ov - 5];          // upper, a second plane over the port end
+
+pier_s = 8;
+roof_screws = [for (x = [wx0 - 2, wx1 + 2], y = [wy0 - 2, wy1 + 2]) [x, y]];
 
 module rect(x0, y0, x1, y1, h) { translate([x0, y0, 0]) cube([x1 - x0, y1 - y0, h]); }
 
@@ -134,11 +145,23 @@ module walls() {
         translate([0, 0, open_side[1][0]])  rect(open_side[0][0], wy0 - 5, open_side[0][1], wy0 + wall + 1, open_side[1][1] - open_side[1][0]);
         translate([0, 0, open_front[1][0]]) rect(wx0 - 5, open_front[0][0], wx0 + wall + 1, open_front[0][1], open_front[1][1] - open_front[1][0]);
     }
-    // corner posts carry the roof across the shadow gap
-    for (x = [wx0, wx1 - 6], y = [wy0, wy1 - 6]) translate([x, y, 0]) cube([6, 6, roof_z]);
+        // corner piers outside the walls carry the roof across the shadow gap
+    // (outside, so they never touch the board's corners)
+    for (c = roof_screws) translate([c[0] - pier_s / 2, c[1] - pier_s / 2, 0]) cube([pier_s, pier_s, roof_z]);
+    // 45 degree fillet where the walls meet the podium, inside: stiffer walls, no supports
+    difference() {
+        hull() {
+            translate([0, 0, podium_z - 0.01]) rect(wx0 + wall, wy0 + wall, wx1 - wall, wy1 - wall, 0.01);
+            translate([0, 0, podium_z + 2]) rect(wx0 + wall, wy0 + wall, wx1 - wall, wy1 - wall, 0.01);
+        }
+        hull() {
+            translate([0, 0, podium_z - 0.02]) rect(wx0 + wall + 2, wy0 + wall + 2, wx1 - wall - 2, wy1 - wall - 2, 0.01);
+            translate([0, 0, podium_z + 2.01]) rect(wx0 + wall, wy0 + wall, wx1 - wall, wy1 - wall, 0.01);
+        }
+    }
 }
 
-roof_screws = [for (x = [wx0 + 3, wx1 - 3], y = [wy0 + 3, wy1 - 3]) [x, y]];
+
 
 module base() {
     difference() {
@@ -147,17 +170,28 @@ module base() {
             walls();
             terrace();
             chimney();
-            for (h = holes) translate([h[0], h[1], podium_z - 0.01]) cylinder(d = 6, h = standoff + 0.01);
+            for (h = holes) translate([h[0], h[1], podium_z - 0.01]) {
+                cylinder(d = 7, h = standoff + 0.01);
+                cylinder(d1 = 11, d2 = 7, h = 2);          // gusseted foot
+            }
         }
-        for (h = holes) translate([h[0], h[1], podium_z - 2]) cylinder(d = 2.2, h = standoff + 3);
-        for (s = roof_screws) translate([s[0], s[1], roof_z - 12]) cylinder(d = 2.6, h = 13, $fn = 20);
+        for (h = holes) translate([h[0], h[1], podium_z - 1]) cylinder(d = m25_hole, h = standoff + 3);
+        for (s = roof_screws) translate([s[0], s[1], roof_z - 10]) cylinder(d = m3_hole, h = 11, $fn = 24);
+        // labels engraved in the podium in front of each opening
+        lbl_t = 0.6;
+        translate([wx0 - 6.5, (open_front[0][0] + open_front[0][1]) / 2, podium_z - lbl_t]) rotate(90) linear_extrude(1)
+            text("POWER  \u00b7  microSD", size = 2.8, font = "Liberation Sans:style=Bold", halign = "center", valign = "center");
+        translate([(open_side[0][0] + open_side[0][1]) / 2, wy0 - 2.6, podium_z - lbl_t]) linear_extrude(1)
+            text("USB-C   HDMI 0   HDMI 1", size = 2.8, font = "Liberation Sans:style=Bold", halign = "center", valign = "center");
+        translate([wx1 + 11, pcb_y / 2, podium_z - lbl_t]) rotate(-90) linear_extrude(1)
+            text("USB   \u00b7   ETHERNET", size = 2.8, font = "Liberation Sans:style=Bold", halign = "center", valign = "center");
         // air in through the floor, under the board
         for (x = [12 : 5 : 72]) translate([x, 10, -1]) cube([2.2, 36, podium_z + 2]);
         // the port openings continue through the terrace where they meet it
         translate([0, 0, open_front[1][0]]) rect(wx0 - terrace_out - 1, open_front[0][0], wx0 + wall + 1, open_front[0][1], open_front[1][1] - open_front[1][0]);
         // zip-tie slots on the plinth at the port end and the HDMI side
-        for (y = [4, 22, 40]) translate([wx1 + 6, y, -1]) cube([2.4, 9, podium_z + 2]);
-        for (x = [10, 30, 50]) translate([x, py0 + 1.8, -1]) cube([9, 2.4, podium_z + 2]);
+        for (y = [4, 22, 40]) translate([wx1 + 5, y, -1]) cube([2.4, 9, podium_z + 2]);
+        for (x = [10, 30, 50]) translate([x, py0 + 1.6, -1]) cube([9, 2.4, podium_z + 2]);
         // bumper seats
         for (x = [px0 + 12, px1 - 12], y = [py0 + 12, py1 - 12]) translate([x, y, -0.01]) cylinder(d = 8.6, h = 0.8);
     }
@@ -206,7 +240,9 @@ module roof() {
 }
 
 // ---------------------------------------------------------------------------
-if (part == "base") base();
+if (part == "fitcheck")   // must come out empty: the board and its keep-out vs the base
+    intersection() { base(); translate([-0.5, -0.5, pcb_z]) cube([pcb_x + 1, pcb_y + 1, pcb_t + 0.01]); }
+else if (part == "base") base();
 else if (part == "roof") translate([0, 0, -roof_z]) roof();
 else {
     color("#c9b8a0") base();          // warm Wright brick-and-sand
