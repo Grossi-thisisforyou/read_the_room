@@ -126,16 +126,22 @@ module ring(s_out, s_in, z0, z1) {
 mark = "J R A";
 font_mark = "Inter Display:style=SemiBold";
 font_small = "Inter:style=Bold";
-// two fine channels that cross on the crown and under the tray, one the long
-// way and one across, for two rubber bands or hair ties that keep the stone
-// shut in a bag
-band_w = 3.5; band_d = 0.9;
-module band_groove() intersection() {
-    union() {
-        translate([-200, -band_w / 2, -1]) cube([400, band_w, 200]);
-        translate([-band_w / 2, -200, -1]) cube([band_w, 400, 200]);
-    }
-    difference() { translate([-200, -200, -1]) cube(400); off(band_d); }
+// two soft, washed-out dips that cross on the crown and under the tray, one the
+// long way and one across, for two rubber bands or hair ties that keep the
+// stone shut in a bag. The work shell only has the one across.
+// Profile: a shallow elliptical valley, band_W wide at the surface, band_d deep,
+// built from band_n layers that each follow the stone's surface.
+band_W = 6.5; band_d = 1.0; band_n = 7;
+module band_groove(long = true, across = true) {
+    for (k = [1 : band_n]) let(t = band_d * k / band_n,
+                               w = band_W * sqrt(1 - pow((k - 1) / band_n, 2)))
+        intersection() {
+            union() {
+                if (long)   translate([-200, -w / 2, -1]) cube([400, w, 200]);
+                if (across) translate([-w / 2, -200, -1]) cube([w, 400, 200]);
+            }
+            difference() { translate([-200, -200, -1]) cube(400); off(t); }
+        }
 }
 
 module label(t, size, font = font_small) text(t, size = size, font = font, halign = "center", valign = "center");
@@ -202,12 +208,12 @@ module tray() {
 }
 
 // ---- shells ----------------------------------------------------------------------
-module shell_raw() {
+module shell_raw(long_band = true) {
     difference() {
         intersection() { stone(); translate([-200, -200, split]) cube([400, 400, 100]); }
         cavity();
         top_mark();
-        band_groove();
+        band_groove(long = long_band);
     }
     inner_mark();
     // ridges that snap into the rim's groove (only where the rim exists)
@@ -228,7 +234,7 @@ module vents() {
 
 module work() {
     difference() {
-        shell_raw();
+        shell_raw(long_band = false);
         vents();
         translate([0, open_ports[0][0], open_ports[1][0]]) translate([X(pcb_x) - 3, 0, 0])
             cube([100, open_ports[0][1] - open_ports[0][0], open_ports[1][1] - open_ports[1][0]]);

@@ -31,9 +31,11 @@ THE CLICK
   stone.scad and export again. Too loose: bump_d = 0.7.
 
 BAND CROSS
-  Two fine channels (3.5 mm wide, 0.9 mm deep) run round the stone, one the long
-  way and one across; they cross on the crown and under the tray. Two hair ties
-  or rubber bands in them keep the shell shut in a bag. Change band_w / band_d in stone.scad to suit the band.
+  Two soft, washed-out dips (6.5 mm wide, 1 mm deep in the middle, rounded
+  edges) run round the travel shell and the tray, one the long way and one
+  across; they cross on the crown and under the tray. Two hair ties or rubber
+  bands in them keep the shell shut in a bag. The work shell only has the dip
+  across. Change band_W / band_d in stone.scad to suit the band.
 
 HARDWARE
   4x M2.5 x 6 mm self-tapping screws (Pi to the tray standoffs)
