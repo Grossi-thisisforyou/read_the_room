@@ -7,8 +7,8 @@
 //   part = "work";    // shell for working: breathes, every connector open
 //   part = "travel";  // shell for the bag: closed, protects the ports
 //
-// Print the tray bottom down and both shells top down (the flat top facet on
-// the bed). No supports for any part.
+// Print the tray bottom down (no supports) and both shells rim down, with tree
+// supports from the build plate only: they touch just the inside of the crown.
 //
 // Either shell clicks onto the tray: the tray's rim has a groove, the shell
 // has small ridges that snap into it. Pull the shell straight up to open.
@@ -29,22 +29,29 @@ $fn = 24;
 // ---- the stone --------------------------------------------------------------
 A = 64; B = 50; C = 30;       // ellipsoid the facets are tangent to
 ZC = 16;                      // its centre height
-H = 46;                       // the top facet (flat, small)
-round_r = 8;                  // how soft the facet edges are: sea-washed
+round_r = 10;                 // how soft the facet edges are: sea-washed
 wall = 2.2;
 
 nA = 14; nB = 14;             // lower ring of facets (near vertical), upper ring (shoulders)
 rnd = rands(0, 1, 4 * (nA + nB), seed);
 // facets wander in direction and are cut to different depths, so some planes are
 // broad and some are narrow slivers between them
-normals = concat(
+sides = concat(
     [for (i = [0 : nA - 1]) let(az = i * 360 / nA + (rnd[i] - 0.5) * 30,
                                 el = -16 + rnd[nA + i] * 26)            // -16 .. +10 degrees
         [cos(el) * cos(az), cos(el) * sin(az), sin(el)]],
     [for (i = [0 : nB - 1]) let(az = (i + 0.5) * 360 / nB + (rnd[2 * nA + i] - 0.5) * 30,
                                 el = 32 + rnd[2 * nA + nB + i] * 14)    // 32 .. 46 degrees
         [cos(el) * cos(az), cos(el) * sin(az), sin(el)]]);
-cuts = [for (i = [0 : nA + nB - 1]) pow(rnd[2 * (nA + nB) + i], 2) * (i < nA ? 4 : 6)];   // 0 .. 4-6 mm deeper
+// the crown: a few low facets, each tilted its own way, so the top is uneven
+nT = 4;
+rt = rands(0, 1, 3 * nT, seed + 1);
+crown = [for (i = [0 : nT - 1]) let(az = i * 360 / nT + 20 + (rt[i] - 0.5) * 70,
+                                    el = 70 + rt[nT + i] * 13)              // 70 .. 83 degrees
+        [cos(el) * cos(az), cos(el) * sin(az), sin(el)]];
+normals = concat(sides, crown);
+cuts = concat([for (i = [0 : nA + nB - 1]) pow(rnd[2 * (nA + nB) + i], 2) * (i < nA ? 4 : 6)],   // 0 .. 4-6 mm deeper
+              [for (i = [0 : nT - 1]) rt[2 * nT + i] * 2.5]);
 
 function support(n) = n[2] * ZC + sqrt(pow(A * n[0], 2) + pow(B * n[1], 2) + pow(C * n[2], 2));
 
@@ -55,22 +62,22 @@ module halfspace(n, d) {
     rotate([0, 0, ph]) rotate([0, th, 0]) translate([-L / 2, -L / 2, d - L]) cube(L);
 }
 
-// the stone as an intersection of 30 half-spaces, pulled in by s
+// the stone as an intersection of 32 half-spaces and the flat bottom, pulled in by s
 module poly(s = 0, e = 0) {
     intersection() {
         intersection_for (i = [0 : len(normals) - 1]) halfspace(normals[i], support(normals[i]) - cuts[i] - s);
-        translate([-200, -200, s - e]) cube([400, 400, H - 2 * s + 2 * e]);   // flat bottom + flat top
+        translate([-200, -200, s - e]) cube([400, 400, 200]);   // flat bottom
     }
 }
 
 // the rounded stone pulled in by s: exact inward offset of the sea-washed surface
 module off(s = 0) {
-    // the flat bottom and top meet the rounding at 45 degrees, not tangent, so the
+    // the flat bottom meets the rounding at 45 degrees, not tangent, so the
     // first layers on the bed do not overhang
     e = round_r * (1 - cos(45));
     if (s < round_r) intersection() {
         minkowski() { poly(round_r, e); sphere(round_r - s, $fn = 28); }
-        translate([-200, -200, s]) cube([400, 400, H - 2 * s]);
+        translate([-200, -200, s]) cube([400, 400, 200]);
     }
     else poly(s);
 }
@@ -131,10 +138,17 @@ module bottom_text() {
 }
 
 // small mark pressed into the top facet of each shell
-module top_mark() translate([0, -22, H - 0.5]) linear_extrude(1) label(mark, 3.6, font_mark);
+// it follows the tilted crown facet it lands on
+module top_mark() intersection() {
+    translate([0, -22, 0]) linear_extrude(100) label(mark, 3.6, font_mark);
+    difference() { translate([-200, -200, 20]) cube(400); off(0.5); }
+}
 // and a raised one on the ceiling inside each shell, read from below
-module inner_mark() translate([32, 0, H - wall - 0.6]) linear_extrude(0.61)
-    mirror([1, 0, 0]) rotate(90) label(mark, 5, font_mark);
+// and a raised one on the inside wall at the microSD end, read from inside
+module inner_mark() intersection() {
+    translate([-100, 0, 23]) rotate([90, 0, 90]) linear_extrude(70) label(mark, 5, font_mark);
+    difference() { off(wall); off(wall + 0.6); }
+}
 
 // ---- tray ----------------------------------------------------------------------
 module tray() {
@@ -212,10 +226,9 @@ module travel() { shell_raw(); }
 
 // ---------------------------------------------------------------------------
 if (part == "tray") tray();
-// shells print upside down, the small flat top facet on the bed: then the inside
-// is open to the nozzle and no ceiling has to be bridged
-else if (part == "work") translate([0, 0, H]) mirror([0, 0, 1]) work();
-else if (part == "travel") translate([0, 0, H]) mirror([0, 0, 1]) travel();
+// shells print rim down; tree supports from the bed carry the inside of the crown
+else if (part == "work") translate([0, 0, -split]) work();
+else if (part == "travel") translate([0, 0, -split]) travel();
 else if (part == "fitcheck") {
     // must come out empty: board, cooler and USB block against the tray and work shell
     intersection() {

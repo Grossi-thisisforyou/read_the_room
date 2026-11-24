@@ -87,21 +87,23 @@ lay them in the two notches, then put the dome on.
 ## Pocket case: Stone (print/stone*), current direction
 
 Since Nov 24 (later the same day): practical, best for the Pi, nice in the hand
-and in a bag. A geometric pebble of about 30 facets of very different sizes, rounded
-deep (8 mm) where they meet as if washed by the sea, on one flat bottom.
+and in a bag. A geometric pebble of about 32 facets of very different sizes, rounded
+deep (10 mm) where they meet as if washed by the sea, on one flat bottom.
+The top is an uneven crown of four low facets, each tilted its own way.
 J R A is pressed into each shell's top and raised inside it; the underside
 of the tray carries the owner and return text. Three parts:
 
 | File | Size | What it is |
 | --- | --- | --- |
-| `print/stone_tray.stl` | 122 x 102 x 13 mm | Flat bottom. Holds the Pi on four standoffs, microSD slot, air slots, click rim. |
-| `print/stone_work.stl` | 121 x 100 x 39 mm | Shell for working: vent slits over the fan and along the GPIO side, every connector and the power button open. |
-| `print/stone_travel.stl` | 125 x 102 x 39 mm | Shell for the bag: closed, protects the ports. |
+| `print/stone_tray.stl` | 122 x 101 x 13 mm | Flat bottom. Holds the Pi on four standoffs, microSD slot, air slots, click rim. |
+| `print/stone_work.stl` | 121 x 100 x 40 mm | Shell for working: vent slits over the fan and along the GPIO side, every connector and the power button open. |
+| `print/stone_travel.stl` | 125 x 102 x 40 mm | Shell for the bag: closed, protects the ports. |
 | `print/stone.scad` | OpenSCAD source | `seed` cuts a different stone, `clr` / `bump_d` tune the click. |
 
 Either shell clicks onto the tray (ridges in the shell snap into a groove in
-the tray's rim); pull straight up to open. Tray prints bottom down, shells
-print top down on their flat top facet, no supports. PETG or ASA, 0.12 mm
+the tray's rim); pull straight up to open. Tray prints bottom down without
+supports; shells print rim down with tree supports from the build plate,
+which touch only the inside of the crown. PETG or ASA, 0.12 mm
 layers, 4 walls. Spec: `print/stone_PRINT_SPEC.txt`. Not yet test-printed:
 print the tray and the travel shell first and try the click.
 
