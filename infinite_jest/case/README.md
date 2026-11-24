@@ -100,9 +100,10 @@ of the tray carries the owner and return text. Three parts:
 | `print/stone_travel.stl` | 125 x 102 x 40 mm | Shell for the bag: closed, protects the ports. |
 | `print/stone.scad` | OpenSCAD source | `seed` cuts a different stone, `clr` / `bump_d` tune the click. |
 
-Two soft, washed-out dips cross on the crown of the travel shell and under
-the tray, for two hair ties that keep it shut in a bag (the work shell has
-only the one across). Either shell clicks onto the tray (ridges in the shell snap into a groove in
+Two fine, wandering, washed-out dips cross on the crown of the travel shell
+and under the tray, for two hair ties that keep it shut in a bag (the work
+shell has only the one across). The Pi is held by printed push-pins
+(`print/stone_pins.stl`), no screws. Either shell clicks onto the tray (ridges in the shell snap into a groove in
 the tray's rim); pull straight up to open. Tray prints bottom down without
 supports; shells print rim down with tree supports from the build plate,
 which touch only the inside of the crown. PETG or ASA, 0.12 mm

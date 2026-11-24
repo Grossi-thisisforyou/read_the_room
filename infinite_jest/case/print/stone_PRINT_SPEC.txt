@@ -5,6 +5,7 @@ PARTS
   stone_tray.stl    122 x 101 x 13 mm   bottom face down, no supports
   stone_work.stl    121 x 100 x 40 mm   rim down, supports inside (see below)
   stone_travel.stl  125 x 102 x 40 mm   rim down, supports inside
+  stone_pins.stl    6 push-pins          head down, no supports
   stone.scad        OpenSCAD source (change `seed` for a differently cut stone)
 The top of the stone is uneven on purpose, so the shells print rim down with
 TREE SUPPORTS, BUILD PLATE ONLY: they stand on the bed inside the shell and
@@ -31,15 +32,19 @@ THE CLICK
   stone.scad and export again. Too loose: bump_d = 0.7.
 
 BAND CROSS
-  Two soft, washed-out dips (6.5 mm wide, 1 mm deep in the middle, rounded
-  edges) run round the travel shell and the tray, one the long way and one
-  across; they cross on the crown and under the tray. Two hair ties or rubber
-  bands in them keep the shell shut in a bag. The work shell only has the dip
-  across. Change band_W / band_d in stone.scad to suit the band.
+  Two fine, washed-out dips (about 4 mm wide, 0.8 mm deep, soft cosine profile)
+  run round the travel shell and the tray, one the long way and one across;
+  each wanders and swells a little like a water-worn line, and they cross on the
+  crown and under the tray. Two hair ties or rubber bands in them keep the shell
+  shut in a bag. The work shell only has the dip across.
+  Change band_W / band_d in stone.scad to suit the band.
 
 HARDWARE
-  4x M2.5 x 6 mm self-tapping screws (Pi to the tray standoffs)
-    or brass heat-set inserts: set threads = "insert" in stone.scad
+  No screws needed: stone_pins.stl holds 6 printed push-pins (4 + 2 spare).
+    Print them head down, 100 % infill, 0.12 mm layers. Push each through a
+    corner hole of the Pi into its post until the split tip clicks.
+    Too tight: set pin_d = 2.3 in stone.scad. Too loose: m25_hole 2.5.
+    Prefer metal? Set threads = "self" (M2.5 x 6 self-tapping) or "insert".
   2 hair ties or rubber bands, about 3 mm thick, for the bag
   4x 8 mm self-adhesive rubber bumpers (seats are marked under the tray)
   Official Raspberry Pi 5 Active Cooler (needed) and 27 W USB-C supply

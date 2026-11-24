@@ -19,8 +19,8 @@
 //
 // Raspberry Pi 5 with the official Active Cooler. Board coordinates below:
 // the board is centred, x = -42.5 is the microSD end, y = -28 the HDMI edge.
-// Hardware: 4x M2.5 x 6 mm screws (self-tapping, or into heat-set inserts
-// with threads = "insert"), 4x 8 mm rubber bumpers. Sizes in mm.
+// Hardware: none needed for the Pi: 4 printed push-pins (part = "pins"), or
+// M2.5 x 6 mm screws with threads = "self" / "insert", 4x 8 mm rubber bumpers. Sizes in mm.
 
 part = "assembly";   // "tray", "work", "travel", "assembly", "travel_assembly", "exploded", "fitcheck"
 seed = 2026;         // change for a differently cut stone
@@ -91,8 +91,22 @@ holes = [[3.5, 3.5], [61.5, 3.5], [3.5, 52.5], [61.5, 52.5]];
 floor_t = 2.4; standoff = 4.2;
 pcb_z = floor_t + standoff;                      // underside of the board
 top_z = pcb_z + pcb_t;
-threads = "self";
-m25_hole = threads == "insert" ? 3.6 : 2.2;
+threads = "pin";     // "pin": printed push-pins (part="pins"), "self": M2.5 self-tapping, "insert": heat-set
+m25_hole = threads == "insert" ? 3.6 : threads == "pin" ? 2.6 : 2.2;
+
+// printed push-pin: a head, a shaft through the Pi's 2.7 mm hole, and a split
+// barbed tip that squeezes into the 2.6 mm hole in the post and springs open
+pin_d = 2.4; pin_len = pcb_t + 3.6; pin_head = 5.5;
+module pin() {
+    difference() {
+        union() {
+            cylinder(d1 = pin_head, d2 = pin_head - 1, h = 1.3, $fn = 32);                  // head
+            cylinder(d = pin_d, h = 1.3 + pin_len - 1.2, $fn = 24);                         // shaft
+            translate([0, 0, 1.3 + pin_len - 1.2]) cylinder(d1 = 2.95, d2 = 2.0, h = 1.2, $fn = 24);   // barb
+        }
+        translate([-0.35, -2, 1.3 + pcb_t + 0.3]) cube([0.7, 4, 10]);                       // split
+    }
+}
 
 // ---- the split and the click rim ---------------------------------------------
 split = pcb_z + 0.4;          // tray / shell seam, just under the board
@@ -126,19 +140,28 @@ module ring(s_out, s_in, z0, z1) {
 mark = "J R A";
 font_mark = "Inter Display:style=SemiBold";
 font_small = "Inter:style=Bold";
-// two soft, washed-out dips that cross on the crown and under the tray, one the
+// two fine, washed-out dips that cross on the crown and under the tray, one the
 // long way and one across, for two rubber bands or hair ties that keep the
 // stone shut in a bag. The work shell only has the one across.
-// Profile: a shallow elliptical valley, band_W wide at the surface, band_d deep,
-// built from band_n layers that each follow the stone's surface.
-band_W = 6.5; band_d = 1.0; band_n = 7;
+// Each dip wanders a little and swells and narrows like a water-worn line; its
+// profile is a soft cosine valley built from band_n layers that each follow the
+// stone's surface.
+band_W = 4.2; band_d = 0.8; band_n = 10; band_wander = 1.1;
+function wander(u, ph) = band_wander * (0.75 * sin(u * 360 / 70 + ph) + 0.25 * sin(u * 360 / 23 + 2 * ph));
+function swell(u, ph) = 1 + 0.18 * sin(u * 360 / 41 + 3 * ph);
+// a wandering strip along the x axis, w wide
+module strip(w, ph) {
+    us = [for (u = [-90 : 3 : 90]) u];
+    polygon(concat([for (u = us) [u, wander(u, ph) - w / 2 * swell(u, ph)]],
+                   [for (k = [len(us) - 1 : -1 : 0]) let(u = us[k]) [u, wander(u, ph) + w / 2 * swell(u, ph)]]));
+}
 module band_groove(long = true, across = true) {
     for (k = [1 : band_n]) let(t = band_d * k / band_n,
-                               w = band_W * sqrt(1 - pow((k - 1) / band_n, 2)))
+                               w = band_W * acos(2 * (k - 1) / band_n - 1) / 180)   // cosine valley
         intersection() {
-            union() {
-                if (long)   translate([-200, -w / 2, -1]) cube([400, w, 200]);
-                if (across) translate([-w / 2, -200, -1]) cube([w, 400, 200]);
+            translate([0, 0, -1]) linear_extrude(200) union() {
+                if (long)   strip(w, 40);
+                if (across) rotate(90) strip(w, 130);
             }
             difference() { translate([-200, -200, -1]) cube(400); off(t); }
         }
@@ -150,12 +173,12 @@ module label(t, size, font = font_small) text(t, size = size, font = font, halig
 module bottom_text() {
     // four fields between the arms of the band cross
     translate([-18, 30]) label(mark, 4.5, font_mark);
-    translate([18, 30]) label("INFINITE JEST", 3.2);
-    translate([-19, -22]) label("Raspberry Pi 5", 2.8);
-    translate([-19, -27.5]) label("16 GB", 2.8);
-    translate([19, -22]) label("return to", 2.8);
-    translate([19, -27.5]) label("Jasper Engelhardt", 2.8);
-    translate([19, -33]) label("jasperengelhardt.com", 2.8);
+    translate([19.5, 30]) label("INFINITE JEST", 3.2);
+    translate([-20, -22]) label("Raspberry Pi 5", 2.8);
+    translate([-20, -27.5]) label("16 GB", 2.8);
+    translate([20, -22]) label("return to", 2.8);
+    translate([20, -27.5]) label("Jasper Engelhardt", 2.8);
+    translate([20, -33]) label("jasperengelhardt.com", 2.8);
 }
 
 // small mark pressed into the top facet of each shell
@@ -199,7 +222,7 @@ module tray() {
         // microSD slot
         translate([-100, sd_slot[0][0], sd_slot[1][0]]) cube([100 + X(0) - 1, sd_slot[0][1] - sd_slot[0][0], 20]);
         // air in, under the board
-        for (x = [-28, -22, -16, -10, -4, 4, 10, 16, 22, 28]) translate([x - 1.2, -16, -1]) cube([2.4, 32, wall + clr + rim_t + 2]);   // through the floor
+        for (x = [-28, -22, -16, -10, -5, 5, 10, 16, 22, 28]) translate([x - 1.2, -16, -1]) cube([2.4, 32, wall + clr + rim_t + 2]);   // through the floor
         // bumper seats and the name, underneath
         for (x = [-41, 41], y = [-25, 25]) translate([x, y, -0.01]) cylinder(d = 8.6, h = 0.8);
         translate([0, 0, -0.01]) mirror([1, 0, 0]) linear_extrude(0.6) bottom_text();
@@ -252,6 +275,7 @@ if (part == "tray") tray();
 // shells print rim down; tree supports from the bed carry the inside of the crown
 else if (part == "work") translate([0, 0, -split]) work();
 else if (part == "travel") translate([0, 0, -split]) travel();
+else if (part == "pins") for (i = [0 : 5]) translate([(i % 3) * 9, floor(i / 3) * 9, 0]) pin();   // 4 + 2 spare
 else if (part == "fitcheck") {
     // must come out empty: board, cooler and USB block against the tray and work shell
     intersection() {
