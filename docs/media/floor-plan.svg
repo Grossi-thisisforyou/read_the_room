@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 540" width="720" height="540" font-family="Helvetica, Arial, sans-serif">
+  <rect width="720" height="540" fill="#ffffff"/>
+  <text x="60" y="34" font-size="18" font-weight="bold" fill="#111">Room 401, 72 Fifth Avenue: floor sketch</text>
+  <text x="60" y="52" font-size="11" fill="#666">Not to scale. About 6.5 x 4.5 m, estimated from photos; to be measured.</text>
+  <!-- walls -->
+  <rect x="60" y="80" width="520" height="360" fill="#f4f4f2" stroke="#111" stroke-width="6"/>
+  <!-- windows, long wall (top) -->
+  <g fill="#ffffff" stroke="#3a6ea5" stroke-width="3">
+    <rect x="130" y="74" width="70" height="12"/><rect x="240" y="74" width="70" height="12"/>
+    <rect x="350" y="74" width="70" height="12"/><rect x="460" y="74" width="70" height="12"/>
+    <rect x="574" y="150" width="12" height="70"/><rect x="574" y="300" width="12" height="70"/>
+  </g>
+  <text x="330" y="104" font-size="11" fill="#3a6ea5" text-anchor="middle">4 windows over radiators: black flame-retardant fabric in each recess</text>
+  <text x="604" y="265" font-size="11" fill="#3a6ea5" text-anchor="middle" transform="rotate(90 604 265)">2 windows, same blackout</text>
+  <!-- whiteboard wall (bottom) -->
+  <line x1="260" y1="440" x2="560" y2="440" stroke="#9a9a9a" stroke-width="6"/>
+  <text x="410" y="462" font-size="11" fill="#666" text-anchor="middle">whiteboard wall (too glossy to project on)</text>
+  <!-- door -->
+  <line x1="90" y1="440" x2="160" y2="440" stroke="#f4f4f2" stroke-width="8"/>
+  <path d="M90 440 L90 370 A70 70 0 0 1 160 440" fill="none" stroke="#111" stroke-width="1.5"/>
+  <text x="125" y="462" font-size="11" fill="#111" text-anchor="middle">door (glass panel)</text>
+  <!-- AV rack -->
+  <rect x="175" y="426" width="60" height="12" fill="#cfcfcf" stroke="#555"/>
+  <text x="205" y="478" font-size="10" fill="#666" text-anchor="middle">school AV rack, touch panel</text>
+  <!-- screen wall -->
+  <rect x="62" y="180" width="12" height="140" fill="#111"/>
+  <text x="44" y="250" font-size="12" font-weight="bold" fill="#111" text-anchor="middle" transform="rotate(-90 44 250)">NEC wall screen (the picture)</text>
+  <circle cx="80" cy="178" r="5" fill="#c0392b"/>
+  <text x="90" y="174" font-size="10" fill="#c0392b">webcam on top</text>
+  <!-- Pi -->
+  <rect x="76" y="232" width="26" height="18" rx="6" fill="#444"/>
+  <text x="108" y="245" font-size="10" fill="#111">Pi in the stone case</text>
+  <!-- speaker -->
+  <rect x="76" y="336" width="26" height="26" fill="#222"/>
+  <text x="108" y="353" font-size="10" fill="#111">powered speaker</text>
+  <!-- visitor spot -->
+  <circle cx="240" cy="250" r="20" fill="none" stroke="#c0392b" stroke-width="3"/>
+  <circle cx="240" cy="250" r="5" fill="#c0392b"/>
+  <text x="268" y="246" font-size="12" font-weight="bold" fill="#c0392b">visitor spot</text>
+  <text x="268" y="262" font-size="10" fill="#c0392b">about 2 m from the screen, facing it</text>
+  <!-- mic -->
+  <rect x="204" y="245" width="10" height="10" fill="#111"/>
+  <text x="150" y="226" font-size="10" fill="#111">USB mic, 30-50 cm</text>
+  <!-- chair -->
+  <rect x="320" y="390" width="22" height="22" fill="none" stroke="#111"/>
+  <text x="350" y="405" font-size="10" fill="#666">one chair; others wait along this wall</text>
+  <!-- walkway -->
+  <path d="M125 420 C 140 330, 190 270, 230 262" fill="none" stroke="#888" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="176" y="318" font-size="10" fill="#888">1 m clear path</text>
+  <!-- legend -->
+  <text x="60" y="510" font-size="11" fill="#444">Screen, Pi, speaker and power share one wall, so every cable stays under 1.5 m and nothing crosses the path from the door.</text>
+</svg>

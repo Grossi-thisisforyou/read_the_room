@@ -1,67 +1,95 @@
-# Read the Room
+# INFINITE JEST
 
-A short dance piece in dim light with a live percussionist, a free-jazz duo. The audience is the subject. The show profiles the people watching it, the way Cambridge Analytica profiled voters, and does it in plain sight. It plays to them until they love it, then it tells them too much about themselves.
+**A performance installation by J R A. Room 401, The New School, 72 Fifth Avenue, New York.
+Dec 9 to Dec 22, 2026, 12:00 to 22:00, closed Saturdays.**
 
-Status: concept.
+*The best performance you have ever seen.*
 
-## The idea
+Infinite Jest is an automated, adaptive performance that runs on a small computer
+hidden in the room. It reads each visitor and plays to them: the images, the music,
+the words and the questions shift until it finds what holds that one person. It is a
+piece about dark data and custom-made intimacy. The method it borrows, personality
+profiling from a digital footprint, is the method behind the Cambridge Analytica
+scandal. Here it is done in plain sight, to people who agreed to it, and it still goes
+too far.
 
-Political targeting worked because people did not know it was happening. This piece flips that. Everyone in the room is told, before they enter, that the show will read them. They say yes. And it still goes too far.
+![The room reading a visitor](docs/media/stills/profiling-dossier.jpg)
 
-The performance runs in three movements:
+Status (Nov 24, 2026): running on the Raspberry Pi in test; install in room 401 the
+week of Dec 4; first visitors Dec 9. Book at
+[jasperengelhardt.com/visit.html](https://jasperengelhardt.com/visit.html).
 
-1. **Listening.** Dance and drums in near darkness. The projection shows the profiling machinery warming up: the questionnaire answers arriving, the five personality scores (the OCEAN or Big Five model) being computed, the audience sorted into clusters.
-2. **Pleasing.** The duo steers the piece toward what the profiles say this room wants: tempo, density, color, imagery. The projection follows the opted-in preferences. The aim is to be liked, extremely.
-3. **Overreach.** The machine starts to share. Cluster labels, predictions, the kind of ad each group "would respond to", all aimed at the room as a whole. It says more than anyone is comfortable with. The method is on the wall, and so is its creepiness.
+## The concept
 
-## Consent model
+One person at a time stands on a marked spot in a dark room facing a screen. The room
+has already looked them up (every guest agrees to this when booking). From the
+moment they enter, it watches how they stand, move, speak and fall silent, and it
+adapts.
 
-This is a hard rule of the piece, not a detail.
+- **It never resets while you stay.** A visit is one long arc, not a loop. Leave and the
+  room forgets you.
+- **Waves.** The music and the picture move in tides of two and a half to five and a half
+  minutes: they build, swell and ebb together, so the room breathes.
+- **A conversation.** The room asks a question, listens for about eleven seconds, and
+  answers. It only notices *whether* and *how long* you spoke, never what you said: the
+  microphone measures loudness and voice activity and records nothing.
+- **It never repeats a sentence.** Every line is new. A small local language model writes
+  fresh lines live, around a bank of hand-written ones.
+- **Family footage.** Donated home movies from a family archive are the main imagery,
+  cut into a moving collage with the room's own paintings, the guest's public pictures
+  and the live camera.
+- **A face that grows.** After a couple of minutes of presence, a small neural network
+  slowly grows a face on the screen, in bursts, while the visitor stays still.
+- **A daily mood.** Each day the room wakes in a different mood (dread, boredom, calm,
+  wonder, longing, fear, elation) that colours everything it says that day.
+- **Five rooms.** Inside the performance the imagery moves between five scenes:
+  *the wound*, *the writing*, *the fall*, *the mirror* and *the dark*. A learning loop
+  (a bandit) tries them and stays with what holds the visitor longest compared with
+  their own baseline.
+- **The reveal.** Near the end the room shows the visitor what it thinks it knows about
+  them, then says it is all being deleted.
 
-- **Consent at the threshold.** The RSVP and a sign-in at the door say plainly: this show reads and profiles its audience. Attending with a profile is the opt-in.
-- **Declining is easy.** Anyone can skip the questionnaire and still watch. They are simply not in the data.
-- **Only volunteered data.** Nothing is taken from phones, Wi-Fi, Bluetooth or the room's signals. No one is looked up online. The only input is what each person types into the questionnaire themselves.
-- **No names on the wall.** Results are shown as clusters and room-level numbers, never as a named or recognisable person.
-- **Deleted after the show.** Answers are kept only for the night and wiped at the end. The audience is told this too.
+## Contents
 
-The provocation lands harder this way: they agreed, and it still felt like too much.
+| | |
+|---|---|
+| [Samples](docs/samples.md) | Music and stills from the Pi |
+| [Room 401](docs/room-401.md) | Photos of the room, floor plan, installation plan |
+| [OCEAN and Cambridge Analytica research](docs/research.md) | How the profiling works, and what we tested |
+| [Technical breakdown](docs/technical.md) | Hardware, software and every AI model on the Pi |
+| [The shell](docs/shell.md) | The 3D-printed "stone" case for the Pi |
+| [The booking tool](docs/booking.md) | The sign-up page, terms and booking list |
+| [References](docs/references.md) | Research, sources and software |
+| [Earlier concept](docs/archive/read-the-room-concept.md) | *Read the Room*, Oct 2026 (superseded) |
 
-## Staging
+## Where the code is
 
-- Dancer (Baby) and a live percussionist, improvising as a free-jazz duo.
-- Dim light, one projection surface behind or around the dancer.
-- A small screen or printed cue sheet for the duo showing the current room profile, so they can play toward it.
-- The profiling dashboard is part of the projection, not hidden backstage.
+The work is being built in parallel branches, each with an open pull request, and
+merged as each part is tested on the Pi:
 
-## Technical sketch
+| Part | Folder | Pull request |
+|---|---|---|
+| Show engine (the Pi app, two screens, conversation, mood) | `infinite_jest/pi`, `infinite_jest/dream` | [#4](https://github.com/Grossi-thisisforyou/read_the_room/pull/4) |
+| Interface contract | `docs/CONTRACT.md` | [#5](https://github.com/Grossi-thisisforyou/read_the_room/pull/5) |
+| Case and boot splash | `infinite_jest/case` | [#6](https://github.com/Grossi-thisisforyou/read_the_room/pull/6) |
+| Profiler and local language model voice | `infinite_jest/profiler`, `infinite_jest/oracle` | [#8](https://github.com/Grossi-thisisforyou/read_the_room/pull/8) |
+| Visuals and music | `infinite_jest/visuals`, `infinite_jest/audio` | [#9](https://github.com/Grossi-thisisforyou/read_the_room/pull/9) |
+| The written voice | `infinite_jest/text` | [#10](https://github.com/Grossi-thisisforyou/read_the_room/pull/10) |
+| All modules together, simulated visits | `infinite_jest/integration` | [#11](https://github.com/Grossi-thisisforyou/read_the_room/pull/11) |
+| Offline install, network, watchdog | `infinite_jest/deploy` | [#12](https://github.com/Grossi-thisisforyou/read_the_room/pull/12) |
 
-```
-RSVP / door sign-in (consent text)
-        |
-        v
-Short questionnaire on the guest's own phone (opt-in, about 10 questions)
-        |
-        v
-Local laptop: score Big Five traits per answer set, no names stored
-        |
-        v
-Room profile: cluster counts and averages
-     |                     |
-     v                     v
-Projection (Isadora)   Cue sheet for dancer and drummer
-        |
-        v
-"Overreach" scene: room-level predictions shown on the wall
-        |
-        v
-Wipe all answers after the show
-```
+The booking page lives in the website repo,
+[Grossi-thisisforyou/jasperengelhardt](https://github.com/Grossi-thisisforyou/jasperengelhardt).
 
-- **Questionnaire:** a simple web form on a local network or a short link, using a public short Big Five inventory (for example the 10-item TIPI). Each submission gets a random id, no name.
-- **Scoring and clustering:** a small script on the laptop turns answers into five scores and groups the room into a few clusters.
-- **Language model (optional):** writes the dashboard text and the "overreach" lines from the room-level numbers only.
-- **Projection:** Isadora reads the room profile (for example over OSC) and shifts color, tempo of the imagery and footage choice.
+## Privacy, in short
 
-## What this piece does not do
+- All AI runs on the Pi, offline. Nothing from the room goes to the internet.
+- The camera image stays in memory only. The microphone measures level and voice
+  activity and is never recorded or transcribed.
+- Everything about a visit is wiped when the visitor leaves.
+- Guest research uses public material only and is deleted on Dec 23, 2026. No guest
+  data is in this repository.
+- The family footage is read from a USB stick in the room and is not in this repository.
 
-It does not collect data from devices, intercept signals, research guests online, or profile anyone who has not opted in. The Cambridge Analytica method is the subject, shown and critiqued openly, not a tool used on unknowing people.
+Made at Parsons School of Design, The New School, Fall 2026, in the course
+*Small Linux Devices, Large Language Models*. Built with the help of Claude (Anthropic).
