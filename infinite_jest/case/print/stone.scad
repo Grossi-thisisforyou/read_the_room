@@ -27,21 +27,24 @@ seed = 2026;         // change for a differently cut stone
 $fn = 24;
 
 // ---- the stone --------------------------------------------------------------
-A = 62; B = 47; C = 30;       // ellipsoid the facets are tangent to
+A = 64; B = 50; C = 30;       // ellipsoid the facets are tangent to
 ZC = 16;                      // its centre height
 H = 46;                       // the top facet (flat, small)
-round_r = 1.4;                // how soft the facet edges are
+round_r = 8;                  // how soft the facet edges are: sea-washed
 wall = 2.2;
 
 nA = 14; nB = 14;             // lower ring of facets (near vertical), upper ring (shoulders)
 rnd = rands(0, 1, 4 * (nA + nB), seed);
+// facets wander in direction and are cut to different depths, so some planes are
+// broad and some are narrow slivers between them
 normals = concat(
-    [for (i = [0 : nA - 1]) let(az = i * 360 / nA + (rnd[i] - 0.5) * 14,
-                                el = -12 + rnd[nA + i] * 20)            // -12 .. +8 degrees
+    [for (i = [0 : nA - 1]) let(az = i * 360 / nA + (rnd[i] - 0.5) * 30,
+                                el = -16 + rnd[nA + i] * 26)            // -16 .. +10 degrees
         [cos(el) * cos(az), cos(el) * sin(az), sin(el)]],
-    [for (i = [0 : nB - 1]) let(az = (i + 0.5) * 360 / nB + (rnd[2 * nA + i] - 0.5) * 14,
-                                el = 36 + rnd[2 * nA + nB + i] * 9)     // 36 .. 45 degrees
+    [for (i = [0 : nB - 1]) let(az = (i + 0.5) * 360 / nB + (rnd[2 * nA + i] - 0.5) * 30,
+                                el = 32 + rnd[2 * nA + nB + i] * 14)    // 32 .. 46 degrees
         [cos(el) * cos(az), cos(el) * sin(az), sin(el)]]);
+cuts = [for (i = [0 : nA + nB - 1]) pow(rnd[2 * (nA + nB) + i], 2) * (i < nA ? 4 : 6)];   // 0 .. 4-6 mm deeper
 
 function support(n) = n[2] * ZC + sqrt(pow(A * n[0], 2) + pow(B * n[1], 2) + pow(C * n[2], 2));
 
@@ -53,15 +56,26 @@ module halfspace(n, d) {
 }
 
 // the stone as an intersection of 30 half-spaces, pulled in by s
-module poly(s = 0) {
+module poly(s = 0, e = 0) {
     intersection() {
-        intersection_for (n = normals) halfspace(n, support(n) - s);
-        translate([-200, -200, s]) cube([400, 400, H - 2 * s]);   // flat bottom + flat top
+        intersection_for (i = [0 : len(normals) - 1]) halfspace(normals[i], support(normals[i]) - cuts[i] - s);
+        translate([-200, -200, s - e]) cube([400, 400, H - 2 * s + 2 * e]);   // flat bottom + flat top
     }
 }
 
-module stone() { minkowski() { poly(round_r); sphere(round_r, $fn = 12); } }
-module cavity() { poly(wall); }
+// the rounded stone pulled in by s: exact inward offset of the sea-washed surface
+module off(s = 0) {
+    // the flat bottom and top meet the rounding at 45 degrees, not tangent, so the
+    // first layers on the bed do not overhang
+    e = round_r * (1 - cos(45));
+    if (s < round_r) intersection() {
+        minkowski() { poly(round_r, e); sphere(round_r - s, $fn = 28); }
+        translate([-200, -200, s]) cube([400, 400, H - 2 * s]);
+    }
+    else poly(s);
+}
+module stone() { off(0); }
+module cavity() { off(wall); }
 
 // ---- the Raspberry Pi 5 ------------------------------------------------------
 pcb_x = 85; pcb_y = 56; pcb_t = 1.6;
@@ -96,10 +110,31 @@ module rim_gaps() {
 
 module ring(s_out, s_in, z0, z1) {
     intersection() {
-        difference() { poly(s_out); poly(s_in); }
+        difference() { off(s_out); off(s_in); }
         translate([-200, -200, z0]) cube([400, 400, z1 - z0]);
     }
 }
+
+// ---- marks -----------------------------------------------------------------------
+mark = "J R A";
+font_mark = "Inter Display:style=SemiBold";
+font_small = "Inter:style=Bold";
+module label(t, size, font = font_small) text(t, size = size, font = font, halign = "center", valign = "center");
+
+// under the tray, as read when you turn the stone over
+module bottom_text() {
+    translate([0, 32]) label(mark, 4.5, font_mark);
+    translate([0, 25]) label("INFINITE JEST", 3.4);
+    translate([0, -26.5]) label("Raspberry Pi 5  16 GB", 3.2);
+    translate([0, -32]) label("return to Jasper Engelhardt", 3.2);
+    translate([0, -37.5]) label("jasperengelhardt.com", 3.2);
+}
+
+// small mark pressed into the top facet of each shell
+module top_mark() translate([0, -22, H - 0.5]) linear_extrude(1) label(mark, 3.6, font_mark);
+// and a raised one on the ceiling inside each shell, read from below
+module inner_mark() translate([32, 0, H - wall - 0.6]) linear_extrude(0.61)
+    mirror([1, 0, 0]) rotate(90) label(mark, 5, font_mark);
 
 // ---- tray ----------------------------------------------------------------------
 module tray() {
@@ -108,7 +143,7 @@ module tray() {
             difference() {
                 intersection() { stone(); translate([-200, -200, -1]) cube([400, 400, split + 1]); }
                 // inside the tray the wall is as thick as the rim above it, so the rim stands on it
-                intersection() { poly(wall + clr + rim_t); translate([-200, -200, floor_t]) cube([400, 400, 100]); }
+                intersection() { off(wall + clr + rim_t); translate([-200, -200, floor_t]) cube([400, 400, 100]); }
             }
             // the click rim, standing up inside the shell line
             difference() {
@@ -132,8 +167,7 @@ module tray() {
         for (x = [-30 : 6 : 30]) translate([x - 1.2, -16, -1]) cube([2.4, 32, wall + clr + rim_t + 2]);   // through the floor
         // bumper seats and the name, underneath
         for (x = [-32, 32], y = [-20, 20]) translate([x, y, -0.01]) cylinder(d = 8.6, h = 0.8);
-        translate([0, 24, -0.01]) mirror([1, 0, 0]) linear_extrude(0.6)
-            text("INFINITE JEST", size = 4, font = "Liberation Sans:style=Bold", halign = "center", valign = "center");
+        translate([0, 0, -0.01]) mirror([1, 0, 0]) linear_extrude(0.6) bottom_text();
     }
 }
 
@@ -142,7 +176,9 @@ module shell_raw() {
     difference() {
         intersection() { stone(); translate([-200, -200, split]) cube([400, 400, 100]); }
         cavity();
+        top_mark();
     }
+    inner_mark();
     // ridges that snap into the rim's groove (only where the rim exists)
     difference() {
         ring(wall - 0.01, wall + bump_d, groove_z + 0.15, groove_z + groove_h - 0.15);
@@ -183,7 +219,7 @@ else if (part == "travel") translate([0, 0, H]) mirror([0, 0, 1]) travel();
 else if (part == "fitcheck") {
     // must come out empty: board, cooler and USB block against the tray and work shell
     intersection() {
-        union() { tray(); work(); }
+        union() { tray(); work(); travel(); }
         union() {
             translate([bx, by, pcb_z]) cube([pcb_x, pcb_y, pcb_t]);
             translate([bx + 18, by + 12, top_z]) cube([42, 34, 13]);

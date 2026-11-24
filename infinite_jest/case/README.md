@@ -87,14 +87,16 @@ lay them in the two notches, then put the dome on.
 ## Pocket case: Stone (print/stone*), current direction
 
 Since Nov 24 (later the same day): practical, best for the Pi, nice in the hand
-and in a bag. A geometric pebble of about 30 flat facets, softly rounded where
-they meet, on one flat bottom. Three parts:
+and in a bag. A geometric pebble of about 30 facets of very different sizes, rounded
+deep (8 mm) where they meet as if washed by the sea, on one flat bottom.
+J R A is pressed into each shell's top and raised inside it; the underside
+of the tray carries the owner and return text. Three parts:
 
 | File | Size | What it is |
 | --- | --- | --- |
-| `print/stone_tray.stl` | 124 x 97 x 13 mm | Flat bottom. Holds the Pi on four standoffs, microSD slot, air slots, click rim. |
-| `print/stone_work.stl` | 122 x 97 x 39 mm | Shell for working: vent slits over the fan and along the GPIO side, every connector and the power button open. |
-| `print/stone_travel.stl` | 126 x 98 x 39 mm | Shell for the bag: closed, protects the ports. |
+| `print/stone_tray.stl` | 122 x 102 x 13 mm | Flat bottom. Holds the Pi on four standoffs, microSD slot, air slots, click rim. |
+| `print/stone_work.stl` | 121 x 100 x 39 mm | Shell for working: vent slits over the fan and along the GPIO side, every connector and the power button open. |
+| `print/stone_travel.stl` | 125 x 102 x 39 mm | Shell for the bag: closed, protects the ports. |
 | `print/stone.scad` | OpenSCAD source | `seed` cuts a different stone, `clr` / `bump_d` tune the click. |
 
 Either shell clicks onto the tray (ridges in the shell snap into a groove in

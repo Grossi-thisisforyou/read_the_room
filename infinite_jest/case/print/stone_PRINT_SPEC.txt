@@ -2,11 +2,17 @@ INFINITE JEST · "Stone" · Raspberry Pi 5 case
 Three printed parts: one tray, two shells that click onto it.
 
 PARTS
-  stone_tray.stl    124 x 97 x 13 mm   bottom face down
-  stone_work.stl    122 x 97 x 39 mm   TOP face down (the small flat facet on the bed)
-  stone_travel.stl  126 x 98 x 39 mm   TOP face down
+  stone_tray.stl    122 x 102 x 13 mm   bottom face down
+  stone_work.stl    121 x 100 x 39 mm   TOP face down (the small flat facet on the bed)
+  stone_travel.stl  125 x 102 x 39 mm   TOP face down
   stone.scad        OpenSCAD source (change `seed` for a differently cut stone)
-No supports for any part. Bed at least 130 x 100 mm.
+No supports for any part. Bed at least 130 x 110 mm.
+
+MARKS
+  J R A is pressed into the top of each shell and raised on the ceiling inside
+  each shell. Under the tray: J R A, INFINITE JEST, "Raspberry Pi 5 16 GB",
+  "return to Jasper Engelhardt", "jasperengelhardt.com". The small letters are
+  pressed 0.6 mm into the face on the bed, so print the first layer slowly.
 
 MATERIAL AND SETTINGS
   PETG or ASA, matte black (not PLA: it softens next to a warm Pi)
