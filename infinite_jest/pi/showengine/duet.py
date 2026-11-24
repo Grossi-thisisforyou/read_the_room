@@ -1,10 +1,17 @@
-"""Two screens (Baby, 2026-11-23). Channel 1 = the TV, channel 2 = the projector on the white wall.
+"""Two screens (Baby, 2026-11-23/24). Channel 1 = the TV, channel 2 = the projector on the white wall.
 
   empty room   TV black. The wall dreams slowly and dimly; the room only plays sound.
   someone in   the wall wakes: brighter, faster, it jolts when they move or speak.
-  ~45 s in     the TV switches on and says hello. A grey, featureless face appears
-               and, step by step, takes the visitor's form.
-  the end      the guest's reveal lines under the finished face, then it dissolves.
+  ~45 s in     the TV switches on and says hello. Coarse grey pieces of pictures are
+               placed, shifted and stitched together.
+  ~2 min in    a face starts to form between them. It comes in bursts, not steadily,
+               and with every burst the pieces get clearer and move.
+  after that   there is no reset: as long as someone stays it flows freely. The face
+               loses ground and finds it again; new lines keep coming.
+  leaving      the guest's reveal lines under the finished face, then it dissolves.
+
+Now and then the donated footage cuts in as a short glitch. The room wakes up in a
+random mood (mood.py) that colours all of it for the day.
 
 Both pictures are generated live on the Pi by small neural networks (dream/net.py),
 so the stream is different every time. The wall network learned the show's own
@@ -28,6 +35,7 @@ from typing import Any
 
 import numpy as np
 
+from . import mood as moods
 from . import plugins
 
 log = logging.getLogger("showengine.duet")
@@ -271,7 +279,9 @@ class Duet:
         if engine is not None:
             engine.cfg["speak"] = False      # the room's generic answers stay quiet: the TV speaks here
         self.tv_at = float(d.get("tv_at_s", 45.0))
-        self.grow_s = float(d.get("grow_s", 150.0))
+        self.face_at = float(d.get("face_at_s", 120.0))       # the face starts to form this far into the visit
+        self.burst_every = (float(d.get("burst_min_s", 18.0)), float(d.get("burst_max_s", 50.0)))
+        self.mood = moods.throw(d.get("mood_file"), force=d.get("mood") or None)
         self.address_every = float(d.get("address_every_s", 30.0))
         self.wall_size = (int(d.get("wall_w", 960)), int(d.get("wall_h", 540)))
         self.rng = random.Random()
@@ -299,13 +309,17 @@ class Duet:
         except Exception:
             plugins.report(log, "dream-load", "could not load the dreaming networks")
         self.words = LiveWords(str(d.get("llm_url", "http://127.0.0.1:8080/v1/chat/completions")))
-        self.material = Material([d.get("paint_dir") or os.path.join(IJ, "visuals", "bank")],
-                                 list(d.get("footage_dirs", ["/mnt/ij-stick"])),
+        foot = list(d.get("footage_dirs", ["/mnt/ij-stick"]))
+        self.material = Material([d.get("paint_dir") or os.path.join(IJ, "visuals", "bank")], foot,
                                  float(d.get("material_every_s", 40.0)))
+        self.material.footage_share = float(d.get("footage_ghost", 0.15))    # footage mostly comes as glitches now
+        self.glitch = Glitch(list(d.get("glitch_dirs", foot)), rate=float(self.mood["glitch"]))
+        self.collage = Collage(os.path.join(self.guest["_dir"], "img") if self.guest else None)
         self.busy_file = str(d.get("busy_file", "/tmp/infinite_jest_busy"))
         self._busy_on = False
         log.info("duet: wall network %s, face network %s, guest %s", "yes" if self.wall else "NO",
                  "yes" if self.face else "NO", "yes" if self.guest else "none")
+        log.info("duet: today's mood is %s; %d pictures for the collage", self.mood["name"], len(self.collage.paths))
         self.reset()
         self._fonts: dict[int, Any] = {}
         self._grain: list[Any] = []
@@ -351,14 +365,24 @@ class Duet:
         self._next_reveal = 0.0
         self._last_heard = 0.0
         self._was_in = False
+        self._guest_i = 0
+        self._today_said = False
+        self._asked_t = 0.0
+        self.target = 0.0            # where the face is heading; it moves in bursts
+        self.burst = 0.0             # 1 at a burst, fades over a few seconds (picture and music follow)
+        self.bursts = 0
+        self._next_burst = 0.0
+        self._last_now = 0.0
+        if getattr(self, "collage", None) is not None:
+            self.collage.clear()
 
     def start(self) -> None:
-        for dr in (self.wall, self.face_dreamer):
+        for dr in (self.wall, self.face_dreamer, self.glitch):
             if dr is not None:
                 dr.start()
 
     def stop(self) -> None:
-        for dr in (self.wall, self.face_dreamer):
+        for dr in (self.wall, self.face_dreamer, self.glitch):
             if dr is not None:
                 dr.stop()
         self._busy(False)
@@ -384,20 +408,26 @@ class Duet:
         if in_room and not self._was_in:
             self.reset()
             self._was_in = True
-            self.words.ask(self.guest)            # new lines for this visit from the local model
+            self.words.ask(self.guest, self.mood)   # new lines for this visit from the local model
+            self._asked_t = now
+        dt = min(1.0, max(0.0, now - self._last_now)) if self._last_now else 0.0
+        self._last_now = now
+        pace = float(self.mood["pace"])
         self.material.update(self.wake)
         heard = float(state.get("heard", 0.0) or 0.0)
         motion = float((state.get("sensor") or {}).get("motion", 0.0) or 0.0)
+        fresh = heard > 0.9 and now - self._last_heard > 1.0       # a new sound, not the tail of the last one
+        if fresh:
+            self._last_heard = now
 
         # the wall: asleep, awake, or pushed by the visitor
         want = 0.0 if phase in ("idle", "wipe") else 1.0
         self.wake += (want - self.wake) * min(1.0, 0.02 + (0.06 if want > self.wake else 0.01))
         if self.wall is not None:
-            self.wall.speed = 0.12 + 0.55 * self.wake + 1.5 * heard + 1.2 * motion
+            self.wall.speed = (0.12 + 0.55 * self.wake) * (0.7 + 0.6 * pace) + 1.5 * heard + 1.2 * motion
             self.wall.scale = 0.8 + 0.5 * self.wake
-            if heard > 0.9 and now - self._last_heard > 1.0:
+            if fresh:
                 self.wall.jolt(1.2)
-                self._last_heard = now
 
         # the TV
         prev = self.tv
@@ -426,22 +456,40 @@ class Duet:
         tv_on = self.tv in ("hello", "face", "reveal")
         self.tv_level += ((1.0 if tv_on else 0.0) - self.tv_level) * (0.04 if tv_on else 0.03)
 
+        self.burst *= math.exp(-dt / 3.0)
         if self.tv == "face":
-            self.progress = min(1.0, max(self.progress, (now - self.tv_t) / self.grow_s))
-            if heard > 0.9:
-                self.progress = min(1.0, self.progress + 0.01)     # every sound you make, it learns a little
+            # the face comes in bursts: nothing for a while, then a step at once. When it is all
+            # there the visit does not end: it loses ground and finds it again, for as long as they stay.
+            if self._next_burst <= 0.0:
+                self._next_burst = now + max(1.0, self.face_at - self.tv_at - 5.0)
+            if fresh:
+                self._next_burst = max(now + 1.0, self._next_burst - 4.0)   # every sound brings the next step closer
+            if now >= self._next_burst:
+                if self.target >= 0.999:
+                    self.target = self.rng.uniform(0.45, 0.8)
+                else:
+                    self.target = min(1.0, self.target + self.rng.uniform(0.07, 0.2))
+                    if self.target > 0.93:
+                        self.target = 1.0
+                self.burst, self.bursts = 1.0, self.bursts + 1
+                self.collage.burst()
+                if self.face_dreamer is not None:
+                    self.face_dreamer.jolt(0.8)
+                lo, hi = self.burst_every
+                k = (1.3 - 0.6 * pace) * (1.6 if self.target >= 0.999 else 1.0)
+                self._next_burst = now + self.rng.uniform(lo, hi) * k
+            self.progress += (self.target - self.progress) * (1.0 - math.exp(-dt / 0.7))
             if now >= self._next_address:
-                lines = self.lines["address"]
-                if self.words.lines and self._address_i % 2 == 1:
-                    self._say(self.words.lines.pop(0), now)       # written for this visit, just now
-                elif self._address_i == 0 and self.lines.get("greeting"):
-                    self._say(self.lines["greeting"], now)
-                elif lines:
-                    self._say(lines[(self._address_i - 1) % len(lines)] if self.lines.get("greeting")
-                              else lines[self._address_i % len(lines)], now)
+                line = self._next_line()
+                if line:
+                    self._say(line, now)
                 self._address_i += 1
                 self._next_address = now + self.address_every
+            if len(self.words.lines) < 2 and not self.words.busy and now - self._asked_t > 90.0:
+                self.words.ask(self.guest, self.mood, keep=True)     # a long visit keeps getting new lines
+                self._asked_t = now
         elif self.tv == "reveal":
+            self.target = 1.0
             self.progress = min(1.0, self.progress + 0.02)
             if now >= self._next_reveal and self._reveal_i < len(self.lines["reveal"]):
                 self._say(self.lines["reveal"][self._reveal_i], now)
@@ -457,6 +505,9 @@ class Duet:
             self.face_dreamer.active = self.tv in ("hello", "face", "reveal", "gone")
         if self.wall is not None:                 # while the face grows, the wall dreams a little slower (CPU)
             self.wall.fps = self.wall_fps * (0.6 if self.tv in ("hello", "face", "reveal") else 1.0)
+        glitching = self.glitch.update(now, self.wake, tv_on=self.tv in ("face", "reveal"))
+        state["glitch"] = 1.0 if glitching else 0.0
+        state["mood"] = moods.for_state(self.mood)
 
         # the sound follows the dream: in an empty room the network's picture leads the music
         if self.wall is not None and self.wall.cur is not None:
@@ -468,8 +519,27 @@ class Duet:
             steer["x"] = round(float(steer.get("x", 0.0)) * self.wake + cx * (1 - self.wake), 3)
             steer["y"] = round(float(steer.get("y", 0.0)) * self.wake + cy * (1 - self.wake), 3)
             state["steer"] = steer
-        state["duet"] = {"tv": self.tv, "wake": round(self.wake, 3), "progress": round(self.progress, 3)}
+        state["duet"] = {"tv": self.tv, "wake": round(self.wake, 3), "progress": round(self.progress, 3),
+                         "burst": round(self.burst, 3)}
         state["words"] = []                       # no wall text in this show
+
+    def _next_line(self) -> str | None:
+        """What the TV says next: the greeting, how it feels today, then the guest file's lines
+        and lines the local model writes during the visit, in turn. Once the guest file has been
+        through, only new lines (or, without a model, the file again)."""
+        lines = self.lines["address"]
+        if self._address_i == 0 and self.lines.get("greeting"):
+            return self.lines["greeting"]
+        if not self._today_said and self.mood.get("today"):
+            self._today_said = True
+            return self.mood["today"]
+        through = self._guest_i >= len(lines)
+        if self.words.lines and (through or self._address_i % 2 == 1):
+            return self.words.lines.pop(0)                    # written for this visit, just now
+        if lines and (not through or (self.words.got == 0 and self._address_i % 2 == 0)):
+            self._guest_i += 1
+            return lines[(self._guest_i - 1) % len(lines)]
+        return None
 
     def _busy(self, on: bool) -> None:
         """While the face grows, the background painter pauses (it watches this file)."""
@@ -548,8 +618,8 @@ class Duet:
         big.set_alpha(int(255 * (0.35 + 0.4 * self.wake)))     # trails: the old dream lingers
         self._fb.blit(big, (-ox, -oy))
         surf.blit(self._fb, (0, 0))
-        lvl = int(255 * (0.28 + 0.72 * self.wake))
-        surf.fill((lvl, lvl, lvl), special_flags=pygame.BLEND_MULT)
+        lvl = 255 * (0.28 + 0.72 * self.wake) * (1.0 - 0.22 * float(self.mood["dark"]))
+        surf.fill(tuple(int(min(255, lvl * c)) for c in self.mood["tint"]), special_flags=pygame.BLEND_MULT)
         heard = float(st.get("heard", 0.0) or 0.0)
         if heard > 0.05:                                         # a jolt: a red ghost to one side
             ghost = big.copy()
@@ -557,6 +627,18 @@ class Duet:
             surf.blit(ghost, (-ox + int(28 * heard), -oy), special_flags=pygame.BLEND_ADD)
         g = self._grains((w, h))
         surf.blit(g[int(now * 24) % len(g)], (0, 0), special_flags=pygame.BLEND_ADD)
+        self._draw_glitch(surf, now, img)
+
+    def _draw_glitch(self, surf, now: float, fallback=None) -> None:
+        """The footage breaks in: a hard cut over all or a band of the picture."""
+        import pygame
+        a = self.glitch.frame(now, fallback)
+        if a is None:
+            return
+        w, h = surf.get_size()
+        y0, y1 = int(self.glitch.band[0] * h), int(self.glitch.band[1] * h)
+        gs = pygame.transform.scale(pygame.surfarray.make_surface(a.swapaxes(0, 1)), (w, h))
+        surf.blit(gs, (0, y0), (0, y0, w, max(1, y1 - y0)))
 
     def draw_tv(self, surf, now: float, wall_here: bool = False) -> None:
         import pygame
@@ -570,7 +652,12 @@ class Duet:
             surf.fill((0, 0, 0))
         if self.tv_level <= 0.01:
             return
-        if self.tv in ("face", "reveal", "gone") and self.face_dreamer is not None:
+        pieces = self.tv in ("face", "reveal", "gone")
+        lvl = self.tv_level * (max(0.0, 1.0 - (now - self.tv_t) / 6.0) if self.tv == "gone" else 1.0)
+        if pieces:
+            self.collage.step(now, (w, h), self.progress, float(self.mood["pace"]))
+            self.collage.draw(surf, now, lvl, front=False)
+        if pieces and self.face_dreamer is not None:
             img = self.face_dreamer.frame(now)
             if img is not None:
                 p = self.progress
@@ -578,7 +665,7 @@ class Duet:
                 grey = f.mean(axis=2, keepdims=True)
                 sat = min(1.0, p ** 1.4)                 # grey first, colour comes last
                 f = grey + (f - grey) * sat
-                f = f * (0.6 + 0.4 * p)                  # dim and dull at first
+                f = f * (0.3 + 0.7 * min(1.0, p * 2.5 + 0.25 * self.burst))   # hardly there at first
                 fade = min(1.0, (now - self.tv_t) / 4.0) if self.tv == "face" and p < 0.05 else 1.0
                 if self.tv == "gone":
                     fade = max(0.0, 1.0 - (now - self.tv_t) / 6.0)
@@ -587,7 +674,16 @@ class Duet:
                 side = int(h * 0.82)
                 s = pygame.transform.smoothscale(s, (side, side))
                 s.blit(self._vig((side, side)), (0, 0), special_flags=pygame.BLEND_MULT)
-                surf.blit(s, ((w - side) // 2, int(h * 0.03)), special_flags=pygame.BLEND_ADD if wall_here else 0)
+                # the face is laid in strips; after a burst they are out of place and settle again
+                x0, y0, offs = (w - side) // 2, int(h * 0.03), self.collage.offsets
+                sh = side // len(offs) + 1
+                for i, o in enumerate(offs):
+                    dx = int(o * side * (0.05 + 0.2 * (1.0 - p)))
+                    surf.blit(s, (x0 + dx, y0 + i * sh), (0, i * sh, side, sh), special_flags=pygame.BLEND_ADD)
+        if pieces:
+            self.collage.draw(surf, now, lvl, front=True)
+            if self.glitch.on_tv:
+                self._draw_glitch(surf, now)
         if self.caption and self.tv in ("hello", "face", "reveal"):
             age = now - self.caption_t
             shown = self.caption[: int(age * 18) + 1]               # typed
@@ -605,7 +701,9 @@ class Duet:
 
     def status(self) -> dict:
         out = {"tv": self.tv, "wake": round(self.wake, 2), "progress": round(self.progress, 2),
-               "guest": bool(self.guest)}
+               "guest": bool(self.guest), "mood": self.mood["name"], "bursts": self.bursts,
+               "glitches": self.glitch.count, "footage_ready": len(self.glitch.runs),
+               "pictures": len(self.collage.paths), "new_lines": self.words.got}
         for name, dr in (("wall", self.wall), ("face", self.face_dreamer)):
             if dr is not None:
                 out[name + "_frames"] = dr.frames
@@ -669,37 +767,43 @@ class LiveWords:
         self.lines: list[str] = []
         self.busy = False
         self.asked = 0
+        self.got = 0
 
-    def ask(self, guest: dict | None) -> None:
+    def ask(self, guest: dict | None, mood: dict | None = None, keep: bool = False) -> None:
         if self.busy:
             return
-        self.busy, self.lines = True, []
+        self.busy = True
+        if not keep:
+            self.lines = []
         self.asked += 1
-        threading.Thread(target=self._run, args=(guest,), name="ij-words", daemon=True).start()
+        threading.Thread(target=self._run, args=(guest, mood), name="ij-words", daemon=True).start()
 
-    def _prompt(self, g: dict | None) -> list:
+    def _prompt(self, g: dict | None, mood: dict | None = None) -> list:
         about = ""
         if g:
             bits = [", ".join(g.get("themes") or []), ", ".join(w.lower() for w in (g.get("words") or []))]
             about = "What the room knows about this visitor: " + "; ".join(b for b in bits if b) + "."
+        feel = f"Today the room itself is {mood['voice']}. " if mood and mood.get("voice") else ""
         return [
             {"role": "system", "content": "You write the voice of a dark art installation that watches one visitor. "
              "Lowercase. Cold and intimate. Each line at most nine words. No names, no brands, no artists, "
              "no emojis, no quotation marks."},
-            {"role": "user", "content": f"{about} Their face is slowly appearing on a screen in front of them. "
+            {"role": "user", "content": f"{about} {feel}Their face is slowly appearing on a screen in front of them. "
              "Write six different lines the room says to them, one per line, no numbering."},
         ]
 
-    def _run(self, guest: dict | None) -> None:
+    def _run(self, guest: dict | None, mood: dict | None = None) -> None:
         import urllib.request
         try:
-            body = json.dumps({"messages": self._prompt(guest), "max_tokens": 160, "temperature": 1.05,
+            body = json.dumps({"messages": self._prompt(guest, mood), "max_tokens": 160, "temperature": 1.05,
                                "top_p": 0.95, "seed": random.randint(0, 2 ** 31 - 1)}).encode()
             req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 text = json.load(r)["choices"][0]["message"]["content"]
-            self.lines = clean_lines(text)
-            log.info("duet: %d new lines from the local model", len(self.lines))
+            new = clean_lines(text)
+            self.lines = self.lines + [x for x in new if x not in self.lines]
+            self.got += len(new)
+            log.info("duet: %d new lines from the local model", len(new))
         except Exception as e:
             log.info("duet: local model not available (%s); using the guest file's lines", type(e).__name__)
         finally:
@@ -747,6 +851,7 @@ class Material:
         self._seen_paint: set = set()
         self._lock = threading.Lock()
         self._busy = False
+        self.footage_share = 0.4     # how often the slow ghost is footage rather than a painting
 
     def alpha(self) -> float:
         if self.kind is None or self.img is None:
@@ -800,10 +905,10 @@ class Material:
         try:
             p = self._newest_painting()
             vids = self._list_videos()
-            if p and (not vids or self.rng.random() < 0.6):
+            if p and (not vids or self.rng.random() >= self.footage_share):
                 self._seen_paint.add(p)
                 self._show_painting(p, now)
-            elif vids:
+            elif vids and (p is None or self.rng.random() < self.footage_share * 2):
                 self._play(self.rng.choice(vids), now)
         except Exception:
             log.info("duet: material skipped", exc_info=True)
@@ -892,3 +997,313 @@ class Material:
     def frame(self):
         with self._lock:
             return self.kind, self.img
+
+
+# ------------------------------------------------------------------ the footage breaks in
+class Glitch:
+    """Now and then the donated footage cuts into the picture for a fraction of a second:
+    hard, torn, repeated, gone. Which clip, which moment and when are all random.
+
+    A helper thread keeps a few short runs of frames ready (read from the stick where they
+    lie, never copied to disk), so a glitch costs nothing at the moment it fires. Without
+    footage the dream itself tears instead."""
+
+    SIZE = (320, 180)
+
+    def __init__(self, footage_dirs: list[str], rate: float = 0.5, seed: int | None = None):
+        self.dirs = [os.path.expanduser(p) for p in footage_dirs]
+        self.rate = rate                 # 0 (rare) .. 1 (often): the mood of the day
+        self.rng = random.Random(seed)
+        self.runs: list[list[np.ndarray]] = []
+        self.want_runs = 3
+        self.t0 = self.t1 = -1.0         # the running glitch, engine time
+        self.next_t = 0.0
+        self.run: list[np.ndarray] = []
+        self.band = (0.0, 1.0)           # the part of the picture it takes (top, bottom)
+        self.on_tv = False
+        self.count = 0
+        self._tear = 0
+        self._videos: list[str] = []
+        self._len: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._fill, name="ij-glitch", daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def active(self, now: float) -> bool:
+        return self.t0 <= now < self.t1
+
+    def update(self, now: float, wake: float, tv_on: bool = False) -> bool:
+        """Call every tick. Returns True while a glitch is running."""
+        if self.next_t <= 0.0:
+            self.next_t = now + self._gap(wake)
+        if now >= self.next_t and not self.active(now):
+            self.fire(now, tv_on=tv_on and self.rng.random() < 0.35)
+            self.next_t = now + self._gap(wake)
+        return self.active(now)
+
+    def _gap(self, wake: float) -> float:
+        mean = (45.0 - 36.0 * self.rate) * (3.0 - 2.0 * min(1.0, max(0.0, wake)))
+        return max(2.0, self.rng.expovariate(1.0 / mean))
+
+    def fire(self, now: float, dur: float | None = None, tv_on: bool = False) -> None:
+        with self._lock:
+            self.run = self.runs.pop(self.rng.randrange(len(self.runs))) if self.runs else []
+        self.t0 = now
+        self.t1 = now + (dur if dur is not None else self.rng.uniform(0.1, 0.6))
+        y0 = self.rng.choice((0.0, 0.0, self.rng.uniform(0.0, 0.6)))
+        self.band = (y0, 1.0 if y0 == 0.0 and self.rng.random() < 0.7 else min(1.0, y0 + self.rng.uniform(0.2, 0.5)))
+        self.on_tv = tv_on
+        self._tear = self.rng.randrange(1 << 30)
+        self.count += 1
+
+    def frame(self, now: float, fallback: np.ndarray | None = None) -> np.ndarray | None:
+        """The torn picture for this moment (H, W, 3 uint8), or None when no glitch runs."""
+        if not self.active(now):
+            return None
+        k = int((now - self.t0) * 12.0)
+        if self.run:
+            src = self.run[(k // 2 * 2 if self._tear & 1 else k) % len(self.run)]      # some stutter
+        elif fallback is not None:
+            src = fallback
+        else:
+            return None
+        rng = np.random.default_rng(self._tear + k)
+        a = src.astype(np.int16)
+        a = np.clip((a - 110) * 1.5 + 120, 0, 255).astype(np.uint8)                  # harsh
+        h = a.shape[0]
+        for _ in range(int(rng.integers(2, 6))):                                     # torn rows
+            y = int(rng.integers(0, h - 4))
+            hh = int(rng.integers(3, max(4, h // 4)))
+            a[y:y + hh] = np.roll(a[y:y + hh], int(rng.integers(-a.shape[1] // 3, a.shape[1] // 3)), axis=1)
+        a[:, :, 0] = np.roll(a[:, :, 0], int(rng.integers(2, 9)), axis=1)             # colours come apart
+        a[:, :, 2] = np.roll(a[:, :, 2], -int(rng.integers(2, 9)), axis=1)
+        return a
+
+    # -- the helper thread
+    def _list(self) -> list[str]:
+        found = []
+        for d in self.dirs:
+            for root, dirs, files in os.walk(d):
+                dirs[:] = [x for x in dirs if not x.startswith(".") and x != "ij-offline"]
+                found += [os.path.join(root, f) for f in files
+                          if f.lower().endswith(VIDEO_EXT) and not f.startswith("._")]
+                if len(found) > 5000:
+                    break
+        return found
+
+    def _fill(self) -> None:
+        listed = -1e9
+        while not self._stop.is_set():
+            if time.monotonic() - listed > 600 or not self._videos:
+                try:
+                    self._videos = self._list()
+                except OSError:
+                    self._videos = []
+                listed = time.monotonic()
+            if not self._videos or len(self.runs) >= self.want_runs:
+                self._stop.wait(1.0 if self._videos else 20.0)
+                continue
+            try:
+                run = self._grab(self.rng.choice(self._videos))
+            except Exception:
+                log.info("duet: a clip could not be read", exc_info=True)
+                run = []
+            if run:
+                with self._lock:
+                    self.runs.append(run)
+            else:
+                self._stop.wait(5.0)
+
+    def _grab(self, path: str, n: int = 8) -> list[np.ndarray]:
+        import shutil
+        import subprocess
+        w, h = self.SIZE
+        ff = shutil.which("ffmpeg")
+        if ff is None:
+            return self._grab_cv2(path, n)
+        if path not in self._len:
+            self._len[path] = Material._length(path)
+        start = self.rng.uniform(0.0, 1.0) * self._len[path]
+        cmd = [ff, "-v", "error", "-threads", "1", "-ss", f"{start:.2f}", "-i", path, "-an", "-frames:v", str(n),
+               "-vf", f"fps=12,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}",
+               "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+        out = subprocess.run(cmd, capture_output=True, timeout=30).stdout
+        size = w * h * 3
+        return [np.frombuffer(out[i * size:(i + 1) * size], np.uint8).reshape(h, w, 3)
+                for i in range(len(out) // size)]
+
+    def _grab_cv2(self, path: str, n: int) -> list[np.ndarray]:
+        try:
+            import cv2
+        except ImportError:
+            return []
+        cap = cv2.VideoCapture(path)
+        try:
+            total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+            if total > 200:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(self.rng.uniform(0, total - 100)))
+            out = []
+            for i in range(n * 2):
+                ok, fr = cap.read()
+                if not ok:
+                    break
+                if i % 2 == 0:
+                    out.append(cv2.resize(fr, self.SIZE)[:, :, ::-1].copy())
+            return out
+        finally:
+            cap.release()
+
+
+# ------------------------------------------------------------------ the pieces on the TV
+class Collage:
+    """Pieces of the guest's pictures that are placed on the TV next to and over the face the
+    network is growing: cut out, shifted, stitched edge to edge. Early pieces are coarse and
+    grey; the further the face has come, the more of them there are and the clearer they get.
+
+    The pictures come from the guest's folder (guests/<name>/img, kept out of the repo and
+    not used past the guest file's date). Everything is drawn with pygame, in the draw call."""
+
+    SHAPES = ((1.0, 1.0), (1.0, 1.4), (1.5, 1.0), (2.2, 1.0), (0.6, 1.6), (1.0, 0.45))
+
+    def __init__(self, img_dir: str | None, seed: int | None = None, max_pieces: int = 10):
+        self.rng = random.Random(seed)
+        self.paths: list[str] = []
+        if img_dir and os.path.isdir(img_dir):
+            self.paths = sorted(os.path.join(img_dir, f) for f in os.listdir(img_dir)
+                                if f.lower().endswith(IMAGE_EXT) and not f.startswith("."))
+        self.max_pieces = max_pieces
+        self.pieces: list[dict] = []
+        self._src: dict[str, Any] = {}
+        self._size = (0, 0)
+        self._next_add = 0.0
+        self._bursts = 0
+        self.offsets = [0.0] * 6         # how far each strip of the face is out of place (-1..1)
+
+    def clear(self) -> None:
+        self.pieces = []
+        self._next_add = 0.0
+        self.offsets = [0.0] * len(self.offsets)
+
+    def _load(self, path: str):
+        import pygame
+        s = self._src.get(path)
+        if s is None:
+            s = pygame.image.load(path)
+            w, h = s.get_size()
+            k = 900.0 / max(w, h)
+            if k < 1.0:
+                s = pygame.transform.smoothscale(s, (int(w * k), int(h * k)))
+            self._src[path] = s
+        return s
+
+    def burst(self) -> None:
+        """The face just came a step further: everything moves, new pieces arrive at once."""
+        self._bursts += 1
+        self.offsets = [self.rng.uniform(-1.0, 1.0) for _ in self.offsets]
+        for p in self.pieces:
+            self._shift(p, hard=self.rng.random() < 0.6)
+        self._next_add = 0.0
+
+    def _shift(self, p: dict, hard: bool) -> None:
+        u = p["u"]
+        axis = self.rng.choice("xy")
+        step = self.rng.choice((-2, -1, 1, 2)) * u
+        w, h = self._size
+        if axis == "x":
+            p["tx"] = float(round(min(max(p["tx"] + step, -p["w"] * 0.3), w - p["w"] * 0.7) / u) * u)
+        else:
+            p["ty"] = float(round(min(max(p["ty"] + step, -p["h"] * 0.3), h - p["h"] * 0.7) / u) * u)
+        if hard:
+            p["x"], p["y"] = p["tx"], p["ty"]
+
+    def _add(self, now: float, progress: float) -> None:
+        import pygame
+        w, h = self._size
+        u = max(8, h // 9)                                   # the grid everything snaps to
+        src = self._load(self.rng.choice(self.paths))
+        sw, sh = src.get_size()
+        ax, ay = self.rng.choice(self.SHAPES)
+        units = self.rng.choice((2, 2, 3, 3, 4, 5))
+        pw, ph = int(units * u * ax), int(units * u * ay)
+        k = self.rng.uniform(0.22, 0.6) * min(sw / ax, sh / ay)          # how much of the picture it shows
+        cw, ch = max(8, int(k * ax)), max(8, int(k * ay))
+        cx = int(self.rng.uniform(0, sw - cw))
+        cy = int(self.rng.betavariate(1.6, 2.6) * (sh - ch))            # faces sit in the upper part
+        crop = src.subsurface((cx, cy, min(cw, sw - cx), min(ch, sh - cy)))
+        a = pygame.surfarray.array3d(crop).astype(np.float32)
+        grey = a.mean(axis=2, keepdims=True)
+        sat = 0.0 if progress < 0.55 or self.rng.random() < 0.5 else min(1.0, progress)
+        a = grey + (a - grey) * sat
+        a = np.clip((a - 30.0) * (0.75 + 0.45 * progress), 0, 255).astype(np.uint8)
+        s = pygame.surfarray.make_surface(a)
+        if progress < 0.6:                                   # not developed yet: coarse
+            n = max(5, int(6 + progress * 70))
+            s = pygame.transform.smoothscale(s, (n, max(3, int(n * ay / ax))))
+            s = pygame.transform.scale(s, (pw, ph)) if self.rng.random() < 0.5 else pygame.transform.smoothscale(s, (pw, ph))
+        else:
+            s = pygame.transform.smoothscale(s, (pw, ph))
+        # where: stitched to the side of a piece that is already there, or near the middle
+        if self.pieces and self.rng.random() < 0.6:
+            o = self.rng.choice(self.pieces)
+            side = self.rng.choice("lrtb")
+            x = o["tx"] - pw if side == "l" else o["tx"] + o["w"] if side == "r" else o["tx"] + self.rng.choice((0, u, -u))
+            y = o["ty"] - ph if side == "t" else o["ty"] + o["h"] if side == "b" else o["ty"] + self.rng.choice((0, u, -u))
+        else:
+            x = w / 2 + self.rng.uniform(-0.42, 0.42) * w - pw / 2
+            y = h / 2 + self.rng.uniform(-0.4, 0.3) * h - ph / 2
+        x = round(min(max(x, -pw * 0.25), w - pw * 0.75) / u) * u
+        y = round(min(max(y, -ph * 0.25), h * 0.84 - ph * 0.75) / u) * u
+        self.pieces.append({"s": s, "x": float(x), "y": float(y), "tx": float(x), "ty": float(y), "w": pw, "h": ph,
+                            "u": u, "born": now, "life": self.rng.uniform(25.0, 70.0), "front": self.rng.random() < 0.3,
+                            "next": now + self.rng.uniform(6.0, 20.0), "a": 0.55 + 0.4 * progress})
+
+    def step(self, now: float, size: tuple, progress: float, pace: float = 0.5) -> None:
+        if size != self._size:
+            self._size = size
+            self.pieces = []
+        self.pieces = [p for p in self.pieces if now - p["born"] < p["life"]]
+        for i, o in enumerate(self.offsets):                 # the strips of the face settle again
+            self.offsets[i] = o * 0.985
+        for p in self.pieces:
+            p["x"] += (p["tx"] - p["x"]) * 0.12
+            p["y"] += (p["ty"] - p["y"]) * 0.12
+            if now >= p["next"]:
+                self._shift(p, hard=self.rng.random() < 0.35)
+                p["next"] = now + self.rng.uniform(6.0, 24.0) * (1.4 - 0.8 * pace)
+        want = min(self.max_pieces, 3 + int(progress * 7))
+        if self.paths and len(self.pieces) < want and now >= self._next_add:
+            try:
+                self._add(now, progress)
+            except Exception:
+                log.info("duet: a collage piece failed", exc_info=True)
+                self.paths = self.paths[1:]
+            self._next_add = now + (0.15 if self._bursts else self.rng.uniform(2.0, 5.0))
+            if len(self.pieces) >= want:
+                self._bursts = 0
+
+    def draw(self, surf, now: float, level: float, front: bool) -> None:
+        import pygame
+        for p in self.pieces:
+            if p["front"] != front:
+                continue
+            age, left = now - p["born"], p["life"] - (now - p["born"])
+            a = min(1.0, age / 0.25, left / 2.0) * p["a"] * level
+            if a <= 0.01:
+                continue
+            p["s"].set_alpha(int(255 * a))
+            x, y = int(p["x"]), int(p["y"])
+            surf.blit(p["s"], (x, y))
+            c = int(170 * a)                                 # the stitches along the seams
+            st = max(6, p["u"] // 5)
+            for sx in range(x + st, x + p["w"], st * 2):
+                pygame.draw.line(surf, (c, c, c), (sx, y - 3), (sx + 2, y + 3))
+            for sy in range(y + st, y + p["h"], st * 2):
+                pygame.draw.line(surf, (c, c, c), (x - 3, sy), (x + 3, sy + 2))

@@ -61,7 +61,8 @@ DEFAULTS: dict[str, Any] = {
         "tv_display": 0,       # HDMI 0 (next to the power socket): the TV
         "wall_display": 1,     # HDMI 1: the projector on the wall
         "tv_at_s": 45.0,       # seconds of someone being there before the TV wakes up
-        "grow_s": 150.0,       # seconds for the grey face to become the guest
+        "face_at_s": 120.0,    # seconds into the visit before a face starts to form (then in bursts)
+        "max_visit_s": 0,      # 0 = no reset while someone stays
         "guest": "001",        # the guest file used for this run ("" for none)
         "wall_fps": 8.0,       # new frames per second from the wall network (cross-faded to 30)
         "face_fps": 6.0,

@@ -90,10 +90,12 @@ class Runner:
         self.duet = None
         if self.show == "duet":
             # two screens: TV (channel 1) = the face, projector (channel 2) = the wall
-            for k, v in (("max_visit", 300.0), ("release_time", 40.0), ("wipe_time", 8.0)):
+            for k, v in (("release_time", 40.0), ("wipe_time", 8.0)):
                 cfg.setdefault("visit", {}).setdefault(k, v)
             cfg["speak"] = False             # the duet speaks for itself, only once the TV is on
             d = cfg.get("duet") if isinstance(cfg.get("duet"), dict) else {}
+            # no reset while someone stays: the visit flows freely until they leave ([duet] max_visit_s to cap it)
+            cfg["visit"]["max_visit"] = float(d.get("max_visit_s", 0) or 0) or 1e9
             cfg["display"]["main_display"] = int(d.get("tv_display", cfg["display"].get("main_display", 0)))
         elif cfg["display"].get("second_screen", True) and cfg["display"].get("enabled", True):
             from .second_screen import SecondScreen
