@@ -1,7 +1,7 @@
 # The shell: "Stone"
 
-The Pi lives in a faceted pebble: about 30 slightly rounded facets, an uneven top and
-one flat bottom. It is made to be practical first: good for the Pi, nice in the hand,
+The Pi lives in a faceted pebble: about 30 slightly rounded facets, an uneven top, 10 mm
+sea-washed rounding and one flat bottom. It is made to be practical first: good for the Pi, nice in the hand,
 safe in a bag. Version 3, Nov 24, 2026.
 
 ![The stone case, all parts](media/shell/stone-all.jpg)
@@ -28,10 +28,10 @@ Active Cooler.
 **The click.** The tray rim has a groove; small ridges inside each shell snap into it.
 Push straight down to close, pull straight up to open.
 
-**New in v3: the band cross.** Two fine channels (3.5 mm wide, 0.9 mm deep) run round the
-stone, one the long way and one across; they cross on the top and under the tray. Two
-hair ties or rubber bands in them keep the shell shut in a bag. `band_w` and `band_d` in
-`stone.scad` set the size.
+**New in v3: washed-out band grooves.** Soft dips, 6.5 mm wide and 1 mm deep with rounded
+edges, worn into the stone like water would. The travel shell and the tray carry a
+cross (one long, one across) for two hair ties that keep the stone shut in a bag; the
+work shell has only the dip across. `band_w` and `band_d` in `stone.scad` set the size.
 
 **Marks.** J R A pressed into the top of each shell. Under the tray: J R A, INFINITE JEST,
 the Pi model and a return address.
