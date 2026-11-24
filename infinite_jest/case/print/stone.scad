@@ -126,11 +126,15 @@ module ring(s_out, s_in, z0, z1) {
 mark = "J R A";
 font_mark = "Inter Display:style=SemiBold";
 font_small = "Inter:style=Bold";
-// a fine channel all the way round the long way (over the crown, under the
-// tray), for a rubber band or hair tie that keeps the stone shut in a bag
+// two fine channels that cross on the crown and under the tray, one the long
+// way and one across, for two rubber bands or hair ties that keep the stone
+// shut in a bag
 band_w = 3.5; band_d = 0.9;
 module band_groove() intersection() {
-    translate([-200, -band_w / 2, -1]) cube([400, band_w, 200]);
+    union() {
+        translate([-200, -band_w / 2, -1]) cube([400, band_w, 200]);
+        translate([-band_w / 2, -200, -1]) cube([band_w, 400, 200]);
+    }
     difference() { translate([-200, -200, -1]) cube(400); off(band_d); }
 }
 
@@ -138,17 +142,20 @@ module label(t, size, font = font_small) text(t, size = size, font = font, halig
 
 // under the tray, as read when you turn the stone over
 module bottom_text() {
-    translate([0, 32]) label(mark, 4.5, font_mark);
-    translate([0, 25]) label("INFINITE JEST", 3.4);
-    translate([0, -26.5]) label("Raspberry Pi 5  16 GB", 3.2);
-    translate([0, -32]) label("return to Jasper Engelhardt", 3.2);
-    translate([0, -37.5]) label("jasperengelhardt.com", 3.2);
+    // four fields between the arms of the band cross
+    translate([-18, 30]) label(mark, 4.5, font_mark);
+    translate([18, 30]) label("INFINITE JEST", 3.2);
+    translate([-19, -22]) label("Raspberry Pi 5", 2.8);
+    translate([-19, -27.5]) label("16 GB", 2.8);
+    translate([19, -22]) label("return to", 2.8);
+    translate([19, -27.5]) label("Jasper Engelhardt", 2.8);
+    translate([19, -33]) label("jasperengelhardt.com", 2.8);
 }
 
 // small mark pressed into the top facet of each shell
 // it follows the tilted crown facet it lands on
 module top_mark() intersection() {
-    translate([0, -22, 0]) linear_extrude(100) label(mark, 3.6, font_mark);
+    translate([-24, -20, 0]) linear_extrude(100) label(mark, 3.6, font_mark);
     difference() { translate([-200, -200, 20]) cube(400); off(0.5); }
 }
 // and a raised one on the ceiling inside each shell, read from below
@@ -186,9 +193,9 @@ module tray() {
         // microSD slot
         translate([-100, sd_slot[0][0], sd_slot[1][0]]) cube([100 + X(0) - 1, sd_slot[0][1] - sd_slot[0][0], 20]);
         // air in, under the board
-        for (x = [-30 : 6 : 30]) translate([x - 1.2, -16, -1]) cube([2.4, 32, wall + clr + rim_t + 2]);   // through the floor
+        for (x = [-28, -22, -16, -10, -4, 4, 10, 16, 22, 28]) translate([x - 1.2, -16, -1]) cube([2.4, 32, wall + clr + rim_t + 2]);   // through the floor
         // bumper seats and the name, underneath
-        for (x = [-32, 32], y = [-20, 20]) translate([x, y, -0.01]) cylinder(d = 8.6, h = 0.8);
+        for (x = [-41, 41], y = [-25, 25]) translate([x, y, -0.01]) cylinder(d = 8.6, h = 0.8);
         translate([0, 0, -0.01]) mirror([1, 0, 0]) linear_extrude(0.6) bottom_text();
         band_groove();
     }

@@ -30,15 +30,15 @@ THE CLICK
   printing the work shell. Too tight: set clr = 0.35 (or bump_d = 0.4) in
   stone.scad and export again. Too loose: bump_d = 0.7.
 
-BAND GROOVE
-  A fine channel (3.5 mm wide, 0.9 mm deep) runs once round the stone the long
-  way, over the crown and under the tray. A hair tie or rubber band in it keeps
-  the shell shut in a bag. Change band_w / band_d in stone.scad to suit the band.
+BAND CROSS
+  Two fine channels (3.5 mm wide, 0.9 mm deep) run round the stone, one the long
+  way and one across; they cross on the crown and under the tray. Two hair ties
+  or rubber bands in them keep the shell shut in a bag. Change band_w / band_d in stone.scad to suit the band.
 
 HARDWARE
   4x M2.5 x 6 mm self-tapping screws (Pi to the tray standoffs)
     or brass heat-set inserts: set threads = "insert" in stone.scad
-  1 hair tie or rubber band, about 3 mm thick, for the bag
+  2 hair ties or rubber bands, about 3 mm thick, for the bag
   4x 8 mm self-adhesive rubber bumpers (seats are marked under the tray)
   Official Raspberry Pi 5 Active Cooler (needed) and 27 W USB-C supply
 
