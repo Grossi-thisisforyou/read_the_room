@@ -19,6 +19,8 @@ Status (Nov 24, 2026): running on the Raspberry Pi in test; install in room 401 
 week of Dec 4; first visitors Dec 9. Book at
 [jasperengelhardt.com/visit.html](https://jasperengelhardt.com/visit.html).
 
+<img src="docs/media/flyer.jpg" alt="Flyer: Infinite Jest. The best performance you have ever seen." width="320">
+
 ## The concept
 
 One person at a time stands on a marked spot in a dark room facing a screen. The room

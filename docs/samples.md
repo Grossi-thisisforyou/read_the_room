@@ -18,6 +18,23 @@ GitHub plays MP3s in the browser when you click a file and choose "View raw".
 
 Full HD frames from the Pi.
 
+**Profiling**, in a simulated visit: the room sizing up a new visitor.
+
+![Profiling a visitor](media/stills/scene-profiling.jpg)
+
+**The wound**, **the fall** and **the dark**, three of the five scenes, each chosen for a
+different kind of visitor.
+
+![The wound](media/stills/scene-the-wound.jpg)
+
+![The fall](media/stills/scene-the-fall.jpg)
+
+![The dark](media/stills/scene-the-dark.jpg)
+
+**The confession**: the file the room shows at the end, honest about how little it knows.
+
+![The confession](media/stills/scene-confession.jpg)
+
 **Arrival.** The room notices someone and starts its file.
 
 ![Arrival](media/stills/approach-surveil.jpg)

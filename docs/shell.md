@@ -28,9 +28,10 @@ Active Cooler.
 **The click.** The tray rim has a groove; small ridges inside each shell snap into it.
 Push straight down to close, pull straight up to open.
 
-**New in v3: the band groove.** A fine channel (3.5 mm wide, 0.9 mm deep) runs once round
-the stone the long way, over the top and under the tray. A hair tie or rubber band in
-it keeps the shell shut in a bag.
+**New in v3: the band cross.** Two fine channels (3.5 mm wide, 0.9 mm deep) run round the
+stone, one the long way and one across; they cross on the top and under the tray. Two
+hair ties or rubber bands in them keep the shell shut in a bag. `band_w` and `band_d` in
+`stone.scad` set the size.
 
 **Marks.** J R A pressed into the top of each shell. Under the tray: J R A, INFINITE JEST,
 the Pi model and a return address.
@@ -44,7 +45,7 @@ the Pi model and a return address.
 - Test first: print the tray and the travel shell and try the click. Too tight: set
   `clr = 0.35` in `stone.scad`. Too loose: `bump_d = 0.7`.
 - Hardware: 4 x M2.5 x 6 mm self-tapping screws (or heat-set inserts), 4 rubber feet,
-  one hair tie.
+  two hair ties.
 
 ## Files
 
