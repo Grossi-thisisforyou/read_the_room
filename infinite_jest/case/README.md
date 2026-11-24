@@ -100,7 +100,8 @@ of the tray carries the owner and return text. Three parts:
 | `print/stone_travel.stl` | 125 x 102 x 40 mm | Shell for the bag: closed, protects the ports. |
 | `print/stone.scad` | OpenSCAD source | `seed` cuts a different stone, `clr` / `bump_d` tune the click. |
 
-Either shell clicks onto the tray (ridges in the shell snap into a groove in
+A fine groove runs round the stone the long way, over the crown and under
+the tray, for a hair tie that keeps it shut in a bag. Either shell clicks onto the tray (ridges in the shell snap into a groove in
 the tray's rim); pull straight up to open. Tray prints bottom down without
 supports; shells print rim down with tree supports from the build plate,
 which touch only the inside of the crown. PETG or ASA, 0.12 mm

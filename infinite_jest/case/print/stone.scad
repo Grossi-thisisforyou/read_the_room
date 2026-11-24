@@ -126,6 +126,14 @@ module ring(s_out, s_in, z0, z1) {
 mark = "J R A";
 font_mark = "Inter Display:style=SemiBold";
 font_small = "Inter:style=Bold";
+// a fine channel all the way round the long way (over the crown, under the
+// tray), for a rubber band or hair tie that keeps the stone shut in a bag
+band_w = 3.5; band_d = 0.9;
+module band_groove() intersection() {
+    translate([-200, -band_w / 2, -1]) cube([400, band_w, 200]);
+    difference() { translate([-200, -200, -1]) cube(400); off(band_d); }
+}
+
 module label(t, size, font = font_small) text(t, size = size, font = font, halign = "center", valign = "center");
 
 // under the tray, as read when you turn the stone over
@@ -182,6 +190,7 @@ module tray() {
         // bumper seats and the name, underneath
         for (x = [-32, 32], y = [-20, 20]) translate([x, y, -0.01]) cylinder(d = 8.6, h = 0.8);
         translate([0, 0, -0.01]) mirror([1, 0, 0]) linear_extrude(0.6) bottom_text();
+        band_groove();
     }
 }
 
@@ -191,6 +200,7 @@ module shell_raw() {
         intersection() { stone(); translate([-200, -200, split]) cube([400, 400, 100]); }
         cavity();
         top_mark();
+        band_groove();
     }
     inner_mark();
     // ridges that snap into the rim's groove (only where the rim exists)
