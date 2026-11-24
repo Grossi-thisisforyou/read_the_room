@@ -1,0 +1,47 @@
+# Infinite Jest boot splash for Plymouth.
+# Shows splash.png scaled to the projector, fades it in out of black,
+# breathes slowly, and flickers now and then like a failing tube.
+# Boot messages and password prompts are never drawn: nothing generic
+# reaches the wall.
+
+Window.SetBackgroundTopColor(0.03, 0.02, 0.03);
+Window.SetBackgroundBottomColor(0.03, 0.02, 0.03);
+
+img = Image("splash.png");
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+scale = Math.Min(sw / img.GetWidth(), sh / img.GetHeight());
+img = img.Scale(img.GetWidth() * scale, img.GetHeight() * scale);
+
+spr = Sprite(img);
+spr.SetX(Window.GetX() + (sw - img.GetWidth()) / 2);
+spr.SetY(Window.GetY() + (sh - img.GetHeight()) / 2);
+spr.SetZ(1);
+spr.SetOpacity(0);
+
+t = 0;
+flick = 0;
+
+fun refresh_callback() {
+    t++;
+    # about 2 seconds of fade-in at 50 frames per second
+    fade = Math.Min(t / 100, 1);
+    # slow breathing between 82% and 100%
+    breath = 0.91 + 0.09 * Math.Sin(t / 40);
+    # rare flicker: a few frames at low brightness
+    if (flick > 0) {
+        flick--;
+    } else if (Math.Random() < 0.012) {
+        flick = Math.Int(2 + Math.Random() * 5);
+    }
+    k = 1;
+    if (flick > 0) k = 0.35;
+    spr.SetOpacity(fade * breath * k);
+}
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# Swallow messages and prompts so no text appears over the image.
+fun message_callback(text) { }
+Plymouth.SetMessageFunction(message_callback);
+fun display_normal_callback() { }
+Plymouth.SetDisplayNormalFunction(display_normal_callback);

@@ -1,0 +1,66 @@
+INFINITE JEST · "Stone" · Raspberry Pi 5 case
+Three printed parts: one tray, two shells that click onto it.
+
+PARTS
+  stone_tray.stl    122 x 101 x 13 mm   bottom face down, no supports
+  stone_work.stl    121 x 100 x 40 mm   rim down, supports inside (see below)
+  stone_travel.stl  125 x 102 x 40 mm   rim down, supports inside
+  stone_pins.stl    6 push-pins          head down, no supports
+  stone.scad        OpenSCAD source (change `seed` for a differently cut stone)
+The top of the stone is uneven on purpose, so the shells print rim down with
+TREE SUPPORTS, BUILD PLATE ONLY: they stand on the bed inside the shell and
+touch only the inside of the crown, so no outside surface is marked.
+Bed at least 130 x 110 mm.
+
+MARKS
+  J R A is pressed into the top of each shell and raised on the inside wall at
+  the microSD end of each shell. Under the tray: J R A, INFINITE JEST, "Raspberry Pi 5 16 GB",
+  "return to Jasper Engelhardt", "jasperengelhardt.com". The small letters are
+  pressed 0.6 mm into the tray face on the bed, so print the first layer slowly.
+
+MATERIAL AND SETTINGS
+  PETG or ASA, matte black (not PLA: it softens next to a warm Pi)
+  0.12 mm layers for the best facets, 4 walls (perimeters), 20 % gyroid infill
+  Shells: 4 walls makes the 2.2 mm shell almost solid, which is what the click needs
+
+THE CLICK
+  The tray has a rim with a groove; each shell has small ridges inside its edge
+  that snap into it. Push the shell straight down until it clicks, pull straight
+  up to open.
+  PLEASE TEST FIRST: print the tray and the travel shell and try the click before
+  printing the work shell. Too tight: set clr = 0.35 (or bump_d = 0.4) in
+  stone.scad and export again. Too loose: bump_d = 0.7.
+
+BAND CROSS
+  Two fine, washed-out dips (about 4 mm wide, 0.8 mm deep, soft cosine profile)
+  run round the travel shell and the tray, one the long way and one across;
+  each wanders and swells a little like a water-worn line, and they cross on the
+  crown and under the tray. Two hair ties or rubber bands in them keep the shell
+  shut in a bag. The work shell only has the dip across.
+  Change band_W / band_d in stone.scad to suit the band.
+
+HARDWARE
+  No screws needed: stone_pins.stl holds 6 printed push-pins (4 + 2 spare).
+    Print them head down, 100 % infill, 0.12 mm layers. Push each through a
+    corner hole of the Pi into its post until the split tip clicks.
+    Too tight: set pin_d = 2.3 in stone.scad. Too loose: m25_hole 2.5.
+    Prefer metal? Set threads = "self" (M2.5 x 6 self-tapping) or "insert".
+  2 hair ties or rubber bands, about 3 mm thick, for the bag
+  4x 8 mm self-adhesive rubber bumpers (seats are marked under the tray)
+  Official Raspberry Pi 5 Active Cooler (needed) and 27 W USB-C supply
+
+OPENINGS (work shell)
+  port end      4x USB, Ethernet
+  long side     USB-C power, micro-HDMI 0 and 1
+  microSD end   power button, status LEDs
+  tray          microSD card slot under the board; air slots in the floor
+  roof + GPIO side: ventilation slits over the fan
+The travel shell is closed and protects the ports in a bag.
+
+Port positions come from the Pi 5 drawings and are not yet checked on a print:
+please do one quick draft of the tray + work shell and try the board in it.
+
+Export:
+  openscad -D 'part="tray"'   -o stone_tray.stl   stone.scad
+  openscad -D 'part="work"'   -o stone_work.stl   stone.scad
+  openscad -D 'part="travel"' -o stone_travel.stl stone.scad
