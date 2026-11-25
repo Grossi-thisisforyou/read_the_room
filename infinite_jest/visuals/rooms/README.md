@@ -48,3 +48,25 @@ would appear today as ordinary "paint" pieces. To give them their own weight:
   rooms come back as they leave: the machine dreaming where they might have come from.
 - **Tags:** `presence: true` rooms can be held back until the visitor has stayed
   a while, and `palette` can follow the mood of the day.
+
+## The living library on the Pi
+
+The Pi cooks the rooms itself, slowly, and the library keeps changing:
+
+- **Grows:** one room at a time, in the gaps, as one turn of the existing painter.
+  `paint_turns.py` replaces ij-paint's command inside the same service, so the
+  abstractions and the rooms take turns and share one heat budget (its CPUQuota,
+  Nice, pause while a visitor is here). No second generator.
+- **Forgets:** past `--rooms-max` rooms (120), old rooms begin to fade. Each cycle one
+  is chosen at random, older ones more likely, and gets darker, softer and coarser;
+  after four fades it is gone. Now and then an old room survives a long time. The
+  show just sees the faded file, so forgetting is visible on the wall.
+- **Keeps cool:** above 70 C it stops and waits until the Pi is under 60 C, and it
+  rests two minutes between pictures.
+
+Proposed ij-paint ExecStart (not installed; the Pi's own thread does that):
+
+    /usr/bin/python3 $HOME/read_the_room/infinite_jest/visuals/rooms/paint_turns.py \
+      --model $HOME/sd-models/sd_turbo.safetensors --taesd $HOME/sd-models/taesd.safetensors \
+      --rest 120 --room-share 0.35 --rooms-max 120 -- --theme mix --steps 1 --width 384 \
+      --height 384 --nice 15 --max-per-hook 80 --abort-after 900
