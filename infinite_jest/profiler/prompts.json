@@ -1,0 +1,40 @@
+{
+  "_about": "Binary prompts the phone shows (left/right half, or keys 1/2). Each option nudges OCEAN traits. Trait nudges are design choices loosely based on taste research (Openness and abstract/dark art), not validated items. The 'counterpart' field names the Cambridge Analytica era move each prompt restages.",
+  "prompts": [
+    {
+      "id": "closer",
+      "ask": "look closer",
+      "options": ["look closer", "look away"],
+      "traits": [{"O": 0.3, "E": 0.2}, {"N": 0.3, "O": -0.1}],
+      "counterpart": "the personality quiz as bait: a harmless choice that is really a measurement"
+    },
+    {
+      "id": "scream",
+      "ask": "the noise or the silence",
+      "options": ["the noise", "the silence"],
+      "traits": [{"O": 0.2, "N": 0.2, "E": 0.2}, {"C": 0.2, "E": -0.3}],
+      "counterpart": "a 'like' on a page: taste as a proxy for personality"
+    },
+    {
+      "id": "seen",
+      "ask": "do you want to be",
+      "options": ["seen", "forgotten"],
+      "traits": [{"E": 0.4, "N": -0.1}, {"E": -0.3, "N": 0.2}],
+      "counterpart": "self-report items in the myPersonality app"
+    },
+    {
+      "id": "upside",
+      "ask": "turn the world",
+      "options": ["upside down", "right way up"],
+      "traits": [{"O": 0.4, "C": -0.2}, {"C": 0.3, "O": -0.2}],
+      "counterpart": "abstract versus representational art preference, a known Openness marker"
+    },
+    {
+      "id": "secret",
+      "ask": "tell me a secret (type it) or keep it",
+      "options": ["tell", "keep"],
+      "traits": [{"A": 0.2, "E": 0.2, "O": 0.1}, {"A": -0.1, "N": 0.1, "C": 0.1}],
+      "counterpart": "disclosure as data: what you volunteer is the most valuable signal. Only the length is kept, never the text."
+    }
+  ]
+}
