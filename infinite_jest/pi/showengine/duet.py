@@ -844,9 +844,13 @@ class Duet:
             self.wall.fps = self.wall_fps * (0.6 if showing else 1.0)
             # with someone there the voice, the ears and the model need the CPU: the dreams rest longer
             # between pictures (they cross-fade, so they only morph more slowly)
-            self.wall.rest = 1.0 + 2.0 * min(1.0, self.attention * 2.0)
+            # A fixed budget for a four-core Pi: while it is making out words or thinking of an answer
+            # (two cores each, never at once with the pictures), the dreams all but hold still.
+            thinking = self.hearing.busy or self.words.busy
+            self.wall.rest = 10.0 if thinking else 1.0 + 2.0 * min(1.0, self.attention * 2.0)
             if self.face_dreamer is not None:
                 self.face_dreamer.rest = 3.0
+                self.face_dreamer.active = showing and not thinking
             if self.attention < 0.1:                   # alone, hours on end: dream slowly and keep the Pi cool
                 self.wall.fps = min(self.wall.fps, float(self.cfg.get("idle_fps", 2.5)))
         glitching = self.glitch.update(now, self.wake, tv_on=True)
