@@ -37,6 +37,10 @@ class SFace:
     def embed(self, image):
         """Embedding of the single largest face in a BGR image, or None (no face, or more than one person close)."""
         h, w = image.shape[:2]
+        if max(h, w) > 1280:                 # the detector misses faces in very large photos
+            k = 1280 / max(h, w)
+            image = self.cv2.resize(image, (int(w * k), int(h * k)))
+            h, w = image.shape[:2]
         self.det.setInputSize((w, h))
         _, faces = self.det.detect(image)
         if faces is None or len(faces) == 0:

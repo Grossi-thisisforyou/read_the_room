@@ -3,8 +3,16 @@
 Lets the room recognise a booked guest who asked for that, so nobody has to pick them on the
 control page. Anyone else is a stranger and gets the getting-to-know-you path.
 
-**Status: prepared, not connected to the show, not tested on a camera.** The matching logic is
-tested with stand-in numbers. The camera models are not in the repo.
+**Status: prepared, not connected to the show, not tested on a live camera.** The camera models
+are not in the repo.
+
+First test (2026-11-25, the artist's own face, with their consent): enrolled from two portraits
+on their site, then shown their other published photos. Recognised in 5 of the 6 photos where one
+face was found (scores 0.48 to 0.73, threshold 0.42). Not recognised in a 2017 film still (0.30:
+nine years younger, in a role). A second person in one photo scored 0.12, and that photo returned
+no answer because two people stood at the same distance. In four photos no face was found
+(profile, dark or small). Published stage photos are not a camera in a dark room; that test is
+still open.
 
 It only works for a guest when all of this is true:
 
