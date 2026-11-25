@@ -81,16 +81,14 @@ FINE_SHARE = 0.4               # how often the room is a fine one rather than a 
 FINE = {r[0] for r in FINE_ROOMS}
 
 # What is wrong. "presence" ones carry an unidentifiable someone; the others are traces.
+# Only big, readable shapes: at 1 step and 384 px the Pi drops small objects
+# (footprints, a phone, a cup all vanished in the first Pi samples).
 # An optional 4th item limits a haunt to rooms where it makes sense.
 HAUNTS = [
     ("door", "trace", "a door left ajar onto pure black"),
     ("chair", "trace", "a chair pulled out as if someone just stood up"),
-    ("footprints", "trace", "wet footprints crossing the floor"),
     ("curtain", "trace", "a curtain lifting with no window open"),
-    ("phone", "trace", "a telephone off the hook, cord hanging"),
-    ("cup", "trace", "a cup still steaming on the table", ("kitchen", "livingroom", "dining", "office", "parlour", "tvroom", "motel", "waiting")),
     ("turned", "trace", "every chair turned to face the wall", ("classroom", "waiting", "hall", "dining", "seminar", "office", "library", "lobby", "terminal")),
-    ("handprint", "trace", "a faint handprint on the glass"),
     ("dust", "trace", "dust turning in a single beam of light"),
     ("bed", "trace", "a hollow in the bed as if someone just got up", ("bedroom", "motel", "nursery", "attic", "glasshouse")),
     ("stain", "trace", "a damp stain on the wallpaper shaped almost like a face"),
