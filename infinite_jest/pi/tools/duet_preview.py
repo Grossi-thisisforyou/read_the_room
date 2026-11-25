@@ -72,6 +72,7 @@ def main():
     if a.mood:
         over["duet"]["mood"] = a.mood
     over["duet"]["speech_to_text"] = False
+    over["duet"]["dream_process"] = False        # the preview steps the networks itself
     if a.stranger:
         over["duet"]["guest"] = ""
     cfg = config.load(None, over)

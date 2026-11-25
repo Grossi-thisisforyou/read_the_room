@@ -362,7 +362,11 @@ class Duet:
             net = _dream_import()
             p = net.find(self._models, "wall")
             if p:
-                self.wall = Dreamer(net.Decoder.load(p), float(d.get("wall_fps", 8.0)))
+                if d.get("dream_process", True):          # its own process: the picture loop is never held up
+                    from . import dreamproc
+                    self.wall = dreamproc.make(Dreamer, "wall", p, float(d.get("wall_fps", 8.0)))
+                else:
+                    self.wall = Dreamer(net.Decoder.load(p), float(d.get("wall_fps", 8.0)))
         except Exception:
             plugins.report(log, "dream-load", "could not load the dreaming networks")
         self._use_face()
@@ -380,11 +384,13 @@ class Duet:
         self._tv_mem: list = []
         self._tvd = None
         self._cam_looked = -1e9
+        self._cam_busy = False
         if d.get("face_cover", True):                   # people in the footage are never recognisable
             from .cover import FaceCover
-            self.face_cover = FaceCover(self._models)
-            self.glitch.cover, self.material.cover = self.face_cover, FaceCover(self._models)
-            self._cam_cover = FaceCover(self._models)
+            how = str(d.get("face_finder", "network"))       # "cascade": the older, lighter finder
+            self.face_cover = FaceCover(self._models, how)
+            self.glitch.cover, self.material.cover = self.face_cover, FaceCover(self._models, how)
+            self._cam_cover = FaceCover(self._models, how)
             self._cam_cover.GROW, self._cam_cover.HOLD = 0.6, 3      # someone moving: bigger blocks, 3 s
             self._cam_cover.FINE = False                             # close to the camera: no need to enlarge
             if not self.face_cover.finder:
@@ -448,8 +454,12 @@ class Duet:
                 net = _dream_import()
                 sd = os.path.join(self._models, f"face_{gid}_steps")
                 if os.path.exists(os.path.join(sd, "index.json")):
-                    face = GrowingFace(FaceModel(sd, net))
-                    dr = Dreamer(face, float(self.cfg.get("face_fps", 6.0)), reach=0.9)
+                    if self.cfg.get("dream_process", True):
+                        from . import dreamproc
+                        face = dr = dreamproc.make(Dreamer, "face", sd, float(self.cfg.get("face_fps", 6.0)), reach=0.9)
+                    else:
+                        face = GrowingFace(FaceModel(sd, net))
+                        dr = Dreamer(face, float(self.cfg.get("face_fps", 6.0)), reach=0.9)
                     dr.speed, dr.active = 0.35, False
                     if self._started:
                         dr.start()
@@ -552,6 +562,9 @@ class Duet:
         self._cue_last = now
         self._hold_until = now + 45.0
         if self.tv == "flow" and self._open is None:
+            if self.guest is not None and not self._named:  # nobody was named: this is someone it does not know,
+                self._want_guest = None                     # and nothing from anyone's file is used for them
+                self._apply_guest()
             self._open = {"line": "hi. who are you?", "ask": True, "t": now}
 
     def _listen_for_hello(self, now: float, fresh: bool) -> None:
@@ -566,17 +579,19 @@ class Duet:
             # picture), not its own voice, and not checked more often than every 12 s (it costs CPU)
             onset = float(getattr(getattr(eng, "listen", None), "onset_t", -1e9)) if eng is not None else -1e9
             new = onset > self._cue_onset and onset > self._spoke_until
-            self._cue_onset = max(self._cue_onset, onset)
+            if onset <= self._spoke_until:
+                self._cue_onset = max(self._cue_onset, onset)       # its own voice: not a visitor
             if ((new or fresh) and self.tv == "flow" and self._open is None and now > self._spoke_until
-                    and now - self._cue_last > 60.0 and now - self._cue_checked > 12.0
+                    and now - self._cue_last > 60.0 and now - self._cue_checked > 6.0
                     and not self.hearing.busy and self.hearing.available()):
-                self._cue = {"at": max(now, onset + 3.0) if new else now + 3.0}
+                self._cue = {"at": max(now, onset + 3.0) if new else now + 3.0, "on": onset if new else now}
+                self._cue_onset = max(self._cue_onset, onset)
                 self._cue_checked = now
             return
         if "sent" not in c:
             if now >= c["at"]:
                 c["sent"] = True
-                if not self.hearing.listen(5.0, lambda t, c=c: c.__setitem__("text", t)):
+                if not self.hearing.listen(min(20.0, max(5.0, now - c["on"] + 2.0)), lambda t, c=c: c.__setitem__("text", t)):
                     self._cue = None
         elif "text" in c:
             self._cue = None
@@ -591,12 +606,20 @@ class Duet:
         if f is None or self._cam_cover is None:
             self._cam_seen = (None, None)
             return f
+        now = time.monotonic()
+        if now - self._cam_looked >= 1.0 and not self._cam_busy:    # look once a second, in a helper thread
+            self._cam_looked, self._cam_busy = now, True
+
+            def look(f=f):
+                try:
+                    self._cam_cover.frame(f, True)
+                finally:
+                    self._cam_busy = False
+            threading.Thread(target=look, name="ij-cover", daemon=True).start()
+        if now - self._cam_cover.looked_t > 3.0:        # not looked yet: nothing of the camera is shown
+            return None
         if self._cam_seen[0] is not f:
-            now = time.monotonic()                      # look for faces twice a second; in between the blocks stay
-            look = now - self._cam_looked >= 1.0
-            if look:
-                self._cam_looked = now
-            self._cam_seen = (f, self._cam_cover.frame(f, look))
+            self._cam_seen = (f, self._cam_cover.frame(f, False))
         return self._cam_seen[1]
 
     def _digest(self) -> None:
@@ -759,8 +782,8 @@ class Duet:
             elif self.tv == "hello" and now - self.tv_t >= 5.0:
                 self.tv = "face"
         elif self.tv != "flow":
-            if self.tv == "face" and self.turns + self._address_i > 1:
-                self._say(self._fresh([x for x in talk.PARTING]) , now)     # they are going; it goes on
+            if not self.exchange and self.tv == "face" and self.turns + self._address_i > 1:
+                self._say(self._fresh([x for x in talk.PARTING]) , now)     # (older way only: a line when they go)
             self.tv = "flow"
             self._named = ""
             self._forget()
@@ -929,18 +952,19 @@ class Duet:
                 done = bool(text) or (a["voiced"] > 0.25 and not still) or (now >= a["until"] and not (a["voiced"] > 0.25 and still))
                 if done and not text and "hearing" not in a and self.hearing.available() \
                         and (a["voiced"] > 0.1 or not a.get("heard_once")):
-                    if self.hearing.busy and now < a["until"] + 8.0:
+                    if self.hearing.busy and now < a["until"] + 20.0:
                         return                                  # the ears are busy: wait for them
                     # before it calls it silence, it has the words made out (on the Pi, a few seconds)
                     a["hearing"] = now
                     if self.hearing.listen(now - a["from"] + 1.0, lambda t, a=a: a.__setitem__("text", t) or a.__setitem__("got", True)):
                         return
-                if "hearing" in a and not a.get("got") and now - a["hearing"] < 9.0 and self.hearing.busy:
+                if "hearing" in a and not a.get("got") and now - a["hearing"] < 16.0 and self.hearing.busy:
                     return
                 if done and self.exchange and not text:
                     if a["q"] and a.get("waits", 0) < 20:       # nobody answered: it is patient, the question stays open
                         a["waits"] = a.get("waits", 0) + 1
                         a["until"], a["voiced"] = now + self.listen_s, 0.0
+                        a["from"] = now - 1.0                   # only new sound is made out next time
                         a.pop("hearing", None); a.pop("got", None)
                         a["heard_once"] = True
                     else:
@@ -968,7 +992,7 @@ class Duet:
                         # now, and says nothing at all when nothing was said
                         if text:
                             pairs = [(q, t) for q, _k, t in self.profile if t]
-                            self.words.reply(pairs, "; ".join(self._facts()[:6]) if self.guest else "", self._recent())
+                            self.words.reply(pairs, "; ".join(self._facts()[:6]) if self.guest and self._named else "", self._recent())
                             self._pending = {"t": now}
                             self._hold_until = max(self._hold_until, now + 35.0)
                         self._next_address = now
@@ -982,6 +1006,9 @@ class Duet:
                     self._next_address = now + self.address_every * 0.6
             return
         if self.exchange:
+            if getattr(getattr(getattr(self.engine, "machine", None), "visit", None), "opted_out", False):
+                self._pending = None                            # they opted out: not another word
+                return
             self._exchange(now)
             return
         if self._unanswered >= self.quiet_after > 0:           # nobody answers: it does not talk to itself
@@ -1029,10 +1056,12 @@ class Duet:
             if self.words.busy and now - self._opening < self.reply_wait:
                 return
             self._opening = 0.0
-            q = self._question()
+            # one question out of what it knows of them (made just now, or written for this guest);
+            # if there is none it has said hi and simply listens
+            q = self._fresh(self.words.questions) or self._fresh(list(self.extra.get("questions") or []))
             if q:
                 self._say(q, now)
-                listen(q, now + 1.0 + 0.075 * len(q))
+            listen(q or "", now + (1.0 + 0.075 * len(q) if q else 0.0))
             return
         if self._voice_now() and now > self._spoke_until:       # they speak without being asked: it listens
             listen("", now - 0.5)
@@ -1291,7 +1320,7 @@ class Duet:
             surf.blit(g[int(now * 24) % len(g)], (0, 0), special_flags=pygame.BLEND_ADD)
 
     def status(self) -> dict:
-        out = {"tv": self.tv, "wake": round(self.wake, 2), "progress": round(self.progress, 2),
+        out = {"tv": "dreaming" if self.tv == "flow" else "in conversation", "wake": round(self.wake, 2), "progress": round(self.progress, 2),
                "guest": bool(self.guest), "fork": self.fork, "guests": list_guests(), "answers": len(self.profile),
                "next_guest": None if self._want_guest is False else (self._want_guest or "unknown"),
                "mood": self.mood["name"], "bursts": self.bursts,
@@ -1465,7 +1494,8 @@ class LiveWords:
     def _run(self, msgs: list, front) -> None:
         import urllib.request
         try:
-            body = json.dumps({"messages": msgs, "max_tokens": 80 if front else 220, "temperature": 1.05,
+            body = json.dumps({"messages": msgs, "max_tokens": 70 if front == "reply" else 80 if front else 220,
+                               "temperature": 0.8 if front == "reply" else 1.05,
                                "top_p": 0.95, "repeat_penalty": 1.15,
                                "seed": random.randint(0, 2 ** 31 - 1)}).encode()
             req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
@@ -1475,10 +1505,13 @@ class LiveWords:
                 one = " ".join(str(text).split()).strip().strip('"\'').lower()
                 try:
                     from .visit import visible_text
-                    one = visible_text(one)
+                    one = visible_text(one, 220)
                 except Exception:
                     pass
-                self.said_back = one if one and len(one.split()) <= 32 else None
+                if one and one[-1] not in ".?!":             # cut off in the middle: keep the whole sentences
+                    cut = max(one.rfind("."), one.rfind("?"), one.rfind("!"))
+                    one = one[:cut + 1] if cut > 0 else ""
+                self.said_back = one if one and len(one.split()) <= 40 else None
                 self.got += 1
                 return
             new = clean_lines(text)
@@ -1634,15 +1667,16 @@ class Material:
                "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps=8",
                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        first = True
+        first, nth = True, 0
         try:
             while True:
                 buf = p.stdout.read(w * h * 3)
                 if len(buf) < w * h * 3:
                     break
                 frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-                if self.cover is not None:
-                    frame = self.cover.frame(frame)
+                if self.cover is not None:                   # look for faces once a second; the blocks stay
+                    nth += 1
+                    frame = self.cover.frame(frame, look=nth % 8 == 1)
                 with self._lock:
                     if first:
                         self.kind, self.t0, self.dur, first = "footage", time.monotonic(), dur, False
@@ -1673,7 +1707,7 @@ class Material:
                     continue
                 fr = cv2.resize(fr, (320, 180))[:, :, ::-1].copy()
                 if self.cover is not None:
-                    fr = self.cover.frame(fr)
+                    fr = self.cover.frame(fr, look=(i // step) % 8 == 1)
                 with self._lock:
                     if first:
                         self.kind, self.t0, self.dur, first = "footage", time.monotonic(), dur, False
@@ -1904,6 +1938,7 @@ class Collage:
         self.camera = camera             # a function returning the newest camera picture (H, W, 3) or None
         self.dream = dream               # a function returning the newest picture of the dreaming network
         self.cover = None                # showengine.cover.FaceCover for the photographs
+        self._loading = False
         self._paints: list[str] = []
         self._paints_t = -1e9
         self.counts = {k: 0 for k in self.WEIGHTS}
@@ -1985,7 +2020,20 @@ class Collage:
     def _source(self):
         """Pick what the next piece is made of: (kind, pygame surface or None, clip or None)."""
         import pygame
-        have = {"photo": bool(self.paths), "paint": bool(self._paintings()),
+        ready = [p for p in self.paths if p in self._src] if self.cover is not None else list(self.paths)
+        if self.paths and not ready and not self._loading:           # photographs are prepared in a helper thread
+            self._loading = True
+
+            def prepare(paths=list(self.paths)):
+                try:
+                    for p in paths:
+                        self._load(p)
+                except Exception:
+                    log.info("duet: a photograph could not be prepared", exc_info=True)
+                finally:
+                    self._loading = False
+            threading.Thread(target=prepare, name="ij-photos", daemon=True).start()
+        have = {"photo": bool(ready), "paint": bool(self._paintings()),
                 "family": self.footage is not None and bool(self.footage.clips),
                 "camera": self.camera is not None and self.camera() is not None,
                 "dream": self.dream is not None and self.dream() is not None}
@@ -2012,7 +2060,7 @@ class Collage:
                 self._paints = [x for x in self._paints if x != path]
                 kind = "photo" if have["photo"] else None
         if kind == "photo":
-            return kind, self._load(self.rng.choice(self.paths)), None
+            return kind, self._load(self.rng.choice(ready)), None
         return None, None, None
 
     @staticmethod

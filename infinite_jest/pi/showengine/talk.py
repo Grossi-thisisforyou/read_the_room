@@ -152,9 +152,9 @@ class Reserve:
 
 
 TECHNICAL = {"file", "files", "camera", "cameras", "screen", "screens", "microphone", "recording", "recorded",
-             "footage", "data", "machine", "tape", "pixel", "pixels", "algorithm", "model", "sensor", "software",
+             "footage", "data", "machine", "tape", "pixel", "pixels", "algorithm", "sensor", "software",
              "archive", "archives", "archived", "release", "released", "delete", "deleted", "deletion", "wipe",
-             "wiped", "profile", "dossier", "subject", "record", "records", "database", "phase", "program"}
+             "wiped", "dossier", "database"}
 PHRASES = ("reading back", "read back", "on file", "the system", "help you", "assist", "language model",
            "said nothing", "say something", "talk to me", "not answering", "did not answer", "no answer",
            "you are quiet", "your silence", "you are silent", "still waiting")

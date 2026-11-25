@@ -196,6 +196,9 @@ class Hub:
         for r in self.clients.values():
             roles[r] = roles.get(r, 0) + 1
         st = self.engine.status()
+        if "starts_on" in st or isinstance(st.get("duet"), dict):   # the duet has no phases: it dreams, with or without someone
+            st["phase"] = "idle" if st.get("phase") in ("idle", None) else "dreaming"
+            st.pop("phase_t", None)
         st.update({"clients": roles, "fps": round(self.fps, 1), "last_frame_ts": self.last_frame_ts,
                    "uptime_s": round(time.monotonic() - self.started),
                    "udp": dict(self.udp_seq), "dropped": self.dropped, "cpu_temp_c": cpu_temp()})
