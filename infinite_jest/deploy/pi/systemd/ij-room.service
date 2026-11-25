@@ -1,0 +1,19 @@
+# The room as the input (no phone needed): microphone level and voice, and a
+# USB camera if one is plugged in, sent to the show engine. Nothing is recorded.
+# Settings: /etc/infinite-jest/room.conf   Test: ij-room --check
+[Unit]
+Description=Infinite Jest room listener (microphone + optional USB camera)
+After=infinite-jest.service sound.target
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=audio video
+ExecStart=/usr/bin/python3 /usr/local/bin/ij-room
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Infinite Jest one-time install from the SD card kit
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash @BOOT@/ij-kit/ij-kit-run.sh
+TimeoutStartSec=0
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

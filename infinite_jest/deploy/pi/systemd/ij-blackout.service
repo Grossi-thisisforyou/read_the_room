@@ -1,0 +1,14 @@
+# Black projector whenever the show isn't drawing: parks the text console on an
+# empty, cursorless screen, so no text or login prompt reaches the wall.
+[Unit]
+Description=Infinite Jest safe blackout (empty console)
+After=systemd-user-sessions.service plymouth-quit-wait.service getty@tty1.service
+Before=infinite-jest.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ij-blackout
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

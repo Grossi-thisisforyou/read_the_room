@@ -1,0 +1,5 @@
+# The Wi-Fi the Pi uses ONCE to download the packages and the language model
+# (about 1.5 GB). Your phone's hotspot works. After the install the show
+# needs no internet. Keep the quotes off; spaces in the name are fine.
+WIFI_NAME=
+WIFI_PASSWORD=

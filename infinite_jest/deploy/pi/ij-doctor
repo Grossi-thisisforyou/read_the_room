@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""ij-doctor: is everything ready for the show? Plain answers, plain fixes.
+
+    ij-doctor              check everything
+    ij-doctor --fix        also fix what can be fixed safely (asks for sudo)
+    ij-doctor --sound      play a 3-second test sound on the show speaker
+    ij-doctor --json       machine-readable result
+
+Checks: power supply, temperature and cooler, disk, projector (HDMI port,
+resolution, model name), sound card, show engine, phone, language model,
+image generator, network, watchdog. Only Python's standard library.
+"""
+
+import glob
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
+SHOW_ADDR = "192.168.1.10"
+PHONE_ADDR = "192.168.1.20"
+ROUTER = "192.168.1.1"
+ENGINE = "http://127.0.0.1:8765/status"
+LLM = "http://127.0.0.1:8080/health"
+
+COLOR = sys.stdout.isatty()
+
+
+def c(code, s):
+    return "\033[%sm%s\033[0m" % (code, s) if COLOR else s
+
+
+RESULTS = []
+
+
+def report(status, title, detail="", fix=""):
+    """status: ok | warn | bad | info"""
+    RESULTS.append({"status": status, "title": title, "detail": detail, "fix": fix})
+    mark = {"ok": c("32", "  ok  "), "warn": c("33", " note "), "bad": c("31;1", "PROBLEM"),
+            "info": c("36", "  --  ")}[status]
+    print("%s  %s%s" % (mark, title, (": " + detail) if detail else ""))
+    if fix:
+        for line in fix.strip().split("\n"):
+            print("         " + c("1", "Fix: ") + line if line == fix.strip().split("\n")[0]
+                  else "              " + line)
+
+
+def run(cmd, timeout=5):
+    try:
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+        return p.returncode, p.stdout.decode("utf-8", "replace").strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e)
+
+
+def read(path, default=""):
+    try:
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8", "replace").strip()
+    except OSError:
+        return default
+
+
+def http_json(url, timeout=2.0):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
+def service(name):
+    rc, out = run(["systemctl", "show", name, "--property=ActiveState,SubState,NRestarts,UnitFileState,LoadState"])
+    if rc != 0:
+        return {}
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def user_home():
+    for u in (os.environ.get("SUDO_USER"), os.environ.get("USER"), "pi"):
+        if u and u != "root":
+            try:
+                import pwd
+                return pwd.getpwnam(u).pw_dir
+            except KeyError:
+                pass
+    return os.path.expanduser("~")
+
+
+HOME = user_home()
+ENGINE_TOML = os.path.join(HOME, ".config", "infinite-jest", "engine.toml")
+
+
+def load_toml(path):
+    try:
+        import tomllib
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        return {}
+
+
+# ------------------------------------------------------------------ checks
+
+def check_power():
+    rc, out = run(["vcgencmd", "get_throttled"])
+    if rc != 0:
+        report("info", "Power supply", "can't read it here (vcgencmd missing; not a Pi?)")
+        return
+    m = re.search(r"0x([0-9a-fA-F]+)", out)
+    v = int(m.group(1), 16) if m else 0
+    if v & 0x1:
+        report("bad", "Power supply", "too weak RIGHT NOW (under-voltage)",
+               "Use the official Raspberry Pi 27 W USB-C power supply, plugged straight into the wall.\n"
+               "Phone chargers and laptop USB ports are not enough for a Pi 5.")
+    elif v & 0x10000:
+        report("warn", "Power supply", "dipped since the last start (under-voltage happened)",
+               "If you're not on the official 27 W supply, switch to it. A short, thick cable helps.")
+    else:
+        report("ok", "Power supply", "steady")
+    if v & 0x4:
+        report("bad", "Speed", "the Pi is slowing itself down right now (throttled)",
+               "Usually heat or power: check the two lines around this one.")
+
+
+def check_heat():
+    t = read("/sys/class/thermal/thermal_zone0/temp")
+    if not t:
+        report("info", "Temperature", "can't read it here")
+        return
+    temp = int(t) / 1000.0
+    fan = False
+    for d in glob.glob("/sys/class/thermal/cooling_device*"):
+        if read(d + "/type") == "pwm-fan":
+            fan = True
+    fan_rpm = ""
+    for f in glob.glob("/sys/devices/platform/cooling_fan/hwmon/*/fan1_input"):
+        fan_rpm = read(f)
+    detail = "%.0f °C" % temp + (", cooler fan found" if fan else ", no cooler fan found")
+    if fan_rpm:
+        detail += " (%s rpm)" % fan_rpm
+    if temp >= 80:
+        report("bad", "Temperature", detail,
+               "Too hot. Fit the official Active Cooler, keep the case vents free, don't box the Pi in.")
+    elif not fan:
+        report("warn", "Temperature", detail,
+               "The Pi 5 needs the official Active Cooler for a long show: clips on, plugs into the FAN socket.")
+    elif temp >= 70:
+        report("warn", "Temperature", detail, "Warm. Check the cooler's fan spins and the vents are clear.")
+    else:
+        report("ok", "Temperature", detail)
+
+
+def check_disk():
+    du = shutil.disk_usage("/")
+    free_gb = du.free / 1e9
+    detail = "%.0f GB free of %.0f GB" % (free_gb, du.total / 1e9)
+    if free_gb < 2:
+        report("bad", "SD card space", detail, "Almost full. Delete old images in read_the_room/infinite_jest/visuals/bank/ or logs.")
+    elif free_gb < 8:
+        report("warn", "SD card space", detail, "Getting low; the image generator needs room to keep painting.")
+    else:
+        report("ok", "SD card space", detail)
+    rc, out = run(["findmnt", "-no", "OPTIONS", "/"])
+    if rc == 0 and re.search(r"(^|,)ro(,|$)", out):
+        report("warn", "SD card", "is read-only (overlay / protection on): changes won't survive a restart")
+
+
+def edid_name(path):
+    try:
+        with open(path, "rb") as f:
+            e = f.read()
+    except OSError:
+        return ""
+    if len(e) < 128:
+        return ""
+    for off in (54, 72, 90, 108):
+        d = e[off:off + 18]
+        if d[0:3] == b"\x00\x00\x00" and d[3] == 0xFC:
+            return d[5:18].split(b"\n")[0].decode("ascii", "replace").strip()
+    return ""
+
+
+def check_projector():
+    ports = sorted(glob.glob("/sys/class/drm/card*-HDMI-A-*"))
+    if not ports:
+        report("info", "Projector", "no HDMI ports visible here (not a Pi, or no display driver)")
+        return
+    connected = {}
+    for p in ports:
+        name = p.rsplit("-", 2)[-2] + "-" + p.rsplit("-", 1)[-1]  # A-1 / A-2
+        if read(p + "/status") == "connected":
+            modes = read(p + "/modes").split()
+            connected[name] = (p, modes)
+    if not connected:
+        report("bad", "Projector", "nothing plugged into either HDMI port, or it's switched off",
+               "Plug the projector into the micro-HDMI port NEXT TO THE POWER SOCKET (HDMI 0),\n"
+               "switch the projector on and set its input to HDMI. Then: sudo systemctl restart infinite-jest")
+        return
+    if "A-1" not in connected:
+        report("bad", "Projector", "plugged into the wrong port (HDMI 1, the one further from the power socket)",
+               "Move the cable to the micro-HDMI port right next to the USB-C power socket (HDMI 0).")
+        return
+    path, modes = connected["A-1"]
+    model = edid_name(path + "/edid")
+    best = modes[0] if modes else "?"
+    if "1920x1080" in modes:
+        report("ok", "Projector", "%s on HDMI 0, Full HD available (best it offers: %s)" % (model or "connected", best))
+    else:
+        report("warn", "Projector", "%s on HDMI 0, but it doesn't offer 1920x1080 (it offers: %s)"
+               % (model or "connected", ", ".join(sorted(set(modes))[:6]) or "nothing"),
+               "Use a Full HD projector, or set width/height in ~/.config/infinite-jest/engine.toml\n"
+               "to one of the sizes listed, then: sudo systemctl restart infinite-jest")
+    if len(connected) > 1:
+        report("warn", "Second screen", "something is also plugged into HDMI 1; the show only uses HDMI 0")
+
+
+def alsa_cards():
+    cards = []
+    for line in read("/proc/asound/cards").splitlines():
+        m = re.match(r"\s*(\d+)\s+\[(\S+)\s*\]:\s*(\S+)\s*-\s*(.*)", line)
+        if m:
+            cards.append({"index": int(m.group(1)), "id": m.group(2), "driver": m.group(3), "name": m.group(4)})
+    return cards
+
+
+def usb_card():
+    for cd in alsa_cards():
+        if cd["driver"] == "USB-Audio":
+            return cd
+    return None
+
+
+def check_sound(fix=False):
+    cards = alsa_cards()
+    usb = usb_card()
+    cfg = load_toml(ENGINE_TOML)
+    dev = (cfg.get("audio") or {}).get("audio_device", "default")
+    if not usb:
+        names = ", ".join(cd["name"] for cd in cards) or "none"
+        report("bad", "Sound card", "no USB sound card found (cards: %s)" % names,
+               "Plug the USB audio interface into a blue USB port, speaker into its output.\n"
+               "The Pi 5 has no headphone socket; without the USB card, sound goes to the projector's HDMI.")
+        return
+    want = "plughw:CARD=%s,DEV=0" % usb["id"]
+    if dev in (want, "plughw:%d,0" % usb["index"], "hw:CARD=%s,DEV=0" % usb["id"]):
+        report("ok", "Sound card", "%s, and the show uses it (%s)" % (usb["name"], dev))
+    else:
+        if fix and set_audio_device(want):
+            report("ok", "Sound card", "%s: switched the show to it (%s)" % (usb["name"], want))
+        else:
+            report("bad", "Sound card", "%s is plugged in, but the show sends sound to '%s'" % (usb["name"], dev),
+                   "Run:  ij-doctor --fix   (sets audio_device = \"%s\" and restarts the show)" % want)
+
+
+def set_audio_device(want):
+    try:
+        text = open(ENGINE_TOML).read()
+    except OSError:
+        return False
+    if re.search(r"(?m)^\s*audio_device\s*=", text):
+        text = re.sub(r'(?m)^(\s*audio_device\s*=\s*)"[^"]*"', r'\g<1>"%s"' % want, text)
+    elif re.search(r"(?m)^\[audio\]\s*$", text):
+        text = re.sub(r"(?m)^\[audio\]\s*$", '[audio]\naudio_device = "%s"' % want, text, count=1)
+    else:
+        text += '\n[audio]\naudio_device = "%s"\n' % want
+    try:
+        with open(ENGINE_TOML, "w") as f:
+            f.write(text)
+    except PermissionError:
+        return False
+    run(["sudo", "systemctl", "restart", "infinite-jest"], timeout=20)
+    return True
+
+
+def sound_test():
+    usb = usb_card()
+    dev = "plughw:CARD=%s,DEV=0" % usb["id"] if usb else "default"
+    print("Playing 3 seconds of noise on %s. If you hear nothing: speaker on? volume up? cable in the output?" % dev)
+    print("(the show is paused for a moment)")
+    run(["sudo", "systemctl", "stop", "infinite-jest"], timeout=20)
+    rc, out = run(["timeout", "4", "speaker-test", "-D", dev, "-c", "2", "-t", "pink", "-l", "1"], timeout=10)
+    run(["sudo", "systemctl", "start", "infinite-jest"], timeout=20)
+    print(out[-300:] if rc not in (0, 124) else "done")
+
+
+def check_engine():
+    svc = service("infinite-jest")
+    if not svc or svc.get("LoadState") == "not-found":
+        report("bad", "Show engine", "not installed as a service",
+               "Run the installer again:  sudo bash /mnt/IJ-BUNDLE/INSTALL.sh")
+        return None
+    restarts = int(svc.get("NRestarts", "0") or 0)
+    st = http_json(ENGINE)
+    if svc.get("ActiveState") != "active":
+        report("bad", "Show engine", "not running (%s/%s)" % (svc.get("ActiveState"), svc.get("SubState")),
+               "sudo systemctl restart infinite-jest     then look:  journalctl -u infinite-jest -n 50")
+        return None
+    if st is None:
+        report("bad", "Show engine", "running but not answering on port 8765",
+               "It may be starting; wait 20 s. Still bad: sudo systemctl restart infinite-jest")
+        return None
+    age = time.time() - st["last_frame_ts"] if st.get("last_frame_ts") else None
+    detail = "phase %s, %s fps" % (st.get("phase", "?"), st.get("fps", "?"))
+    if restarts:
+        detail += ", restarted itself %d time%s since boot" % (restarts, "" if restarts == 1 else "s")
+    if age is not None and age > 10:
+        report("bad", "Show engine", detail + ", but the picture is frozen (%d s)" % age,
+               "The watchdog should restart it within 30 s. If not: sudo systemctl restart infinite-jest")
+    elif restarts > 5:
+        report("warn", "Show engine", detail, "It keeps crashing: journalctl -u infinite-jest -n 100  (send to Claude)")
+    else:
+        report("ok", "Show engine", detail)
+    return st
+
+
+def ping(addr):
+    rc, _ = run(["ping", "-c", "1", "-W", "1", addr], timeout=3)
+    return rc == 0
+
+
+def check_phone(st):
+    roles = (st or {}).get("clients") or {}
+    if isinstance(roles, list):
+        roles = {r: roles.count(r) for r in roles}
+    last = (st or {}).get("last_sensor_ts")
+    age = time.time() - last if last else None
+    if age is not None and age < 5:
+        report("ok", "Phone", "sending (last reading %.1f s ago)%s" % (age, ", WebSocket" if roles.get("phone") else ", UDP fallback"))
+        return
+    reach = ping(PHONE_ADDR)
+    if reach:
+        report("bad", "Phone", "the N900 is on the network (%s) but the app isn't sending" % PHONE_ADDR,
+               "On the N900: is the black INFINITE JEST screen up? If not, restart the phone.\n"
+               "Its log: /home/user/.ij-phone.log on the phone. The Pi address in /home/user/.ij-phone.conf must be %s." % SHOW_ADDR)
+    else:
+        report("bad", "Phone", "no N900 at %s and no readings%s" % (PHONE_ADDR, (" for %d s" % age) if age else ""),
+               "N900 on? On Wi-Fi 'infinitejest'? (Settings > Internet connections > Connect automatically: WLAN)\n"
+               "Its fixed address must be %s (Edit > Advanced > IP addresses)." % PHONE_ADDR)
+
+
+def check_llm():
+    svc = service("llama-server")
+    if not svc or svc.get("LoadState") == "not-found":
+        report("info", "Language model", "not installed (the show uses its own prepared words)")
+        return
+    if svc.get("ActiveState") != "active":
+        report("bad", "Language model", "service not running",
+               "sudo systemctl restart llama-server   then:  journalctl -u llama-server -n 30")
+        return
+    h = http_json(LLM, timeout=3)
+    if h and h.get("status") == "ok":
+        model = ""
+        rc, out = run(["systemctl", "show", "llama-server", "--property=ExecStart"])
+        m = re.search(r"--model\s+(\S+)", out)
+        if m:
+            model = os.path.basename(m.group(1))
+        report("ok", "Language model", "ready (%s)" % (model or "loaded"))
+    elif h:
+        report("warn", "Language model", "starting up (%s)" % h.get("status", "loading"), "Give it a minute.")
+    else:
+        report("bad", "Language model", "running but not answering on 127.0.0.1:8080",
+               "Look:  journalctl -u llama-server -n 30   (model file missing or damaged?)")
+
+
+def check_images():
+    svc = service("infinite-jest-bankgen")
+    bank = os.path.join(HOME, "read_the_room", "infinite_jest", "visuals", "bank")
+    n = len(glob.glob(os.path.join(bank, "*", "*.png")))
+    if not svc or svc.get("LoadState") == "not-found":
+        report("info", "Image generator", "not installed; %d pictures in the library" % n)
+        return
+    state = svc.get("ActiveState")
+    report("ok" if state == "active" else "warn", "Image generator",
+           "%s, %d pictures in the library (it paints at night and pauses for visitors)" % (state, n),
+           "" if state == "active" else "sudo systemctl restart infinite-jest-bankgen")
+
+
+def check_network():
+    rc, out = run(["ip", "-4", "-br", "addr"])
+    lines = {l.split()[0]: l for l in out.splitlines() if l.strip()} if rc == 0 else {}
+    where = [ifc for ifc, l in lines.items() if (SHOW_ADDR + "/") in l]
+    carrier = read("/sys/class/net/eth0/carrier") == "1"
+    if where:
+        report("ok", "Show address", "%s on %s" % (SHOW_ADDR, ", ".join(where)))
+    else:
+        report("bad", "Show address", "the Pi doesn't have %s, so the phone can't find it" % SHOW_ADDR,
+               "Ethernet cable from the Pi to a numbered LAN port on the Linksys (not 'Internet').\n"
+               "Then: sudo systemctl restart ij-netguard. Still bad: sudo ij-network --apply")
+    if carrier:
+        report("ok", "Ethernet cable", "plugged in, link up")
+    else:
+        report("warn", "Ethernet cable", "no link", "Plug the Pi into LAN port 1-4 of the Linksys (Wi-Fi fallback is slower).")
+    if ping(ROUTER):
+        report("ok", "Router", "Linksys at %s answers" % ROUTER)
+    else:
+        report("bad", "Router", "nothing answers at %s" % ROUTER,
+               "Is the Linksys powered (lights on)? Is the Pi's cable in a LAN port? See LINKSYS.md for its settings.")
+
+
+def check_wifi_channels():
+    """How crowded are channels 1, 6 and 11 here? (pick the quietest on the Linksys)"""
+    rc, out = run(["nmcli", "-t", "-f", "SSID,CHAN,SIGNAL", "device", "wifi", "list", "--rescan", "auto"], timeout=15)
+    if rc != 0 or not out:
+        return
+    load = {1: 0.0, 6: 0.0, 11: 0.0}
+    show_chan = None
+    for line in out.splitlines():
+        parts = line.rsplit(":", 2)
+        if len(parts) != 3:
+            continue
+        ssid, chan, sig = parts
+        try:
+            chan, sig = int(chan), int(sig)
+        except ValueError:
+            continue
+        if chan > 14:
+            continue  # 5 GHz doesn't disturb the N900
+        if ssid.replace("\\:", ":") == "infinitejest":
+            show_chan = chan
+            continue
+        for k in load:
+            if abs(chan - k) <= 4:
+                load[k] += sig / 100.0 * (1 - abs(chan - k) / 5.0)
+    best = min(load, key=load.get)
+    detail = "busy-ness: ch 1 = %.1f, ch 6 = %.1f, ch 11 = %.1f" % (load[1], load[6], load[11])
+    if show_chan is None:
+        report("info", "Wi-Fi channels", detail + "; quietest is %d" % best)
+    elif load.get(show_chan, 0) - load[best] > 1.0:
+        report("warn", "Wi-Fi channels", detail + "; the show Wi-Fi is on %d" % show_chan,
+               "On the Linksys (Wireless > Basic Wireless Settings) set Standard Channel to %d." % best)
+    else:
+        report("ok", "Wi-Fi channels", detail + "; the show Wi-Fi is on %d, fine" % show_chan)
+
+
+def check_watchdog():
+    svc = service("ij-watchdog")
+    if svc and svc.get("ActiveState") == "active":
+        report("ok", "Watchdog", "watching the show (restarts it if it freezes, black screen meanwhile)")
+    else:
+        report("warn", "Watchdog", "not running", "sudo systemctl enable --now ij-watchdog")
+
+
+def main():
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(__doc__)
+        return 0
+    if "--sound" in args:
+        sound_test()
+        return 0
+    global COLOR
+    as_json = "--json" in args
+    if as_json:
+        COLOR = False
+        sys.stdout = open(os.devnull, "w")
+    fix = "--fix" in args
+    print(c("1", "INFINITE JEST doctor") + "  " + time.strftime("%a %d %b %H:%M"))
+    model = read("/proc/device-tree/model").rstrip("\x00")
+    if model:
+        print(c("2", model))
+    check_power()
+    check_heat()
+    check_disk()
+    check_projector()
+    check_sound(fix=fix)
+    st = check_engine()
+    check_phone(st)
+    check_llm()
+    check_images()
+    check_network()
+    check_wifi_channels()
+    check_watchdog()
+    bad = [r for r in RESULTS if r["status"] == "bad"]
+    warn = [r for r in RESULTS if r["status"] == "warn"]
+    if as_json:
+        sys.stdout = sys.__stdout__
+        print(json.dumps({"ok": not bad, "results": RESULTS}, indent=2))
+    else:
+        print()
+        if not bad and not warn:
+            print(c("32;1", "Everything looks ready. Have a good show."))
+        elif not bad:
+            print(c("33;1", "Ready, with %d note%s above." % (len(warn), "" if len(warn) == 1 else "s")))
+        else:
+            print(c("31;1", "%d problem%s to fix (top to bottom; the first one often causes the rest)." % (
+                len(bad), "" if len(bad) == 1 else "s")))
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

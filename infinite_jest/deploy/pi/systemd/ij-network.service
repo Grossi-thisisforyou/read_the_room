@@ -1,0 +1,15 @@
+# At boot: if infinitejest-network.txt on the SD card's boot drive was edited
+# (for example on the Mac), apply the new settings.
+[Unit]
+Description=Infinite Jest network settings from the boot drive
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ij-network --boot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

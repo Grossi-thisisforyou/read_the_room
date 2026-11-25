@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""ij-watchdog: keep the show alive, unattended, for days.
+
+Runs as the ij-watchdog service. Every 5 seconds it looks at the show and:
+  * restarts the engine if it stops answering or its picture freezes
+    (systemd's own watchdog catches a frozen frame loop within 20 s; this
+    also catches a stuck web server and a crash loop that systemd gave up on),
+  * restarts the language model if it stops answering,
+  * pauses the image generator if memory runs low,
+  * points the show's sound at the USB sound card by its name as soon as one
+    is plugged in (card numbers change between boots; names don't),
+  * once a night (06:00 by default), restarts the engine while the room is
+    empty, so a five-day run starts every morning fresh.
+
+While the engine is down the projector shows black: the Pi's text console is
+parked on an empty screen (see ij-blackout), so no text or login prompt ever
+reaches the wall. Everything it does is logged: journalctl -u ij-watchdog
+"""
+
+import glob
+import json
+import os
+import pwd
+import re
+import subprocess
+import time
+import urllib.request
+
+ENGINE = "http://127.0.0.1:8765/status"
+LLM = "http://127.0.0.1:8080/health"
+TICK = 5
+GRACE = 60            # seconds after (re)start before we judge the engine
+FROZEN_AFTER = 15     # last_frame_ts older than this = frozen
+DEAD_AFTER = 30       # no /status answer for this long = hung
+LLM_DEAD_AFTER = 60
+FRESH_START_HOUR = int(os.environ.get("IJ_FRESH_START_HOUR", "6"))   # -1 = never
+LOW_MEM_MB = 600
+STATE_FILE = "/run/ij-watchdog.json"
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def sh(*cmd, timeout=30):
+    try:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=timeout).stdout.decode("utf-8", "replace").strip()
+    except Exception as e:
+        return str(e)
+
+
+def props(unit):
+    out = sh("systemctl", "show", unit, "--property=ActiveState,SubState,LoadState,ActiveEnterTimestampMonotonic")
+    return dict(l.split("=", 1) for l in out.splitlines() if "=" in l)
+
+
+def get(url, timeout=2.0):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
+def uptime_of(p):
+    try:
+        t = int(p.get("ActiveEnterTimestampMonotonic", "0"))
+    except ValueError:
+        return 0
+    if t <= 0:
+        return 0
+    return time.monotonic() - t / 1e6
+
+
+def mem_available_mb():
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return 99999
+
+
+def show_user_home():
+    for u in ("pi",):
+        try:
+            return pwd.getpwnam(u).pw_dir
+        except KeyError:
+            pass
+    try:
+        return pwd.getpwuid(1000).pw_dir
+    except KeyError:
+        return "/home/pi"
+
+
+ENGINE_TOML = os.environ.get("IJ_CONFIG") or os.path.join(show_user_home(), ".config", "infinite-jest", "engine.toml")
+
+
+def usb_cards():
+    out = []
+    try:
+        for line in open("/proc/asound/cards"):
+            m = re.match(r"\s*(\d+)\s+\[(\S+)\s*\]:\s*USB-Audio", line)
+            # only cards that can PLAY: a USB microphone has capture only (pcm0c)
+            if m and glob.glob("/proc/asound/card%s/pcm*p" % m.group(1)):
+                out.append(m.group(2))
+    except OSError:
+        pass
+    return out
+
+
+def card_present(name):
+    try:
+        return any(re.match(r"\s*\d+\s+\[%s\s*\]" % re.escape(name), l) for l in open("/proc/asound/cards"))
+    except OSError:
+        return False
+
+
+def pick_audio(cur, cards):
+    """New audio_device value, or None to leave it.
+
+    Changes it only when it can't be right: "default" (HDMI on a Pi), a card
+    number (plughw:1,0 moves between boots), or a named card that isn't
+    plugged in while another USB card is. Anything else was set by hand.
+    """
+    if not cards:
+        return None
+    named = re.search(r"CARD=([^,]+)", cur)
+    if named and (named.group(1) in cards or card_present(named.group(1))):
+        return None     # a card chosen by name that is there (USB or HDMI): leave it
+    if not (cur in ("", "default") or named or re.match(r"^(plug)?hw:\d", cur)):
+        return None
+    return "plughw:CARD=%s,DEV=0" % cards[0]
+
+
+class Watch:
+    def __init__(self):
+        self.engine_silent_since = None
+        self.llm_silent_since = None
+        self.failed_backoff = 10
+        self.next_failed_try = 0
+        self.fresh_done_day = None
+        self.bankgen_paused = False
+        self.events = []
+        self.next_audio_check = 0
+
+    def event(self, msg):
+        log(msg)
+        self.events = (self.events + [time.strftime("%H:%M:%S ") + msg])[-20:]
+
+    def restart(self, unit, why):
+        self.event("restarting %s: %s" % (unit, why))
+        sh("systemctl", "reset-failed", unit)
+        sh("systemctl", "restart", unit, timeout=60)
+
+    def engine(self):
+        p = props("infinite-jest")
+        if p.get("LoadState") != "loaded":
+            return
+        state = p.get("ActiveState")
+        now = time.monotonic()
+        # "failed" = crashed so often that systemd gave up. A show stopped on
+        # purpose (sudo systemctl stop infinite-jest) is "inactive": left alone.
+        if state == "failed":
+            if now >= self.next_failed_try:
+                self.restart("infinite-jest", "it had stopped (%s); next try in %ds if it fails again" % (state, self.failed_backoff))
+                self.next_failed_try = now + self.failed_backoff
+                self.failed_backoff = min(self.failed_backoff * 2, 300)
+            return
+        if state != "active":
+            return
+        if uptime_of(p) < GRACE:
+            return
+        if uptime_of(p) > 600:
+            self.failed_backoff = 10   # stable again
+        st = get(ENGINE)
+        if st is None:
+            self.engine_silent_since = self.engine_silent_since or now
+            if now - self.engine_silent_since > DEAD_AFTER:
+                self.restart("infinite-jest", "no answer on port 8765 for %ds" % DEAD_AFTER)
+                self.engine_silent_since = None
+            return
+        self.engine_silent_since = None
+        lf = st.get("last_frame_ts")
+        if lf and time.time() - lf > FROZEN_AFTER:
+            self.restart("infinite-jest", "picture frozen for %ds" % (time.time() - lf))
+            return
+        # once-a-night fresh start, only while nobody is in the room
+        day = time.strftime("%Y-%m-%d")
+        if FRESH_START_HOUR >= 0 and time.localtime().tm_hour == FRESH_START_HOUR and \
+                self.fresh_done_day != day and st.get("phase") in ("idle", None) and uptime_of(p) > 3600:
+            self.fresh_done_day = day
+            self.restart("infinite-jest", "nightly fresh start (room empty)")
+
+    def llm(self):
+        p = props("llama-server")
+        if p.get("LoadState") != "loaded" or p.get("ActiveState") != "active" or uptime_of(p) < 120:
+            self.llm_silent_since = None
+            return
+        h = get(LLM, timeout=3)
+        now = time.monotonic()
+        if h is None:
+            self.llm_silent_since = self.llm_silent_since or now
+            if now - self.llm_silent_since > LLM_DEAD_AFTER:
+                self.restart("llama-server", "no answer for %ds" % LLM_DEAD_AFTER)
+                self.llm_silent_since = None
+        else:
+            self.llm_silent_since = None
+
+    def memory(self):
+        mb = mem_available_mb()
+        p = props("infinite-jest-bankgen")
+        if p.get("LoadState") != "loaded":
+            return
+        if mb < LOW_MEM_MB and p.get("ActiveState") == "active":
+            self.event("memory low (%d MB free): pausing the image generator" % mb)
+            sh("systemctl", "stop", "infinite-jest-bankgen")
+            self.bankgen_paused = True
+        elif self.bankgen_paused and mb > LOW_MEM_MB * 4:
+            self.event("memory fine again (%d MB): image generator back on" % mb)
+            sh("systemctl", "start", "infinite-jest-bankgen")
+            self.bankgen_paused = False
+
+    def audio(self):
+        """'default' (= HDMI on a Pi) or a card that's gone -> the USB card, by name."""
+        if time.monotonic() < self.next_audio_check:
+            return
+        self.next_audio_check = time.monotonic() + 30
+        cards = usb_cards()
+        if not cards:
+            return
+        try:
+            text = open(ENGINE_TOML).read()
+        except OSError:
+            return
+        m = re.search(r'(?m)^\s*audio_device\s*=\s*"([^"]*)"', text)
+        cur = m.group(1) if m else "default"
+        want = pick_audio(cur, cards)
+        if not want:
+            return
+        if m:
+            text = text[:m.start(1)] + want + text[m.end(1):]
+        elif re.search(r"(?m)^\[audio\]\s*$", text):
+            text = re.sub(r"(?m)^\[audio\]\s*$", '[audio]\naudio_device = "%s"' % want, text, count=1)
+        else:
+            text += '\n[audio]\naudio_device = "%s"\n' % want
+        st = os.stat(ENGINE_TOML)
+        with open(ENGINE_TOML, "w") as f:
+            f.write(text)
+        os.chown(ENGINE_TOML, st.st_uid, st.st_gid)
+        self.restart("infinite-jest", "sound now goes to the USB sound card %s (was %s)" % (cards[0], cur))
+
+    def save(self):
+        try:
+            with open(STATE_FILE, "w") as f:
+                json.dump({"ts": time.time(), "events": self.events}, f)
+        except OSError:
+            pass
+
+    def loop(self):
+        log("ij-watchdog: watching infinite-jest, llama-server, memory (every %ds)" % TICK)
+        while True:
+            for fn in (self.audio, self.engine, self.llm, self.memory):
+                try:
+                    fn()
+                except Exception as e:   # the watchdog itself must never die
+                    log("watchdog check failed: %r" % e)
+            self.save()
+            time.sleep(TICK)
+
+
+if __name__ == "__main__":
+    Watch().loop()
