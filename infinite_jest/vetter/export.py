@@ -59,27 +59,28 @@ def _walk(node, found, ts=None):
 
 
 def _files(path):
+    """(name, loader) pairs. A file's bytes are read only when its loader is called."""
     if os.path.isdir(path):
         for base, _, names in os.walk(path):
             for n in names:
                 if n.endswith(".json"):
                     full = os.path.join(base, n)
-                    with open(full, "rb") as f:
-                        yield os.path.relpath(full, path), f.read()
+                    yield os.path.relpath(full, path), (lambda f=full: open(f, "rb").read())
     else:
-        with zipfile.ZipFile(path) as z:
-            for n in z.namelist():
-                if n.endswith(".json"):
-                    yield n, z.read(n)
+        z = zipfile.ZipFile(path)
+        for n in z.namelist():
+            if n.endswith(".json"):
+                yield n, (lambda n=n: z.read(n))
 
 
 def read(path):
     """{'posts': [(text, year)], 'counts': {...}, 'themes': {...}} from a download zip or folder."""
     posts, names, counts = [], [], {"posts": 0, "comments": 0, "likes": 0, "follows": 0}
-    for name, raw in _files(path):
+    for name, load in _files(path):
         kind = _kind(name)
         if not kind:
-            continue
+            continue            # decided by the file's name alone: messages and follower lists stay unread
+        raw = load()
         try:
             found = []
             _walk(json.loads(raw.decode("utf-8", "replace")), found)

@@ -159,6 +159,22 @@ class Export(unittest.TestCase):
         self.assertNotIn("dance_archive", blob)         # names of followed accounts are not kept
         self.assertEqual(data["social"]["counts"]["follows"], 2)
 
+    def test_message_files_are_never_read_from_the_zip(self):
+        from infinite_jest.vetter import export
+        opened = []
+        real = export._files
+
+        def spy(path):
+            for name, load in real(path):
+                yield name, (lambda n=name, l=load: (opened.append(n), l())[1])
+        export._files = spy
+        try:
+            export.read(self.make())
+        finally:
+            export._files = real
+        self.assertTrue(opened)
+        self.assertFalse([n for n in opened if "messages" in n or "inbox" in n])
+
 
 class Search(unittest.TestCase):
     def test_bot_check_is_logged_as_blocked(self):
