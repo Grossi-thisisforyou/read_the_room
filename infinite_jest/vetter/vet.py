@@ -20,7 +20,7 @@ def _tokens(hints):
     return [h.lower() for h in re.findall(r"[\wÀ-ſ]{3,}", " ".join(hints))]
 
 
-def same_person(name, text, hints, trusted):
+def same_person(name, text, hints, trusted, cited=False):
     """A page counts only if it names the person in full and matches something they told us."""
     if trusted:
         return True
@@ -28,6 +28,8 @@ def same_person(name, text, hints, trusted):
     first, last = name.lower().split()[0], name.lower().split()[-1]
     if not re.search(re.escape(first) + r"\W+(?:\w+\W+){0,2}" + re.escape(last), low):
         return False
+    if cited:        # a page the person's own Wikipedia article cites, naming them in full
+        return True
     return any(h in low for h in _tokens(hints))
 
 
@@ -56,9 +58,11 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
 
     # 1. find pages: the guest's own links first, then Wikipedia, then search
     wiki = web.wikipedia(name)
-    found = list(urls) + wiki
+    found, cited = list(urls) + wiki, set()
     for article in wiki:
-        found += getattr(web, "wikipedia_sources", lambda u: [])(article)
+        links = getattr(web, "wikipedia_sources", lambda u: [])(article)
+        cited.update(links)
+        found += links
     for q in [f'"{name}"'] + [f'"{name}" {h}' for h in hints[:3]] + [f'"{name}" interview']:
         found += web.search(q)
     seen, pages, skipped = set(), [], []
@@ -72,15 +76,21 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
         seen.add(key)
         if len(pages) >= MAX_PAGES:
             break
+        if rules.excluded_topic(re.sub(r"[-_/+.%]", " ", urllib.parse.urlsplit(url).path)):
+            web.log.append(("a page", "skipped (its address names an excluded topic)"))
+            continue
         got = web.page(url)
         if not got:
             continue
         title, text = got
+        if rules.excluded_topic(title):
+            web.log[-1] = ("a page", "skipped (its title names an excluded topic)")
+            continue
         host = urllib.parse.urlsplit(url).netloc
         if host in own:   # read the rest of the guest's own site, one level deep
             found[found.index(url) + 1:found.index(url) + 1] = getattr(web, "links", {}).get(url, [])[:6]
         trusted = host in own or "wikipedia.org" in host and name.lower() in title.lower()
-        if not same_person(name, title + "\n" + text, hints, trusted):
+        if not same_person(name, title + "\n" + text, hints, trusted, url in cited):
             skipped.append(url)
             continue
         pages.append({"url": url, "title": title, "text": text, "own": host in own})
@@ -123,9 +133,10 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
                     continue
                 cues.append({"trait": trait, "dir": direction, "weight": w, "kind": kind, "year": year,
                              "source": p["url"], "text": s[:200]})
-            if kind == "self" and len(s) < 240:
+            marks = len(re.findall("[\"\u201c\u201d\u201e\u00ab\u00bb]", s))
+            if kind == "self" and len(s) < 240 and (p["own"] or marks >= 2):
                 quotes.append({"text": s, "year": year, "source": p["url"]})
-            elif kind == "observer" and year and len(s) < 240:
+            elif kind == "observer" and year and 60 <= len(s) < 240 and not any(f["year"] == year and f["text"][:40] == s[:40] for f in facts):
                 facts.append({"text": s, "year": year, "source": p["url"]})
 
     # 2b. the person's own platform download, if they handed one over

@@ -179,6 +179,18 @@ class Search(unittest.TestCase):
         self.assertTrue(data["thin"])
 
 
+class Topics(unittest.TestCase):
+    def test_a_page_whose_address_names_a_topic_is_never_opened_or_listed(self):
+        w = FakeWeb()
+        bad = "https://gossip.example/stars/mara-lindqvist-bankrupt-and-in-therapy.html"
+        w.pages[bad] = PRESS
+        w.search = lambda q, n=8: [bad]
+        data, md = vet.vet("Mara Lindqvist", w, hints=["Malmo"], urls=["https://mara.example/"], booked="2026-12-01",
+                           root=tempfile.mkdtemp(), today=datetime.date(2026, 11, 25))
+        self.assertNotIn("bankrupt", json.dumps(data) + md)
+        self.assertNotIn(bad, data["sources"])
+
+
 class Store(unittest.TestCase):
     def test_files_are_private_and_deletable(self):
         data, _, root, _ = run()

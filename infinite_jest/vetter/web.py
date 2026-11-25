@@ -181,7 +181,8 @@ class Web:
             if u.startswith("//"):
                 u = "https:" + u
             if (u.startswith("http") and not blocked(u) and not u.lower().endswith(NOT_PAGES)
-                    and not any(k in u for k in ("archive.org", "wikimedia.org", "wikidata.org", "d-nb.info", "viaf.org"))):
+                    and not any(k in u for k in ("archive.org", "wikimedia.org", "wikidata.org", "d-nb.info", "viaf.org", "toolforge.org",
+                                              ".invalid", "lobid.org", "gnd.network", "bsz-bw.de", "/gnd/", "loc.gov", "isni.org"))):
                 out.append(u)
         self.log.append(("wikipedia sources", f"{len(out)} links"))
         return out[:n]

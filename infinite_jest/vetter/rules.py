@@ -43,7 +43,8 @@ EXCLUDED = {
     "immigration": r"\b(visa|asylum|refugee|undocumented|immigration status|green card|deport\w*|citizenship|"
                    r"aufenthalt\w*|asyl\w*)\b",
     "finances": r"\b(salary|income|debt|bankrupt\w*|net worth|earn(s|ed|ing)?|mortgage|poverty|welfare|"
-                r"gehalt|schulden|armut\w*|insolven\w*)\b",
+                r"gehalt|schulden|armut\w*|insolven\w*|homeless\w*|obdachlos\w*|dumpster\w*|m(\u00fc|ue)llcontainer\w*|"
+                r"broke|penniless|pleite)\b",
     "family": r"\b(mother|father|parents?|brother|sister|son|daughter|wife|husband|spouse|partner|girlfriend|"
               r"boyfriend|grand(mother|father|parents?)|uncle|aunt|cousin|child(ren)?|"
               r"mutter|vater|eltern|bruder|schwester|sohn|tochter|ehefrau|ehemann|freundin|groß\w+|kind(er)?)\b",
