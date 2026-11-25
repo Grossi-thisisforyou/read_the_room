@@ -77,6 +77,8 @@ class Engine:
         self.listen = Listen(room)      # the room answers a voice (level and voiced only)
         self._heard_line: str | None = None
         self.state_hooks: list = []
+        self.answer_hooks: list = []         # shows that want the visitor's typed words (kept in memory only)
+        self.control_hooks: dict = {}        # extra control-page commands: name -> function(arg)
         self.demo_until = 0.0
         self.machine = VisitMachine(VisitConfig(**_dataclass_kwargs(VisitConfig, cfg.get("visit", {}))), now)
         self.fallback = FallbackProfiler()
@@ -130,6 +132,7 @@ class Engine:
             if self.machine.visit.opted_out:
                 return   # opted out: their words go nowhere
             self.machine.on_answer(str(d.get("text", "")))
+            self._answered(str(d.get("text", "")))
             self._to_remote_profiler(msg)
         elif t == P.PHONE:
             if role in ("profiler", "control"):
@@ -192,8 +195,10 @@ class Engine:
             self.sensor["touch"] = {"x": d["x"], "y": d["y"]}
         elif kind == "keys" and not self.machine.visit.opted_out:
             self.machine.on_answer(str(d.get("text", "")))
+            self._answered(str(d.get("text", "")))
         elif kind == "choice" and not self.machine.visit.opted_out:
             self.machine.on_answer(str(d.get("option", "")))
+            self._answered(str(d.get("option", "")))
         elif kind == "optout" or (kind == "phone" and d.get("optout") is True):
             self._opt_out(now)   # the phone saw its sensor covered: works with or without a profiler
         self.presence.feed(d, now)       # still needed after an opt-out: to see them leave
@@ -287,6 +292,13 @@ class Engine:
         self.last_frame = rgb            # the newest camera picture, in memory only; gone at the wipe
         plugins.call(self.visuals, "on_frame", rgb)
 
+    def _answered(self, text: str) -> None:
+        for hook in self.answer_hooks:
+            try:
+                hook(text)
+            except Exception:
+                plugins.report(log, "answer-hook", "an answer hook failed")
+
     def _on_control(self, d: dict, now: float) -> None:
         cmd, arg = d.get("cmd"), d.get("arg")
         log.info("control: %s %s", cmd, "" if arg is None else arg)
@@ -296,6 +308,11 @@ class Engine:
             self.demo_until = now + float(self.cfg.get("demo_s", 300.0)) if on else 0.0
             if not on:
                 self.presence.reset()
+        elif cmd in self.control_hooks:
+            try:
+                self.control_hooks[cmd](arg)
+            except Exception:
+                plugins.report(log, "control-hook", "a control command failed")
         elif cmd == "wipe":
             self.machine.force("wipe", now)
         elif cmd == "next":

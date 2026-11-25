@@ -62,6 +62,17 @@ for w in sys.argv[2:]:
 PY
   then say "natural voice program: installed"; else say "!! natural voice program did not unpack"; fi
 fi
+# speech to text (faster-whisper): unpacked with the same wheels; the model folder comes from the Mac
+# into ~/models/whisper/<name>/ (model.bin, config.json, tokenizer.json, vocabulary.*)
+sudo -u "$WHO" mkdir -p "$H/models/whisper"
+if [[ -d $OFF/whisper ]]; then sudo -u "$WHO" cp -rn "$OFF"/whisper/* "$H/models/whisper/" 2>/dev/null; fi
+if ls "$H"/models/whisper/*/model.bin >/dev/null 2>&1; then
+  if sudo -u "$WHO" python3 "$HERE_DIR/../pi/tools/hear_check.py" 2>/dev/null | tail -1 | grep -q "^ok"
+  then say "speech to text: ok ($(ls "$H/models/whisper" | head -1))"
+  else say "!! speech to text did not pass its check (run pi/tools/hear_check.py to see why); the room only hears that someone speaks"; fi
+else
+  say "speech to text: no model in ~/models/whisper yet (the room only hears that someone speaks)"
+fi
 sudo -u "$WHO" mkdir -p "$H/voices"
 if ls "$OFF"/voices/*.onnx >/dev/null 2>&1; then sudo -u "$WHO" cp -n "$OFF"/voices/*.onnx "$OFF"/voices/*.onnx.json "$H/voices/" 2>/dev/null; fi
 if ls "$H"/voices/*.onnx >/dev/null 2>&1; then

@@ -50,6 +50,8 @@ def main():
     ap.add_argument("--mood", help="force the mood of the day")
     ap.add_argument("--footage", help="folder with clips (the family footage, or a stand-in)")
     ap.add_argument("--paintings", help="folder with paintings (the Pi paints its own)")
+    ap.add_argument("--stranger", action="store_true", help="the unknown-visitor fork: no guest file, a pretend camera, spoken answers")
+    ap.add_argument("--camera", help="a picture or clip to stand in for the room's camera (with --stranger)")
     ap.add_argument("--states", help="write the show state per frame here (to render the music afterwards)")
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--models")
@@ -68,6 +70,9 @@ def main():
         over["duet"]["models_dir"] = a.models
     if a.mood:
         over["duet"]["mood"] = a.mood
+    over["duet"]["speech_to_text"] = False
+    if a.stranger:
+        over["duet"]["guest"] = ""
     cfg = config.load(None, over)
     clock = Clock()
     audio = SayLog(clock)
@@ -89,6 +94,12 @@ def main():
     dt = 1.0 / a.fps
     rng = np.random.default_rng(3)
     n = int(a.seconds * a.fps)
+    cam = None
+    if a.stranger and a.camera:
+        cam = pygame.surfarray.array3d(pygame.transform.smoothscale(pygame.image.load(a.camera), (320, 240))).swapaxes(0, 1)
+    answers = ["a small town. you would not know it.", "", "my grandmother, i think.", "i left my phone outside.",
+               "", "nobody. i came alone.", "the kitchen, in the morning.", "not really.", "i used to sing."]
+    answered = set()
     for i in range(n):
         t = i * dt
         clock.t = 1000.0 + t
@@ -101,6 +112,14 @@ def main():
         data = {"kind": "phone", "motion": (0.25 + 0.2 * rng.random()) if here else 0.0,
                 "audio": {"level": 0.5 if voiced else 0.0, "voiced": voiced}}
         eng.handle(P.make(P.SENSOR, data), "phone")
+        if a.stranger:
+            if cam is not None and here:                 # the pretend camera: the same picture, a little alive
+                eng.last_frame = np.clip(cam.astype(np.int16) + rng.integers(-12, 12, cam.shape), 0, 255).astype(np.uint8)
+            if here and q and id(q) not in answered and clock.t >= q["from"] + 3.0:
+                answered.add(id(q))                      # what speech recognition would hand over
+                txt = answers[(len(answered) - 1) % len(answers)]
+                if txt:
+                    duet.on_answer(txt)
         if duet.wall is not None and clock.t >= next_wall:
             duet.wall.push(duet.wall.make(1.0 / duet.wall.fps), clock.t)
             next_wall = clock.t + 1.0 / duet.wall.fps

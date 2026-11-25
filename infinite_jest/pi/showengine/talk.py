@@ -46,6 +46,20 @@ QUESTIONS = [
     "are you here alone?", "what did you almost say just now?",
     "where is home, if you had to point?", "who is missing from your pictures?",
     "can you say your own name out loud?", "what are you afraid i already know?",
+    "what should i call you?", "where were you born?", "who sent you here?",
+    "what do you do when nobody needs you?", "what is the last picture you took?",
+    "who would recognise you from behind?", "what did you want to be, as a child?",
+    "what would i find if i looked you up?", "which room do you still dream of?",
+    "what is your oldest photograph of?", "who do you call when it is late?",
+    "what do you never post?",
+]
+
+# to someone the room has no file on
+STRANGER = [
+    "i do not know you. nobody told me you were coming.", "there is no file on you. i will have to ask.",
+    "you are not on my list. stay anyway.", "i have nothing on you. that is rare.",
+    "a stranger. i had almost forgotten what that is.", "i was built for someone else. you will do.",
+    "no name, no pictures, nothing. tell me yourself.", "you came without a file. i will make one while we talk.",
 ]
 
 # after a question: the visitor said nothing / a little / a lot
@@ -74,6 +88,15 @@ REPLIES = {
 }
 
 
+# when the words were understood (typed, or speech to text): hand them back
+HEARD_WORDS = [
+    "{t}. i will keep that until you leave.", "you said: {t}. say more.", "{t}. i believe you.",
+    "{t}. nobody in the footage ever said that.", "i heard: {t}. it changes the picture.",
+    "{t}. i did not expect that.", "so: {t}. i am building with it.", "{t}. that is going on the wall.",
+    "{t}. and before that?", "{t}. i wondered.",
+]
+
+
 class Reserve:
     """Draws lines without ever returning one that is in `used` (normalised text)."""
 
@@ -96,6 +119,16 @@ class Reserve:
 
     def reply(self, kind: str, used: set) -> str | None:
         return self._fresh(REPLIES.get(kind, REPLIES["none"]), used)
+
+    def heard(self, text: str, used: set) -> str | None:
+        """An answer that gives the visitor's own words back (they are new every time)."""
+        t = " ".join(text.lower().split()).strip(" .,!?")[:60]
+        tries = [x.format(t=t) for x in HEARD_WORDS]
+        self.rng.shuffle(tries)
+        for line in tries:
+            if norm(line) not in used:
+                return line
+        return None
 
     def _fresh(self, pool: list[str], used: set) -> str | None:
         left = [x for x in pool if norm(x) not in used]

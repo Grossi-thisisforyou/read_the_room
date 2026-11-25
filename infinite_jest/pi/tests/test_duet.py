@@ -34,6 +34,7 @@ def duet_engine(**cfg):
     eng, clock, sent = make_engine(audio=audio)
     import tempfile
     eng.cfg["duet"] = {"models_dir": "/nonexistent", "guest": "", "mood": "calm", "footage_dirs": [],
+                       "speech_to_text": False,
                        "mood_file": os.path.join(tempfile.mkdtemp(), "mood.json"), **cfg}
     eng.machine.cfg.release_time, eng.machine.cfg.wipe_time, eng.machine.cfg.max_visit = 40.0, 8.0, 1e9
     duet = Duet(eng.cfg, eng)
@@ -69,7 +70,8 @@ def test_tv_wakes_after_45_seconds_and_says_hello():
     assert duet.tv in ("hello", "face") and audio.said[0] == "hello."
     run(eng, clock, 60, HERE_DATA)
     assert duet.tv == "face" and duet.progress == 0.0       # pieces first; the face comes later
-    assert len(audio.said) >= 2 and audio.said[1] == duet.mood["today"]
+    from showengine import talk
+    assert len(audio.said) >= 2 and audio.said[1] in talk.STRANGER     # no guest file: it says so
 
 
 def test_the_face_comes_late_and_in_bursts_and_the_visit_never_resets():
@@ -465,3 +467,147 @@ def test_the_tide_builds_peaks_ebbs_and_builds_again():
     assert len(peaks) >= 3 and len(lows) >= 2
     assert max(arc) > 0.7 and min(arc[12:]) < 0.15
     assert 0.2 <= eng.state["intensity"] <= 0.95
+
+
+def guest_dir(tmp_path, monkeypatch, gid="007"):
+    from showengine import duet as D
+    g = tmp_path / "guests" / "kim"
+    (g / "img").mkdir(parents=True)
+    (g / "guest.json").write_text(json_dumps({"guest_id": gid, "name_spoken": "Kim", "delete_after": "2099-01-01",
+                                              "address": ["you came back, kim."], "themes": ["leaving"]}))
+    (g / "talk.json").write_text(json_dumps({"lines": ["you packed twice."], "questions": ["what did you pack?"],
+                                             "facts": ["they moved eleven times"]}))
+    monkeypatch.setattr(D, "IJ", str(tmp_path))
+
+
+def json_dumps(x):
+    import json
+    return json.dumps(x)
+
+
+def test_two_forks_vetted_guest_and_stranger(tmp_path, monkeypatch):
+    from showengine import talk
+    guest_dir(tmp_path, monkeypatch)
+    eng, clock, duet, audio = duet_engine(guest="007")
+    assert duet.fork == "vetted" and duet.status()["fork"] == "vetted"
+    run(eng, clock, 150, HERE_DATA)
+    assert audio.said[0] == "hello, kim." and "you came back, kim." in audio.said
+    assert not set(audio.said) & set(talk.STRANGER)
+    assert "they moved eleven times" in duet._facts()
+    # the control page says: the next one is unknown. Not in the middle of this visit.
+    eng.handle(P.make(P.CONTROL, {"cmd": "guest", "arg": None}), "control")
+    assert duet.fork == "vetted" and duet.status()["next_guest"] == "unknown"
+    run(eng, clock, 70, EMPTY)
+    assert eng.machine.phase == "idle" and duet.fork == "stranger"
+    n = len(audio.said)
+    run(eng, clock, 150, HERE_DATA)
+    new = audio.said[n:]
+    assert new[0] == "hello." and new[1] in talk.STRANGER and "kim" not in " ".join(new).lower()
+    assert sum(x.endswith("?") for x in new) >= 2                    # it asks, because it knows nothing
+    assert duet.face_dreamer is None and duet.collage.paths == []
+    run(eng, clock, 70, EMPTY)
+    eng.handle(P.make(P.CONTROL, {"cmd": "guest", "arg": "007"}), "control")
+    assert duet.fork == "vetted"                                     # empty room: at once
+    eng.handle(P.make(P.CONTROL, {"cmd": "guest", "arg": "nobody-has-this-id"}), "control")
+    assert duet.fork == "stranger"
+
+
+def test_a_stranger_shapes_the_show_by_answering_and_nothing_is_kept():
+    eng, clock, duet, audio = duet_engine(mood="calm")
+    eng.last_frame = np.random.default_rng(1).integers(0, 255, (120, 160, 3), dtype=np.uint8)
+    run(eng, clock, 50, HERE_DATA)
+    day = dict(duet.day_mood)
+    seen_prompts = []
+    duet.words.answer = lambda q, kind, guest, mood, **k: seen_prompts.append((q, kind, k))
+    for i in range(4):                                               # four questions, never an answer
+        for _ in range(1500):
+            run(eng, clock, 0.1, HERE_DATA)
+            if duet.asking:
+                break
+        for _ in range(300):
+            if not duet.asking:
+                break
+            run(eng, clock, 0.1, HERE_DATA)
+    assert len(duet.profile) == 4 and all(k == "none" for _, k, _ in duet.profile)
+    assert duet.mood["dark"] > day["dark"] + 0.15 and duet.mood["warm"] < day["warm"]
+    assert eng.state["mood"]["dark"] == duet.mood["dark"]             # the music gets it
+    # now they type an answer on the phone: the words reach the model and come back on the TV
+    for _ in range(1500):
+        run(eng, clock, 0.1, HERE_DATA)
+        if duet.asking:
+            break
+    q = duet.asking["q"]
+    eng.handle(P.make(P.ANSWER, {"text": "my grandmother's kitchen in Kassel"}), "phone")
+    run(eng, clock, 0.3, HERE_DATA)
+    assert not duet.asking and duet.profile[-1] == (q, "long", "my grandmother's kitchen in Kassel")
+    assert seen_prompts[-1][2]["text"] == "my grandmother's kitchen in Kassel"
+    assert duet.echo == ["my grandmother's kitchen in kassel"]
+    assert any("kitchen" in x for x in duet._learned())
+    face = duet._camera_face()
+    assert face is not None and face.shape == (128, 128, 3)
+    run(eng, clock, 90, EMPTY)                                         # they leave
+    assert eng.machine.phase == "idle" and duet.profile == [] and duet.echo == []
+    assert duet.mood == duet.day_mood and eng.last_frame is None
+
+
+def test_the_model_is_told_what_the_stranger_said():
+    from showengine.duet import LiveWords
+    w = LiveWords()
+    seen = []
+    w._run = lambda msgs, front: seen.append(msgs[1]["content"])
+    import threading
+    real = threading.Thread
+    w.answer("where is home?", "short", None, None, text="a boat", learned=["asked who sent you? they stayed silent"])
+    for _ in range(50):
+        if seen:
+            break
+        __import__("time").sleep(0.02)
+    assert "a boat" in seen[0] and "goes deeper" in seen[0] and "stayed silent" in seen[0]
+    text = w._prompt(None, None, None, ["asked where is home? they answered \"a boat\""])[1]["content"]
+    assert "do not know this visitor" in text and "a boat" in text
+    assert "do not know this visitor at all" in w._prompt(None)[1]["content"]
+
+
+def test_spoken_answers_are_understood_on_the_pi_and_only_kept_for_the_visit():
+    import time as T
+    from showengine import hear
+
+    class Seg:
+        def __init__(self, text, p=0.1):
+            self.text, self.no_speech_prob = text, p
+
+    class FakeModel:
+        calls = []
+
+        def transcribe(self, audio, **kw):
+            FakeModel.calls.append((len(audio), kw))
+            return [Seg(" I grew up by the sea."), Seg(" thank you", 0.9)], None
+
+    eng, clock, duet, audio = duet_engine()
+    asked = []
+    duet.hearing = hear.Hearing({}, model=FakeModel(), fetch_fn=lambda s: asked.append(s) or np.zeros(int(16000 * s), np.float32))
+    duet.words.answer = lambda *a, **k: None
+    run(eng, clock, 50, HERE_DATA)
+    for _ in range(1500):
+        run(eng, clock, 0.1, HERE_DATA)
+        if duet.asking:
+            break
+    q = duet.asking["q"]
+    while clock.t < duet.asking["from"] + 0.2:
+        run(eng, clock, 0.1, HERE_DATA)
+    run(eng, clock, 3.0, SPEAKS)
+    for _ in range(100):
+        run(eng, clock, 0.1, HERE_DATA)
+        T.sleep(0.005)
+        if not duet.asking:
+            break
+    assert duet.profile[-1][0] == q and duet.profile[-1][2] == "I grew up by the sea"
+    assert duet.echo == ["i grew up by the sea"]
+    assert 3.0 < asked[0] < 12.0 and FakeModel.calls[0][1]["beam_size"] == 1
+    assert duet.status()["understood"] == 1
+    run(eng, clock, 90, EMPTY)
+    assert duet.profile == [] and duet.echo == []
+    # made-up words on silence are thrown away; without a model it simply does not try
+    assert hear.clean("Thank you.") == "" and hear.clean(" [BLANK_AUDIO] ") == "" and hear.clean("my mother") == "my mother"
+    assert hear.Hearing({"speech_to_text": False}).listen(3, lambda t: None) is False
+    assert hear.fetch(1.0, addr=("127.0.0.1", 9), timeout=0.2) is None
