@@ -801,3 +801,23 @@ def test_alone_both_screens_are_colours_and_not_the_same(tmp_path):
     assert duet.collage.pieces == []                          # nobody there: no pieces, only the colours
     a, b = pygame.surfarray.array3d(tv).astype(int), pygame.surfarray.array3d(wall).astype(int)
     assert a.mean() > 8 and b.mean() > 8 and np.abs(a - b).mean() > 10
+
+
+def test_looking_for_a_hello_has_a_budget_when_the_room_is_noisy():
+    class Ears:
+        busy, heard = False, 0
+        def available(self): return True
+        def warm(self): pass
+        def listen(self, seconds, done):
+            assert seconds <= 6.0
+            done("la la la")
+            return True
+    eng, clock, duet, audio = duet_engine(talk_start="hello")
+    duet.hearing = Ears()
+    loud = {"kind": "phone", "motion": 0.0, "audio": {"level": 0.9, "voiced": False}}
+    run(eng, clock, 120, loud)                                # loud music, no voice: never checked
+    assert duet.cue_checks == 0
+    for i in range(150):                                      # five minutes of voices that never say hello
+        run(eng, clock, 1, SPEAKS)
+        run(eng, clock, 1, EMPTY)
+    assert 3 <= duet.cue_checks <= 12 and not audio.said      # (it was 50 when every sound was checked)

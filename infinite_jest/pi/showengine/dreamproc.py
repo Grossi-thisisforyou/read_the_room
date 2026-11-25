@@ -38,11 +38,12 @@ def _child(conn, kind: str, path: str, fps: float, reach: float) -> None:
     dr = D.Dreamer(dec, fps, reach)
     conn.send(("ready", int(dec.latent)))
     last = time.monotonic()
-    wait = 0.0
+    due = 0.0                                # when the next picture may be made
     while True:
         try:
-            while conn.poll(wait):
-                wait = 0.0
+            # settings arrive all the time; they must never cut the rest short (they did in the
+            # first version: the network then ran flat out, whatever fps and rest said)
+            while conn.poll(max(0.0, due - time.monotonic())):
                 msg = conn.recv()
                 if msg is None:
                     return
@@ -60,7 +61,7 @@ def _child(conn, kind: str, path: str, fps: float, reach: float) -> None:
             return
         t0 = time.monotonic()
         if not dr.active:
-            last, wait = t0, 0.25
+            last, due = t0, t0 + 0.25
             continue
         img = dr.make(t0 - last)
         last = t0
@@ -69,7 +70,7 @@ def _child(conn, kind: str, path: str, fps: float, reach: float) -> None:
             conn.send((img.shape, img.tobytes(), spent * 1000.0))
         except (EOFError, OSError):
             return
-        wait = max(spent * float(dr.rest), 1.0 / max(0.2, float(dr.fps)) - spent)
+        due = time.monotonic() + max(spent * float(dr.rest), 1.0 / max(0.2, float(dr.fps)) - spent)
 
 
 def make(base, kind: str, path: str, fps: float, reach: float = 1.6):
@@ -133,7 +134,8 @@ def make(base, kind: str, path: str, fps: float, reach: float = 1.6):
         def _pump(self) -> None:
             while not self._stop.is_set():
                 try:
-                    now_state = {k: getattr(self, k) for k in KEYS}
+                    now_state = {k: (round(float(getattr(self, k)), 2) if k != "active" else bool(getattr(self, k)))
+                                 for k in KEYS}
                     change = {k: v for k, v in now_state.items() if self._sent.get(k) != v}
                     if self._jolts:
                         change["jolt"] = max(self._jolts)

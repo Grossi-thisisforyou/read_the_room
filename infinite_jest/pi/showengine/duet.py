@@ -411,6 +411,9 @@ class Duet:
         self._cue_last = -1e9
         self._cue_onset = -1e9
         self._cue_checked = -1e9
+        self._cue_misses = 0
+        self.cue_checks = 0                  # how often sound was turned into words to look for a hello
+        self._prof = {"t": time.monotonic(), "n": 0, "update": 0.0, "tv": 0.0, "wall": 0.0, "hear": 0.0, "think": 0.0}
         self._open: dict | None = None       # the opening line that is due as soon as the visit is on
         self._hold_until = 0.0               # it keeps the visit open this long after being spoken to
         self._spoke_until = 0.0              # its own voice is not a visitor
@@ -568,37 +571,46 @@ class Duet:
             self._open = {"line": "hi. who are you?", "ask": True, "t": now}
 
     def _listen_for_hello(self, now: float, fresh: bool) -> None:
-        """A loud sound while nobody is being talked to: three seconds are turned into words, looked
-        at for a greeting, and dropped."""
+        """A voice while nobody is being talked to: a few seconds are turned into words, looked at
+        for a greeting, and dropped.
+
+        Turning sound into words takes two cores for seconds, so this has a strict budget (on
+        2026-11-25 the room's own music set it off every 6 s and the whole show crawled): only a
+        voice sets it off, never mere loudness; the clip is 6 s at most; and every check that finds
+        no greeting doubles the pause before the next one (8 s up to 40 s) until a greeting is found."""
         c = self._cue
+        eng = self.engine
         if c is None:
-            eng = self.engine
             if eng is not None and (getattr(eng, "blackout", False) or getattr(eng.machine.visit, "opted_out", False)):
                 return
-            # a new sound, noticed where the microphone readings come in (not at the pace of the
-            # picture), not its own voice, and not checked more often than every 12 s (it costs CPU)
-            onset = float(getattr(getattr(eng, "listen", None), "onset_t", -1e9)) if eng is not None else -1e9
-            new = onset > self._cue_onset and onset > self._spoke_until
+            onset = float(getattr(getattr(eng, "listen", None), "voice_t", -1e9)) if eng is not None else -1e9
             if onset <= self._spoke_until:
                 self._cue_onset = max(self._cue_onset, onset)       # its own voice: not a visitor
-            if ((new or fresh) and self.tv == "flow" and self._open is None and now > self._spoke_until
-                    and now - self._cue_last > 60.0 and now - self._cue_checked > 6.0
+            new = onset > self._cue_onset
+            gap = min(40.0, 8.0 * 2 ** min(self._cue_misses, 3))
+            if (new and self.tv == "flow" and self._open is None and now > self._spoke_until
+                    and now - self._cue_last > 60.0 and now - self._cue_checked > gap
                     and not self.hearing.busy and self.hearing.available()):
-                self._cue = {"at": max(now, onset + 3.0) if new else now + 3.0, "on": onset if new else now}
-                self._cue_onset = max(self._cue_onset, onset)
+                self._cue = {"at": max(now, onset + 2.5), "on": onset}
+                self._cue_onset = onset
                 self._cue_checked = now
             return
         if "sent" not in c:
             if now >= c["at"]:
                 c["sent"] = True
-                if not self.hearing.listen(min(20.0, max(5.0, now - c["on"] + 2.0)), lambda t, c=c: c.__setitem__("text", t)):
+                self.cue_checks += 1
+                if not self.hearing.listen(min(6.0, max(4.0, now - c["on"] + 1.5)), lambda t, c=c: c.__setitem__("text", t)):
                     self._cue = None
         elif "text" in c:
             self._cue = None
             if GREETING.search(" " + str(c["text"]).lower() + " "):
+                self._cue_misses = 0
                 self._hello(now)
-        elif now > c["at"] + 14.0:
+            else:
+                self._cue_misses += 1
+        elif now > c["at"] + 20.0:
             self._cue = None
+            self._cue_misses += 1
 
     def _camera_covered(self):
         """The camera's picture for the pieces on the TV, with every face under a black block."""
@@ -730,6 +742,33 @@ class Duet:
             plugins.call(eng.audio, "say", text)
 
     def update(self, state: dict, now: float) -> None:
+        t0 = time.perf_counter()
+        try:
+            self._update(state, now)
+        finally:
+            self._profile("update", time.perf_counter() - t0)
+
+    def _profile(self, key: str, spent: float) -> None:
+        """Once a minute one line in the log says where the time of the picture loop goes."""
+        p = self._prof
+        p[key] += spent
+        if key != "update":
+            return
+        p["n"] += 1
+        p["hear"] += 1 if self.hearing.busy else 0
+        p["think"] += 1 if self.words.busy else 0
+        t = time.monotonic()
+        if t - p["t"] >= 60.0 and p["n"]:
+            n, dt = p["n"], t - p["t"]
+            self.profile_line = ("%.1f loops/s; per loop: logic %.0f ms, tv %.0f ms, wall %.0f ms; ears busy %d%%, "
+                                 "thinking %d%%; hello checks %d; wall net %.0f ms; clips %d" % (
+                                     n / dt, p["update"] / n * 1000, p["tv"] / n * 1000, p["wall"] / n * 1000,
+                                     100 * p["hear"] / n, 100 * p["think"] / n, self.cue_checks,
+                                     getattr(self.wall, "ms", 0.0) or 0.0, len(self.glitch.clips)))
+            log.info("profile: %s", self.profile_line)
+            self._prof = {"t": t, "n": 0, "update": 0.0, "tv": 0.0, "wall": 0.0, "hear": 0.0, "think": 0.0}
+
+    def _update(self, state: dict, now: float) -> None:
         """Called from the engine's tick with the fresh state (before audio and visuals get it)."""
         eng = self.engine
         m = eng.machine if eng is not None else None
@@ -1158,6 +1197,13 @@ class Duet:
         return v
 
     def draw_wall(self, surf, now: float) -> None:
+        t0 = time.perf_counter()
+        try:
+            self._draw_wall(surf, now)
+        finally:
+            self._prof["wall"] += time.perf_counter() - t0
+
+    def _draw_wall(self, surf, now: float) -> None:
         import pygame
         w, h = surf.get_size()
         img = self.wall.frame(now) if self.wall is not None else None
@@ -1228,11 +1274,12 @@ class Duet:
                 k = min(1.0, max(0.0, (now - self.tv_dream_delay - mem[0][0]) / (mem[1][0] - mem[0][0])))
                 if a.shape == mem[1][1].shape:
                     a = (a * (1.0 - k) + mem[1][1] * k).astype(np.uint8)
+            # darkened and tinted here, five times a second, not on every picture of the loop
+            k = (0.8 - 0.5 * min(1.0, self.attention * 1.3)) * (1.0 - 0.22 * float(self.mood["dark"]))
+            a = np.clip(a.astype(np.float32) * (k * np.array(self.mood["tint"], np.float32)), 0, 255).astype(np.uint8)
             s = pygame.transform.smoothscale(pygame.surfarray.make_surface(a.swapaxes(0, 1)), (w, h))
             self._tvd = ((w, h), now, s)
-        k = 255 * (0.8 - 0.5 * min(1.0, self.attention * 1.3)) * (1.0 - 0.22 * float(self.mood["dark"]))
         surf.blit(self._tvd[2], (0, 0))
-        surf.fill(tuple(int(min(255, k * c)) for c in self.mood["tint"]), special_flags=pygame.BLEND_MULT)
 
     def _draw_glitch(self, surf, now: float, fallback=None) -> None:
         """The footage breaks in: a hard cut over all or a band of the picture."""
@@ -1246,6 +1293,13 @@ class Duet:
         surf.blit(gs, (0, y0), (0, y0, w, max(1, y1 - y0)))
 
     def draw_tv(self, surf, now: float, wall_here: bool = False) -> None:
+        t0 = time.perf_counter()
+        try:
+            self._draw_tv(surf, now, wall_here)
+        finally:
+            self._prof["tv"] += time.perf_counter() - t0
+
+    def _draw_tv(self, surf, now: float, wall_here: bool = False) -> None:
         import pygame
         w, h = surf.get_size()
         if wall_here:
@@ -1330,7 +1384,8 @@ class Duet:
                "turns": self.turns, "arc": round(self.arc, 2), "said": len(self.used),
                "attention": round(self.attention, 2), "fed": self.fed,
                "body": {k: round(float(self.mood[k]), 2) for k in ("dark", "pace", "warm", "glitch")},
-               "starts_on": self.start_on, "face_cover": self.face_cover.kind if self.face_cover else "off",
+               "starts_on": self.start_on, "hello_checks": self.cue_checks,
+               "profile": getattr(self, "profile_line", ""), "face_cover": self.face_cover.kind if self.face_cover else "off",
                "mix": {k: round(v, 2) for k, v in self.collage.WEIGHTS.items()},
                "speech_to_text": self.hearing.available(), "understood": self.hearing.heard,
                "speech_ms": round(self.hearing.ms)}

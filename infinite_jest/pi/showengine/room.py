@@ -89,6 +89,7 @@ class Listen:
         self.reset()
 
     onset_t = -1e9
+    voice_t = -1e9
 
     def reset(self) -> None:
         self.pulse = 0.0
@@ -106,10 +107,13 @@ class Listen:
         voiced = bool(audio.get("voiced"))
         lvl = float(audio.get("level") or 0.0)
         loud = lvl >= self.onset if not self._loud else lvl >= self.onset * 0.5
+        was_voiced = self._voiced
         start = (voiced and not self._voiced) or (loud and not self._loud)
         self._voiced, self._loud = voiced, loud
         if start:
-            self.onset_t = now               # every new sound, visit or not (the duet listens for a hello)
+            self.onset_t = now               # every new sound, visit or not
+        if voiced and not was_voiced:
+            self.voice_t = now               # a voice begins (the duet listens for a hello)
         if voiced or loud:
             self.quiet_since = None
         elif self.quiet_since is None:
