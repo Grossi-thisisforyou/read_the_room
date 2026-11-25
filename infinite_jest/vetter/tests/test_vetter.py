@@ -160,6 +160,25 @@ class Export(unittest.TestCase):
         self.assertEqual(data["social"]["counts"]["follows"], 2)
 
 
+class Search(unittest.TestCase):
+    def test_bot_check_is_logged_as_blocked(self):
+        w = web.Web(delay=0)
+        w._get = lambda url: '<div class="anomaly-modal__title">Select all squares</div>'
+        self.assertEqual(w.search('"Mara Lindqvist"'), [])
+        self.assertIn("blocked", w.log[-1][1])
+
+    def test_pictures_are_not_pages(self):
+        links = web.same_site_links('<a href="/img/a.jpg">x</a><a href="/about.html">y</a>', "https://m.example/")
+        self.assertEqual(links, ["https://m.example/about.html"])
+
+    def test_no_quotes_and_no_movement_is_thin(self):
+        w = FakeWeb()
+        w.pages = {"https://mara.example/": "<html><title>Mara Lindqvist</title><body>" +
+                   "<p>Mara Lindqvist is listed here with a date and a place and not much more than that.</p>" * 9 + "</body></html>"}
+        data, _ = vet.vet("Mara Lindqvist", w, urls=["https://mara.example/"], booked="2026-12-01", root=tempfile.mkdtemp())
+        self.assertTrue(data["thin"])
+
+
 class Store(unittest.TestCase):
     def test_files_are_private_and_deletable(self):
         data, _, root, _ = run()

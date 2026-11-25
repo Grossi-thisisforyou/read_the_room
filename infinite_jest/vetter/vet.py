@@ -8,7 +8,7 @@ from collections import Counter
 from . import export as _export
 from . import rules, store
 
-MAX_PAGES = 12
+MAX_PAGES = 20
 SENT = re.compile(r"(?<=[.!?”\"])\s+(?=[A-ZÄÖÜ“„\"])|\n+")
 
 
@@ -55,7 +55,10 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
     hints, own = list(hints), {urllib.parse.urlsplit(u).netloc for u in urls}
 
     # 1. find pages: the guest's own links first, then Wikipedia, then search
-    found = list(urls) + web.wikipedia(name)
+    wiki = web.wikipedia(name)
+    found = list(urls) + wiki
+    for article in wiki:
+        found += getattr(web, "wikipedia_sources", lambda u: [])(article)
     for q in [f'"{name}"'] + [f'"{name}" {h}' for h in hints[:3]] + [f'"{name}" interview']:
         found += web.search(q)
     seen, pages, skipped = set(), [], []
@@ -165,7 +168,8 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
         for k, v in social["themes"].items():
             room_counts[k] += v
         order = sorted(room_counts, key=lambda k: -room_counts[k])
-    thin = len(kept) < 8 or (len(pages) < 2 and not social)
+    # thin: nothing personal to say and no trait the evidence could move. The room should ask instead.
+    thin = len(kept) < 8 or (not quotes and not any(ocean[t]["moved"] for t in rules.TRAITS))
     data = {
         "name": name, "name_spoken": first, "method": "v2",
         "consent": {"research": True, "source": f"booking {booked}"},
@@ -193,7 +197,8 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
 def markdown(d):
     L = [f"# Guest file: {d['name']}", "",
          f"Made on {d['made_on']} on the installation's own computer. Deleted after {d['delete_after']}.",
-         "It was built from public web pages only and has never left this room.", ""]
+         "It was built from public web pages and is kept on this computer only. To build it, the name was",
+         "sent to a web search engine.", ""]
     if d["thin"]:
         L += ["**Very little was found.** The room will get to know this guest by talking instead.", ""]
     L += ["## Reading", "", "| Trait | Guess (0 to 100) | Plus or minus | Starting point | Evidence |", "|---|---|---|---|---|"]

@@ -96,6 +96,20 @@ the model is off or unclear.
 - **Rights:** `--show` gives the guest their file on the spot (show it on screen or print it;
   email it only to the guest and only if they ask), `--delete` erases it.
 
+## Search: what the first live run showed (2026-11-25, on the artist, on a Mac)
+
+DuckDuckGo answered every search with a human check, so the tool found only the artist's own
+site and their Wikipedia article and every score stayed at the starting point. Since then:
+
+- A blocked search is logged as blocked. The tool does not try to get past a human check.
+- When the person has a Wikipedia article, the tool also reads the outside pages that article
+  cites (press, theatre pages). That needs no search engine.
+- For real search, set `IJ_SEARCH_KEY` to a Brave Search API key (free tier, made for programs).
+  Without a key, expect most guests to come out thin, and the room to ask instead.
+
+Run guests on the Pi itself. Do not run a guest's name through a remote assistant session:
+its report would carry the file out of the room.
+
 ## Not yet checked
 
 Live web search and fetching could not be run from the build environment (those sites are

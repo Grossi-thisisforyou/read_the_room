@@ -7,6 +7,7 @@ sites, social-media scraping behind a login wall. robots.txt is respected.
 """
 
 import html
+import os
 import re
 import time
 import urllib.parse
@@ -17,6 +18,8 @@ from html.parser import HTMLParser
 UA = "Mozilla/5.0 (X11; Linux aarch64) InfiniteJestVetter/2.0 (art installation; research with the person's consent)"
 TIMEOUT = 12
 MAX_BYTES = 600_000
+
+NOT_PAGES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".zip", ".mp4", ".mp3", ".mov", ".ics")
 
 # Never fetched: data brokers and people-search sites, and login-walled networks.
 BLOCKED = ("spokeo.", "pipl.", "whitepages.", "beenverified.", "truepeoplesearch.", "radaris.",
@@ -72,6 +75,8 @@ def same_site_links(markup, base):
     host, out = urllib.parse.urlsplit(base).netloc, []
     for h in p.hrefs:
         u = urllib.parse.urljoin(base, h).split("#")[0]
+        if u.lower().endswith(NOT_PAGES):
+            continue
         if urllib.parse.urlsplit(u).netloc == host and u.rstrip("/") != base.rstrip("/") and u not in out:
             out.append(u)
     return out
@@ -133,22 +138,69 @@ class Web:
             self.log.append((url, "skipped (blocked list or robots.txt)"))
             return None
         try:
-            markup = self._get(url)
-            title, text = to_text(markup)
-            self.links[url] = same_site_links(markup, url)
+            wiki = re.match(r"https://(\w+)\.wikipedia\.org/wiki/([^?#]+)$", url)
+            if wiki:      # the article's plain text, without maintenance notes and reference lists
+                title, text = self._wiki_text(wiki.group(1), wiki.group(2))
+            else:
+                markup = self._get(url)
+                title, text = to_text(markup)
+                self.links[url] = same_site_links(markup, url)
         except Exception as e:
             self.log.append((url, f"failed ({type(e).__name__})"))
+            return None
+        if len(text) < 80:
+            self.log.append((url, "skipped (not a text page)"))
             return None
         self.log.append((url, "read"))
         return title, text
 
+    def _wiki_text(self, lang, title):
+        import json
+        api = (f"https://{lang}.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1"
+               f"&format=json&titles={title}")
+        pages = json.loads(self._get(api))["query"]["pages"]
+        page = next(iter(pages.values()))
+        return page.get("title", ""), page.get("extract", "")
+
+    def wikipedia_sources(self, article_url, n=25):
+        """The outside pages a Wikipedia article cites: press and theatre pages about the person."""
+        wiki = re.match(r"https://(\w+)\.wikipedia\.org/wiki/([^?#]+)$", article_url)
+        if not wiki:
+            return []
+        import json
+        api = (f"https://{wiki.group(1)}.wikipedia.org/w/api.php?action=query&prop=extlinks&ellimit=100"
+               f"&redirects=1&format=json&titles={wiki.group(2)}")
+        try:
+            page = next(iter(json.loads(self._get(api))["query"]["pages"].values()))
+        except Exception as e:
+            self.log.append((f"wikipedia sources", f"failed ({type(e).__name__})"))
+            return []
+        out = []
+        for link in page.get("extlinks", []):
+            u = link.get("*") or link.get("url") or ""
+            if u.startswith("//"):
+                u = "https:" + u
+            if (u.startswith("http") and not blocked(u) and not u.lower().endswith(NOT_PAGES)
+                    and not any(k in u for k in ("archive.org", "wikimedia.org", "wikidata.org", "d-nb.info", "viaf.org"))):
+                out.append(u)
+        self.log.append(("wikipedia sources", f"{len(out)} links"))
+        return out[:n]
+
     def search(self, query, n=8):
-        """Result URLs from DuckDuckGo's plain HTML page."""
+        """Result URLs. Uses the Brave Search API when a key is set (IJ_SEARCH_KEY), which permits
+        automated use; otherwise DuckDuckGo's plain HTML page, which often answers a program with a
+        bot check. A bot check is logged as blocked and never worked around."""
+        key = os.environ.get("IJ_SEARCH_KEY")
+        if key:
+            return self._brave(query, key, n)
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote_plus(query)
         try:
             markup = self._get(url)
         except Exception as e:
             self.log.append((f"search: {query}", f"failed ({type(e).__name__})"))
+            return []
+        if "anomaly" in markup or "challenge-form" in markup:
+            self.log.append((f"search: {query}", "blocked (the search engine asked for a human check)"))
             return []
         out = []
         for href in re.findall(r'class="result__a"[^>]*href="([^"]+)"', markup):
@@ -159,6 +211,20 @@ class Web:
                 link = "https:" + link
             if link.startswith("http") and link not in out and not blocked(link):
                 out.append(link)
+        self.log.append((f"search: {query}", f"{len(out)} results"))
+        return out[:n]
+
+    def _brave(self, query, key, n):
+        import json
+        url = "https://api.search.brave.com/res/v1/web/search?count=%d&q=%s" % (n, urllib.parse.quote_plus(query))
+        try:
+            req = urllib.request.Request(url, headers={"X-Subscription-Token": key, "Accept": "application/json"})
+            with self.opener.open(req, timeout=TIMEOUT) as r:
+                data = json.loads(r.read(MAX_BYTES).decode("utf-8", "replace"))
+        except Exception as e:
+            self.log.append((f"search: {query}", f"failed ({type(e).__name__})"))
+            return []
+        out = [x["url"] for x in data.get("web", {}).get("results", []) if x.get("url") and not blocked(x["url"])]
         self.log.append((f"search: {query}", f"{len(out)} results"))
         return out[:n]
 
