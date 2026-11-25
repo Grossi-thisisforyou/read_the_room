@@ -80,6 +80,7 @@ class Engine:
         self.answer_hooks: list = []         # shows that want the visitor's typed words (kept in memory only)
         self.control_hooks: dict = {}        # extra control-page commands: name -> function(arg)
         self.demo_until = 0.0
+        self.hold_until = 0.0                # a show keeps the visit on (someone spoke to it, or was named)
         self.machine = VisitMachine(VisitConfig(**_dataclass_kwargs(VisitConfig, cfg.get("visit", {}))), now)
         self.fallback = FallbackProfiler()
         self.frames = FrameAnalyzer()
@@ -338,6 +339,7 @@ class Engine:
     # ------------------------------------------------------------------ clock
     def tick(self, now: float | None = None) -> dict:
         now = self.clock() if now is None else now
+        self.presence.hold_until = 0.0 if self.blackout else self.hold_until
         if now < self.demo_until and not self.blackout:
             self.presence.feed({"presence": 1.0}, now)
         flip = self.presence.tick(now)

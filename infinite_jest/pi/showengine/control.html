@@ -16,17 +16,20 @@ pre{color:var(--dim);white-space:pre-wrap;font-size:12px}
 <h1>INFINITE JEST · ENGINE</h1>
 <div id="conn">connecting…</div>
 <div class="big" id="phase">–</div>
-<div><span id="scene"></span> · <span id="tempo"></span> bpm · hook <span id="hook">–</span></div>
+<div id="old"><span id="scene"></span> · <span id="tempo"></span> bpm · hook <span id="hook">–</span></div>
 <div id="pal" style="margin:8px 0"></div>
 <div id="bar"><i></i></div>
 <div class="row">
-<button data-cmd="next">next phase</button><button data-cmd="wipe">wipe now</button>
+<span class="old"><button data-cmd="next">next phase</button><button data-cmd="wipe">wipe now</button></span>
 <button data-cmd="blackout">blackout on/off</button>
 <button data-cmd="demo">pretend someone is here (5 min) on/off</button>
 <button data-cmd="guest" data-arg="001">next visitor: vetted guest 001</button><button data-cmd="guest" data-arg="">next visitor: unknown</button>
-<button data-cmd="hook" data-arg="flesh">flesh</button><button data-cmd="hook" data-arg="scrawl">scrawl</button>
+<input id="gid" placeholder="guest folder name" size="16"><button id="gset">next visitor: this guest</button>
+<button id="ghere">this guest is here: say their name</button>
+<button data-cmd="hello">someone said hi: start getting to know them</button>
+<span class="old"><button data-cmd="hook" data-arg="flesh">flesh</button><button data-cmd="hook" data-arg="scrawl">scrawl</button>
 <button data-cmd="hook" data-arg="inverted">inverted</button><button data-cmd="hook" data-arg="mirror">mirror</button>
-<button data-cmd="hook" data-arg="void">void</button>
+<button data-cmd="hook" data-arg="void">void</button></span>
 </div>
 <pre id="raw"></pre>
 <script>
@@ -36,11 +39,15 @@ function connect(){
   ws.onopen=()=>{conn.textContent='connected';ws.send(JSON.stringify({type:'hello',ts:Date.now()/1000,data:{role:'control',name:'control page'}}))};
   ws.onclose=()=>{conn.textContent='disconnected, retrying…';setTimeout(connect,1500)};
   ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type!=='state')return;const s=m.data;
-    phase.textContent=s.phase.toUpperCase()+'  '+s.phase_t.toFixed(0)+'s';scene.textContent=s.scene;tempo.textContent=s.tempo;hook.textContent=s.hook||'–';
+    const d=s.duet;                                   // the duet has no phases: it is always dreaming
+    document.querySelectorAll('.old,#old').forEach(x=>x.style.display=d?'none':'');
+    phase.textContent=d?(d.tv==='flow'?(d.attention>0.15?'DREAMING · SOMEONE IS NEAR':'DREAMING'):'DREAMING · IN CONVERSATION'):s.phase.toUpperCase()+'  '+s.phase_t.toFixed(0)+'s';scene.textContent=s.scene;tempo.textContent=s.tempo;hook.textContent=s.hook||'–';
     document.querySelector('#bar i').style.width=(s.intensity*100)+'%';
     pal.innerHTML=(s.palette.colors||[]).map(c=>`<span class="sw" style="background:${c}"></span>`).join('')+' '+s.palette.name;
     raw.textContent=JSON.stringify({ocean:s.ocean,confidence:s.confidence,source:s.profile_source,words:s.words,sensor:s.sensor,blackout:s.blackout},null,1)};
 }
 document.querySelectorAll('button').forEach(b=>b.onclick=()=>ws&&ws.send(JSON.stringify({type:'control',ts:Date.now()/1000,data:{cmd:b.dataset.cmd,arg:b.dataset.arg||null}})));
+document.getElementById('ghere').onclick=()=>ws&&ws.send(JSON.stringify({type:'control',ts:Date.now()/1000,data:{cmd:'recognised',arg:document.getElementById('gid').value.trim()||null}}));
+document.getElementById('gset').onclick=()=>ws&&ws.send(JSON.stringify({type:'control',ts:Date.now()/1000,data:{cmd:'guest',arg:document.getElementById('gid').value.trim()||null}}));
 connect();
 </script></body></html>

@@ -9,7 +9,7 @@ show, so an empty, quiet room gets no reactions (Baby, 2026-11-19: "if nothing
 comes in there is no reactions to nothing").
 
 Listen: the room answers a voice. It only ever sees a level and a voiced flag
-(contract privacy rule 3: never recorded, never transcribed). When someone starts
+(contract privacy rule 3: never recorded; words are only made out by hear.py, for the seconds after the room asks a question). When someone starts
 to speak or makes a sound during a visit it gives one pulse: the picture jolts,
 the sound stutters, one whispered line goes on the wall. Then it waits a while
 before it answers again, so it stays an answer and not a meter.
@@ -88,6 +88,8 @@ class Listen:
         self.decay_s = 1.2
         self.reset()
 
+    onset_t = -1e9
+
     def reset(self) -> None:
         self.pulse = 0.0
         self.heard_t = -1e9
@@ -106,6 +108,8 @@ class Listen:
         loud = lvl >= self.onset if not self._loud else lvl >= self.onset * 0.5
         start = (voiced and not self._voiced) or (loud and not self._loud)
         self._voiced, self._loud = voiced, loud
+        if start:
+            self.onset_t = now               # every new sound, visit or not (the duet listens for a hello)
         if voiced or loud:
             self.quiet_since = None
         elif self.quiet_since is None:

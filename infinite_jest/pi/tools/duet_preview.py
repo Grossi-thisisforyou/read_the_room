@@ -55,6 +55,7 @@ def main():
     ap.add_argument("--states", help="write the show state per frame here (to render the music afterwards)")
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--models")
+    ap.add_argument("--arrive", type=float, default=6.0, help="when the visitor comes in (s)")
     ap.add_argument("--leave", type=float, default=490, help="when the visitor leaves (s)")
     ap.add_argument("--stills", help="also save PNG stills at these seconds, comma separated")
     a = ap.parse_args()
@@ -103,7 +104,7 @@ def main():
     for i in range(n):
         t = i * dt
         clock.t = 1000.0 + t
-        here = 6.0 <= t < a.leave
+        here = a.arrive <= t < a.leave
         voiced = here and (t % 47.0) < 0.6
         q = duet.asking                      # the pretend visitor answers most questions, short or long
         if here and q and clock.t >= q["from"] + 1.0:

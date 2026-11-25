@@ -88,6 +88,8 @@ class Presence:
         raw = self._raw
         if self._last_data_t is None or now - self._last_data_t > self.cfg.stale_after:
             raw = 0.0
+        if now < getattr(self, "hold_until", 0.0):      # the show is talking with someone: they are here
+            raw = 1.0
         a = 1.0 if self.cfg.smoothing <= 0 else min(1.0, dt / self.cfg.smoothing)
         # rise fast, fall at the normal rate: arrivals should feel immediate
         if raw > self.score:

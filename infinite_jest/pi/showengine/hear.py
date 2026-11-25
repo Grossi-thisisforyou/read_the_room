@@ -71,6 +71,16 @@ def clean(text: str) -> str:
     return text[:160]
 
 
+def loudest(audio) -> float:
+    """The loudest fifth of a second (RMS, 0..1): faint sounds make the model invent sentences."""
+    a = np.asarray(audio, np.float32)
+    n = RATE // 5
+    if len(a) < n:
+        return float(np.sqrt(np.mean(a ** 2))) if len(a) else 0.0
+    a = a[:len(a) // n * n].reshape(-1, n)
+    return float(np.sqrt((a ** 2).mean(axis=1)).max())
+
+
 class Hearing:
     def __init__(self, cfg: dict | None = None, model=None, fetch_fn=None):
         cfg = cfg or {}
@@ -78,6 +88,7 @@ class Hearing:
         self.lang = cfg.get("speech_language", "en") or None   # "" in the config: the model works it out
         self.threads = int(cfg.get("speech_threads", 2))
         self.want = str(cfg.get("speech_model", ""))
+        self.min_level = float(cfg.get("speech_min_level", 0.0))   # ignore anything fainter (0 = off)
         self._model = model
         self._tried = model is not None
         self._fetch = fetch_fn or fetch
@@ -127,6 +138,8 @@ class Hearing:
         try:
             model = self._load()
             audio = self._fetch(seconds) if model is not None else None
+            if audio is not None and self.min_level > 0.0 and loudest(audio) < self.min_level:
+                audio = None                                   # too faint to be someone speaking to it
             if audio is not None and len(audio) > RATE // 3:
                 t0 = time.perf_counter()
                 segs, _info = model.transcribe(audio, language=self.lang, beam_size=1, vad_filter=False,

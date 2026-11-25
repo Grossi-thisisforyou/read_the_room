@@ -1,4 +1,4 @@
-"""The two-screen show: TV black until ~45 s of company, then hello, the face, the reveal."""
+"""The two-screen show: always making; a visitor is greeted after ~45 s, changes it, and it goes on changed."""
 import os
 
 import numpy as np
@@ -34,7 +34,7 @@ def duet_engine(**cfg):
     eng, clock, sent = make_engine(audio=audio)
     import tempfile
     eng.cfg["duet"] = {"models_dir": "/nonexistent", "guest": "", "mood": "calm", "footage_dirs": [],
-                       "speech_to_text": False,
+                       "speech_to_text": False, "talk_mode": "musing", "quiet_after": 0,
                        "mood_file": os.path.join(tempfile.mkdtemp(), "mood.json"), **cfg}
     eng.machine.cfg.release_time, eng.machine.cfg.wipe_time, eng.machine.cfg.max_visit = 40.0, 8.0, 1e9
     duet = Duet(eng.cfg, eng)
@@ -55,23 +55,61 @@ HERE_DATA = {"kind": "phone", "motion": 0.6, "audio": {"level": 0.0, "voiced": F
 EMPTY = {"kind": "phone", "motion": 0.0, "audio": {"level": 0.0, "voiced": False}}
 
 
-def test_tv_stays_black_in_an_empty_room():
+def test_alone_it_keeps_making_quietly_and_says_nothing():
     eng, clock, duet, audio = duet_engine()
     run(eng, clock, 120, EMPTY)
-    assert duet.tv == "black" and duet.tv_level < 0.01 and audio.said == []
+    assert duet.tv == "flow" and audio.said == [] and duet.progress == 0.0
+    assert 0.3 < duet.tv_level < 0.5 and duet.attention < 0.01            # a baseline, never black
+    d = eng.state["duet"]
+    assert d["flow"] == 1 and 0.0 < d["arc"] < 0.5 and 0.1 < eng.state["intensity"] < 0.4
     assert eng.state["words"] == []
 
 
-def test_tv_wakes_after_45_seconds_and_says_hello():
+def test_someone_is_greeted_after_45_seconds():
+    from showengine import talk
     eng, clock, duet, audio = duet_engine()
     run(eng, clock, 30, HERE_DATA)
-    assert duet.tv == "black" and duet.wake > 0.5            # the wall reacted already
+    assert duet.tv == "flow" and duet.attention > 0.5 and duet.wake > 0.6   # it has turned to them already
     run(eng, clock, 20, HERE_DATA)
     assert duet.tv in ("hello", "face") and audio.said[0] == "hello."
     run(eng, clock, 60, HERE_DATA)
     assert duet.tv == "face" and duet.progress == 0.0       # pieces first; the face comes later
+    assert len(audio.said) >= 2 and not [x for x in audio.said if talk.technical(x)]
+
+
+def test_leaving_resets_nothing_it_digests_and_goes_on_changed():
     from showengine import talk
-    assert len(audio.said) >= 2 and audio.said[1] in talk.STRANGER     # no guest file: it says so
+    eng, clock, duet, audio = duet_engine()
+    before = {k: duet.mood[k] for k in ("dark", "pace", "warm", "glitch")}
+    run(eng, clock, 300, HERE_DATA)                           # five minutes, never answering
+    assert duet.progress > 0.2
+    p_leave, lvl = duet.progress, duet.tv_level
+    body = {k: duet.mood[k] for k in before}
+    assert body["dark"] > before["dark"] + 0.1                # their silence made it darker
+    run(eng, clock, 45, EMPTY)
+    assert duet.tv == "flow" and audio.said[-1] in talk.PARTING
+    assert 0.5 * p_leave < duet.progress < p_leave and duet.tv_level > 0.8 * lvl    # no cut: it sinks slowly
+    run(eng, clock, 600, EMPTY)                               # ten minutes alone
+    assert eng.machine.phase == "idle" and duet.tv == "flow" and duet.progress < 0.02
+    assert duet.attention < 0.05 and 0.35 < duet.tv_level < 0.5      # back to the baseline, still making
+    after = {k: duet.mood[k] for k in before}
+    assert all(abs(after[k] - body[k]) < 0.03 for k in before)       # the body stays where the visit left it
+    assert duet.fed == 1 and duet.aftertaste and duet.profile == [] and duet.echo == []
+    assert not [s for s in audio.said if "deleted" in s or "file" in s]
+    n = len(audio.said)
+    run(eng, clock, 240, HERE_DATA)                           # the next one hears that someone was here
+    assert all(abs(duet._entry[k] - after[k]) < 0.03 for k in before)   # and starts from the changed body
+
+
+def test_it_never_talks_about_how_it_works():
+    from showengine import talk
+    from showengine.duet import LiveWords
+    bad = ("camera", "record", "footage", "file", "screen", "microphone", "delete", "data", "words", "wall", "film", "tape", "lens")
+    pools = talk.QUESTIONS + talk.STRANGER + talk.PARTING + talk.THINGS + list(talk.AFTERTASTE.values()) \
+        + sum(talk.REPLIES.values(), []) + talk.HEARD_WORDS + sum(talk.VERBS.values(), [])
+    hits = [(x, b) for x in pools for b in bad if b in x.lower().split() or b + "s" in x.lower().split()]
+    assert hits == []
+    assert "Never mention screens, cameras" in LiveWords.SYSTEM
 
 
 def test_the_face_comes_late_and_in_bursts_and_the_visit_never_resets():
@@ -94,17 +132,6 @@ def test_the_face_comes_late_and_in_bursts_and_the_visit_never_resets():
     assert duet.bursts >= 8 and len(audio.said) >= 8
 
 
-def test_leaving_ends_with_the_reveal_then_black():
-    eng, clock, duet, audio = duet_engine()
-    run(eng, clock, 90, HERE_DATA)
-    run(eng, clock, 15, EMPTY)
-    assert duet.tv == "reveal"
-    run(eng, clock, 40, EMPTY)
-    assert any("deleted" in s for s in audio.said)
-    run(eng, clock, 30, EMPTY)
-    assert duet.tv == "black" and eng.machine.phase == "idle"
-
-
 def test_a_voice_jolts_the_wall():
     eng, clock, duet, audio = duet_engine()
     run(eng, clock, 10, HERE_DATA)
@@ -121,6 +148,7 @@ def test_drawing_does_not_crash_without_networks():
     eng, clock, duet, audio = duet_engine()
     duet.wall.push(duet.wall.make(0.1), clock.t)
     s = pygame.Surface((320, 180))
+    duet.draw_tv(s, clock.t)                                  # alone: it draws its baseline
     for secs in (5, 50, 60):
         run(eng, clock, secs, HERE_DATA)
         duet.draw_tv(s, clock.t)
@@ -344,7 +372,9 @@ def test_collage_mixes_family_footage_paintings_camera_and_photos(tmp_path):
     foot = Glitch([], seed=1)
     cam = {"f": rng.integers(0, 255, (120, 160, 3), dtype=np.uint8)}
     c = Collage(str(tmp_path / "img"), seed=5, paint_dirs=[str(tmp_path / "bank")], footage=foot,
-                camera=lambda: cam["f"])
+                camera=lambda: cam["f"], dream=lambda: cam["d"])
+    cam["d"] = rng.integers(0, 255, (135, 240, 3), dtype=np.uint8)
+    c.WEIGHTS = dict(c.WEIGHTS, dream=0.1)
     s = pygame.Surface((960, 540))
     t = 0.0
     for i in range(30 * 240):
@@ -354,8 +384,10 @@ def test_collage_mixes_family_footage_paintings_camera_and_photos(tmp_path):
         c.draw(s, t, 1.0, front=False)
         c.draw(s, t, 1.0, front=True)
         t += 1 / 30
-    assert all(c.counts[k] >= 1 for k in ("family", "photo", "paint", "camera")), c.counts
+    assert all(c.counts[k] >= 1 for k in ("dream", "family", "photo", "paint", "camera")), c.counts
     assert c.counts["family"] == max(c.counts.values())        # the family footage leads
+    assert c.counts["paint"] < c.counts["photo"]               # hardly any paintings
+    assert c.counts["family"] >= 5                             # the family footage is a second voice
     moving = [p for p in c.pieces if p["clip"]]
     assert moving
     i0 = moving[0]["i"]
@@ -453,7 +485,7 @@ def test_the_local_model_writes_statements_questions_and_answers():
     wait()
     srv.shutdown()
     assert w.lines[0] == "i heard your breath, not the word." and w.questions[0] == "who taught you to wait?"
-    assert "spoke for a long time" in seen[1]
+    assert "at length" in seen[1]
 
 
 def test_the_tide_builds_peaks_ebbs_and_builds_again():
@@ -491,7 +523,8 @@ def test_two_forks_vetted_guest_and_stranger(tmp_path, monkeypatch):
     eng, clock, duet, audio = duet_engine(guest="007")
     assert duet.fork == "vetted" and duet.status()["fork"] == "vetted"
     run(eng, clock, 150, HERE_DATA)
-    assert audio.said[0] == "hello, kim." and "you came back, kim." in audio.said
+    assert audio.said[0] == "hello, kim." and "you came back, kim." not in audio.said   # nothing scripted
+    assert "you packed twice." in audio.said or "what did you pack?" in audio.said
     assert not set(audio.said) & set(talk.STRANGER)
     assert "they moved eleven times" in duet._facts()
     # the control page says: the next one is unknown. Not in the middle of this visit.
@@ -502,8 +535,8 @@ def test_two_forks_vetted_guest_and_stranger(tmp_path, monkeypatch):
     n = len(audio.said)
     run(eng, clock, 150, HERE_DATA)
     new = audio.said[n:]
-    assert new[0] == "hello." and new[1] in talk.STRANGER and "kim" not in " ".join(new).lower()
-    assert sum(x.endswith("?") for x in new) >= 2                    # it asks, because it knows nothing
+    assert new[0] == "hello." and "kim" not in " ".join(new).lower()
+    assert sum(x.endswith("?") for x in new) >= 1                    # it asks, because it knows nothing
     assert duet.face_dreamer is None and duet.collage.paths == []
     run(eng, clock, 70, EMPTY)
     eng.handle(P.make(P.CONTROL, {"cmd": "guest", "arg": "007"}), "control")
@@ -547,7 +580,7 @@ def test_a_stranger_shapes_the_show_by_answering_and_nothing_is_kept():
     assert face is not None and face.shape == (128, 128, 3)
     run(eng, clock, 90, EMPTY)                                         # they leave
     assert eng.machine.phase == "idle" and duet.profile == [] and duet.echo == []
-    assert duet.mood == duet.day_mood and eng.last_frame is None
+    assert eng.last_frame is None and duet.mood["dark"] > day["dark"]      # their words are gone, the change stays
 
 
 def test_the_model_is_told_what_the_stranger_said():
@@ -611,3 +644,160 @@ def test_spoken_answers_are_understood_on_the_pi_and_only_kept_for_the_visit():
     assert hear.clean("Thank you.") == "" and hear.clean(" [BLANK_AUDIO] ") == "" and hear.clean("my mother") == "my mother"
     assert hear.Hearing({"speech_to_text": False}).listen(3, lambda t: None) is False
     assert hear.fetch(1.0, addr=("127.0.0.1", 9), timeout=0.2) is None
+
+
+def test_guest_files_from_the_vetting_tool_and_thin_ones(tmp_path, monkeypatch):
+    import json as J
+    from showengine import duet as D
+    root = tmp_path / "share" / "guests"
+    for slug, extra in (("mara", {}), ("thin-one", {"thin": True})):
+        (root / slug).mkdir(parents=True)
+        (root / slug / "guest.json").write_text(J.dumps({
+            "name": "Mara Example", "name_spoken": "Mara Example", "delete_after": "2099-01-01",
+            "ocean": {"O": 0.8, "C": 0.4, "E": 0.3, "A": 0.6, "N": 0.5},
+            "facts": [{"text": "trained as a carpenter", "year": 2011, "source": "x"}],
+            "quotes": [{"text": "I build what I cannot say", "year": 2020, "source": "y"}], **extra}))
+    monkeypatch.setattr(D, "guest_roots", lambda: (str(root),))
+    assert D.list_guests() == ["mara"]
+    assert D.load_guest("thin-one") is None and D.load_guest("nobody") is None
+    eng, clock, duet, audio = duet_engine(guest="mara")
+    assert duet.fork == "vetted" and duet.lines["hello"] == "hello, mara."        # first name only
+    facts = duet.extra["facts"]
+    assert "trained as a carpenter" in facts and "they once said: I build what I cannot say" in facts
+    run(eng, clock, 200, HERE_DATA)
+    assert audio.said[0] == "hello, mara." and len(set(audio.said)) == len(audio.said) >= 5
+    eng.handle(P.make(P.CONTROL, {"cmd": "guest", "arg": "thin-one"}), "control")
+    run(eng, clock, 400, EMPTY)
+    assert duet.fork == "stranger"
+
+
+def test_faces_in_the_footage_are_covered_in_black():
+    cv2 = pytest.importorskip("cv2")
+    from showengine.cover import FaceCover
+    c = FaceCover()
+    assert c.finder
+    plain = np.full((180, 320, 3), 120, np.uint8)
+    assert c.clip([plain, plain])[0].min() == 120              # no face: nothing is touched
+    c.boxes = lambda rgb: [(0.4, 0.2, 0.6, 0.6)] if rgb[0, 0, 0] == 1 else []
+    seen, missed = plain.copy(), plain.copy()
+    seen[0, 0, 0] = 1
+    out = c.clip([missed, seen, missed])                        # found in one frame: covered in all of them
+    assert all(o[40:100, 130:190].max() == 0 for o in out) and out[0][150, 10, 1] == 120
+    assert missed[70, 160, 0] == 120                            # the footage itself is never changed
+    c.cut()
+    a, b = c.frame(seen), c.frame(missed)                       # running footage: the block stays a while
+    assert a[70, 160].max() == 0 and b[70, 160].max() == 0
+    blind = FaceCover()
+    blind.cv2 = None                                            # no finder on this machine: a fixed block
+    assert blind.clip([plain])[0][60, 160].max() == 0
+
+
+def test_duet_covers_faces_by_default():
+    eng, clock, duet, audio = duet_engine()
+    assert duet.face_cover is not None and duet.glitch.cover is duet.face_cover and duet.material.cover is not None
+    mix = duet.status()["mix"]
+    assert mix["family"] == 0.32 and mix["paint"] <= 0.05 and mix["dream"] == 0.0
+    assert duet_engine(family_share=0.5, dream_share=0.2)[2].collage.WEIGHTS["dream"] == 0.2
+
+
+def test_faint_sounds_are_not_turned_into_words():
+    from showengine.hear import Hearing, loudest
+
+    class Model:
+        def transcribe(self, audio, **kw):
+            return [type("S", (), {"text": " hello there", "no_speech_prob": 0.0})()], None
+    faint = (np.random.default_rng(0).standard_normal(16000 * 3) * 0.004).astype(np.float32)
+    loud = faint.copy()
+    loud[8000:16000] += 0.2 * np.sin(np.arange(8000) / 6.0).astype(np.float32)
+    assert loudest(faint) < 0.02 < loudest(loud)
+    for audio, want in ((faint, ""), (loud, "hello there")):
+        got = []
+        h = Hearing({"speech_min_level": 0.02}, model=Model(), fetch_fn=lambda s, a=audio: a)
+        h._run(3.0, got.append)
+        assert got == [want]
+
+
+def test_saying_hi_starts_the_conversation_and_it_asks_who_they_are():
+    class Ears:                                   # stands in for speech to text
+        busy, heard = False, 0
+        def __init__(self): self.say = ""
+        def available(self): return True
+        def warm(self): pass
+        def listen(self, seconds, done):
+            done(self.say)
+            return True
+    eng, clock, duet, audio = duet_engine(talk_start="hello")
+    duet.hearing = ears = Ears()
+    run(eng, clock, 120, HERE_DATA)
+    assert duet.tv == "flow" and not audio.said               # someone is there: it dreams on and waits
+    ears.say = "what a strange room"
+    run(eng, clock, 8, SPEAKS)
+    assert duet.tv == "flow" and not audio.said               # talk that is not a greeting: nothing
+    run(eng, clock, 6, HERE_DATA)
+    ears.say = "Hello? Anybody?"
+    run(eng, clock, 8, SPEAKS)
+    assert audio.said == ["hi. who are you?"] and duet.tv in ("hello", "face")
+    assert duet.asking is not None or duet.turns >= 1         # and it listens for the answer
+
+
+def test_a_guest_who_is_seen_is_named_and_their_file_is_used(tmp_path, monkeypatch):
+    from showengine import duet as D
+    guest_dir(tmp_path, monkeypatch)
+    eng, clock, duet, audio = duet_engine(guest="", talk_start="hello")
+    run(eng, clock, 20, EMPTY)
+    eng.control_hooks["recognised"]("nobody-by-that-name")
+    eng.control_hooks["recognised"]("kim")
+    run(eng, clock, 15, EMPTY)                                # nobody at the phone: being seen starts the visit
+    assert audio.said[0] == "hi, kim." and duet.fork == "vetted"
+    eng.control_hooks["recognised"]("kim")
+    run(eng, clock, 5, EMPTY)
+    assert audio.said.count("hi, kim.") == 1                 # once
+
+
+def test_it_only_speaks_in_exchange_and_is_patient_with_silence(tmp_path, monkeypatch):
+    from showengine import talk
+    guest_dir(tmp_path, monkeypatch)
+    eng, clock, duet, audio = duet_engine(guest="", talk_start="hello", talk_mode="exchange")
+    asked = []
+
+    def reply(pairs, about="", avoid=None):
+        asked.append(list(pairs))
+        duet.words.said_back = "anna. where did you come from, anna?"
+    duet.words.reply = reply
+    run(eng, clock, 300, HERE_DATA)
+    assert audio.said == [] and duet.tv == "flow"             # five minutes of someone there: not a word
+    eng.control_hooks["hello"]()
+    run(eng, clock, 4, HERE_DATA)
+    assert audio.said == ["hi. who are you?"]
+    run(eng, clock, 60, HERE_DATA)                            # no answer for a minute
+    assert audio.said == ["hi. who are you?"] and duet.asking is not None   # patient: the question stays open
+    duet.on_answer("i am anna")
+    run(eng, clock, 5, HERE_DATA)
+    assert asked == [[("hi. who are you?", "i am anna")]]     # the model gets the exchange as it was
+    assert audio.said[-1] == "anna. where did you come from, anna?" and len(audio.said) == 2
+    run(eng, clock, 120, HERE_DATA)
+    assert len(audio.said) == 2                               # and then it waits again, quietly
+    duet.words.said_back = None
+    duet.words.reply = lambda pairs, about="", avoid=None: None    # the model has nothing: silence, no stock line
+    duet.on_answer("from the north")
+    run(eng, clock, 30, HERE_DATA)
+    assert len(audio.said) == 2
+    assert not [x for x in audio.said if talk.technical(x)]
+    run(eng, clock, 120, EMPTY)                               # they go: their words go too
+    assert duet.profile == [] and duet.echo == [] and talk.norm("anna. where did you come from, anna?") not in duet.used
+
+
+def test_alone_both_screens_are_colours_and_not_the_same(tmp_path):
+    pygame = pytest.importorskip("pygame")
+    eng, clock, duet, audio = duet_engine()
+    rng = np.random.default_rng(2)
+    duet.collage.footage.clips.append([rng.integers(0, 255, (180, 320, 3), dtype=np.uint8)] * 8)
+    tv, wall = pygame.Surface((320, 180)), pygame.Surface((320, 180))
+    for i in range(200):
+        run(eng, clock, 0.2, EMPTY)
+        duet.wall.push(rng.integers(0, 255, (45, 80, 3), dtype=np.uint8), clock())
+        duet.draw_tv(tv, clock())
+        duet.draw_wall(wall, clock())
+    assert duet.collage.pieces == []                          # nobody there: no pieces, only the colours
+    a, b = pygame.surfarray.array3d(tv).astype(int), pygame.surfarray.array3d(wall).astype(int)
+    assert a.mean() > 8 and b.mean() > 8 and np.abs(a - b).mean() > 10

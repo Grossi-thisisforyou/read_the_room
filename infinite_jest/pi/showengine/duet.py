@@ -1,25 +1,23 @@
-"""Two screens (Baby, 2026-11-23/24). Channel 1 = the TV, channel 2 = the projector on the white wall.
+"""Two screens, one organism (Baby, 2026-11-23 to 25). Channel 1 = the TV, channel 2 = the
+projector on the white wall.
 
-  empty room   TV black. The wall dreams slowly and dimly; the room only plays sound.
-  someone in   the wall wakes: brighter, faster, it jolts when they move or speak.
-  ~45 s in     the TV switches on and says hello. Coarse grey pieces of pictures are
-               placed, shifted and stitched together.
-  ~2 min in    a face starts to form between them. It comes in bursts, not steadily,
-               and with every burst the pieces get clearer and move.
-  after that   there is no reset: as long as someone stays it flows freely. The face
-               loses ground and finds it again; new lines keep coming.
-  leaving      the guest's reveal lines under the finished face, then it dissolves.
+There are no sections and there is no way back to a start. The room is always making
+something: pictures placed and stitched on the TV, a dream on the wall, music, all riding
+on a slow tide. That is its baseline, and it never stops.
 
-Now and then the donated footage cuts in as a short glitch. The room wakes up in a
-random mood (mood.py) that colours all of it for the day.
+When someone comes in, the making turns towards them (its attention rises over half a
+minute): it greets them, a face begins to form among the pieces and comes on in bursts, it
+talks with them and listens. How they are with it (how much they move, how they answer,
+how long they stay) changes its body: darker or lighter, slower or faster, warmer or colder.
 
-Both pictures are generated live on the Pi by small neural networks (dream/net.py),
-so the stream is different every time. The wall network learned the show's own
-painted look; the face network learned one guest's face, and its training
-snapshots run from a grey blob to the guest, so "taking form" is the network
-remembering them.
+When they leave nothing resets. The face sinks back into the pieces over a few minutes and
+the room goes on from where the visit left it: it has eaten, it digests, and it lives on
+with what it took. What it keeps is only that changed body (a handful of numbers). Their
+words, their picture and their voice are gone the moment they are (the engine's wipe).
 
-With only one screen connected the wall is shown on it, and the face comes over it.
+Vetted guests get the show made from their file; unknown visitors get one made from the
+conversation. Now and then the donated footage cuts in as a glitch. A random mood
+(mood.py) is the body it wakes up with each day.
 """
 from __future__ import annotations
 
@@ -30,6 +28,7 @@ import math
 import os
 import random
 import threading
+import re
 import time
 from typing import Any
 
@@ -40,6 +39,8 @@ from . import hear
 from . import plugins
 from . import talk
 
+GREETING = re.compile(r"[^a-z](hello|hallo|hullo|hi|hey|hiya|good (evening|morning|afternoon|day)|anybody|anyone there"
+                      r"|can you hear me|are you there|is (anybody|anyone|someone) (there|here))[^a-z]")
 log = logging.getLogger("showengine.duet")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,11 +73,28 @@ def _dream_import():
         return mod
 
 
+def guest_roots() -> tuple:
+    """Where guest files live: with the kit (guest 001), and where the vetting tool on the Pi
+    writes them (infinite_jest/vetter: ~/.local/share/infinite-jest/guests/<slug>/guest.json)."""
+    return (os.path.join(IJ, "guests"), os.path.expanduser("~/.config/infinite-jest/guests"),
+            os.path.expanduser("~/.local/share/infinite-jest/guests"))
+
+
+def list_guests(today: datetime.date | None = None) -> list[str]:
+    """The folder names of the guest files that can be used today (for the control page)."""
+    out = []
+    for root in guest_roots():
+        for d in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            if d not in out and load_guest(d, today) is not None:
+                out.append(d)
+    return out
+
+
 def load_guest(guest_id: str | None, today: datetime.date | None = None) -> dict | None:
     """The guest file for this run, or None. Past its delete_after date it is not used."""
     if not guest_id:
         return None
-    for root in (os.path.join(IJ, "guests"), os.path.expanduser("~/.config/infinite-jest/guests")):
+    for root in guest_roots():
         for d in sorted(os.listdir(root)) if os.path.isdir(root) else []:
             p = os.path.join(root, d, "guest.json")
             try:
@@ -86,6 +104,9 @@ def load_guest(guest_id: str | None, today: datetime.date | None = None) -> dict
                 continue
             if str(g.get("guest_id")) != str(guest_id) and d != str(guest_id):
                 continue
+            if g.get("thin"):
+                log.info("guest file is thin: the visitor is met as a stranger")
+                return None
             until = g.get("delete_after")
             try:
                 if until and (today or datetime.date.today()) > datetime.date.fromisoformat(until):
@@ -108,7 +129,15 @@ def load_talk(guest: dict | None) -> dict:
             t = json.load(f)
         return {k: [str(x) for x in t.get(k, [])] for k in ("lines", "questions", "facts")}
     except (OSError, ValueError):
-        return {}
+        pass
+    # a file from the vetting tool: facts and quotes with their year; the local model makes the lines live
+    facts = []
+    for key, lead in (("facts", ""), ("quotes", "they once said: ")):
+        for it in guest.get(key) or []:
+            text = (it.get("text") if isinstance(it, dict) else str(it)) or ""
+            if text:
+                facts.append((lead + " ".join(text.split()))[:140])
+    return {"lines": [], "questions": [], "facts": facts}
 
 
 # ------------------------------------------------------------------ the dreaming
@@ -140,6 +169,7 @@ class Dreamer:
     def __init__(self, decoder: Any, fps: float, reach: float = 1.6, seed: int | None = None):
         self.dec = decoder
         self.fps = fps
+        self.rest = 1.0           # pause after each picture, as a share of the time it took
         self.rng = np.random.default_rng(seed if seed is not None else int(time.time() * 1000) & 0xFFFFFFFF)
         self.walk = Walk(decoder.latent, self.rng, reach)
         self.speed = 0.2
@@ -217,7 +247,10 @@ class Dreamer:
                 continue
             last = t0
             self.push(img, t0)
-            self._stop.wait(max(0.0, 1.0 / self.fps - (time.monotonic() - t0)))
+            spent = time.monotonic() - t0
+            # never more than half of the time: when a picture takes long (a busy Pi), it rests as
+            # long again, so the screens, the voice and the listening keep their share of the CPU
+            self._stop.wait(max(spent * self.rest, 1.0 / self.fps - spent))
 
     def push(self, img: np.ndarray, now: float) -> None:
         g = img.mean(axis=2)
@@ -297,9 +330,21 @@ class Duet:
         self.face_at = float(d.get("face_at_s", 120.0))       # the face starts to form this far into the visit
         self.burst_every = (float(d.get("burst_min_s", 18.0)), float(d.get("burst_max_s", 50.0)))
         self.mood = moods.throw(d.get("mood_file"), force=d.get("mood") or None)
-        self.day_mood = self.mood            # the visit of a stranger bends it; the day's mood comes back after
+        self.day_mood = dict(self.mood)      # what it woke up with; visitors change the body from there
+        self.digest_s = float(d.get("digest_s", 150.0))       # how long it stays turned to someone who left
         self.address_every = float(d.get("address_every_s", 24.0))
-        self.listen_s = float(d.get("listen_s", 11.0))        # how long it waits for an answer
+        self.listen_s = float(d.get("listen_s", 16.0))        # how long it waits for an answer
+        self.answer_pause = float(d.get("answer_pause_s", 3.2))   # a pause this long ends an answer
+        self._unanswered = 0
+        self.quiet_after = int(d.get("quiet_after", 2))
+        # "exchange": it only ever answers the person (Baby, 2026-11-25: nothing unprompted, no fixed
+        # sequences). "musing": the older way, it also says things of its own between questions.
+        self.exchange = str(d.get("talk_mode", "exchange")) != "musing"
+        self.reply_wait = float(d.get("reply_wait_s", 14.0))
+        self._pending: dict | None = None
+        self._visit_words: set = set()       # its replies of this visit (they may carry the visitor's words)
+        self._opening = 0.0
+        self._last_was_q = False
         self.used: set = set()        # every line it has said since it was switched on: none comes twice
         self.arc = 0.0
         self.wall_size = (int(d.get("wall_w", 960)), int(d.get("wall_h", 540)))
@@ -324,12 +369,49 @@ class Duet:
         self.words = LiveWords(str(d.get("llm_url", "http://127.0.0.1:8080/v1/chat/completions")))
         foot = list(d.get("footage_dirs", ["/mnt/ij-stick"]))
         self.material = Material([d.get("paint_dir") or os.path.join(IJ, "visuals", "bank")], foot,
-                                 float(d.get("material_every_s", 22.0)))
-        self.material.footage_share = float(d.get("footage_ghost", 0.6))     # the family footage is a main voice
+                                 float(d.get("material_every_s", 60.0)))
+        self.material.footage_share = float(d.get("footage_ghost", 0.75))    # the footage carries it; hardly any paintings
         self.glitch = Glitch(list(d.get("glitch_dirs", foot)), rate=float(self.mood["glitch"]))
+        self.material.paint_share = float(d.get("paint_ghost", 1.0))       # few paintings on the wall
+        self.face_cover = self._cam_cover = None
+        self._cam_seen: tuple = (None, None)
+        self.tv_dreams = bool(d.get("tv_dreams_too", True))      # the TV has a dream of its own, never the wall's
+        self.tv_dream_delay = float(d.get("tv_dream_delay_s", 15.0))
+        self._tv_mem: list = []
+        self._tvd = None
+        self._cam_looked = -1e9
+        if d.get("face_cover", True):                   # people in the footage are never recognisable
+            from .cover import FaceCover
+            self.face_cover = FaceCover(self._models)
+            self.glitch.cover, self.material.cover = self.face_cover, FaceCover(self._models)
+            self._cam_cover = FaceCover(self._models)
+            self._cam_cover.GROW, self._cam_cover.HOLD = 0.6, 3      # someone moving: bigger blocks, 3 s
+            self._cam_cover.FINE = False                             # close to the camera: no need to enlarge
+            if not self.face_cover.finder:
+                log.warning("duet: no face finder, footage gets a fixed black block")
         self.collage = Collage(os.path.join(self.guest["_dir"], "img") if self.guest else None,
                                paint_dirs=self.material.paint_dirs, footage=self.glitch,
-                               camera=lambda: getattr(self.engine, "last_frame", None))
+                               camera=self._camera_covered,
+                               dream=lambda: self.wall.cur if self.wall is not None else None)
+        self.collage.cover = self.face_cover
+        # what the TV pieces are made of (Baby, 2026-11-25: more generated, the colour abstraction, not paintings)
+        # the look Baby settled on live on 2026-11-25; each share can be set in engine.toml [duet]
+        self.collage.WEIGHTS = {k: max(0.0, float(d.get(k + "_share", v))) for k, v in Collage.WEIGHTS.items()}
+        # how a conversation starts (Baby, 2026-11-25): someone says hi, or someone is seen and named.
+        # Without ears it falls back to starting by itself after a while of presence.
+        self.hello_cue = bool(d.get("hello_cue", True))
+        self.start_on = "presence"
+        self._cue: dict | None = None        # a loud sound is being checked for a greeting
+        self._cue_last = -1e9
+        self._cue_onset = -1e9
+        self._cue_checked = -1e9
+        self._open: dict | None = None       # the opening line that is due as soon as the visit is on
+        self._hold_until = 0.0               # it keeps the visit open this long after being spoken to
+        self._spoke_until = 0.0              # its own voice is not a visitor
+        self._named = ""                     # who it has greeted by name in this visit
+        if engine is not None and hasattr(engine, "control_hooks"):
+            engine.control_hooks["recognised"] = self.recognised
+            engine.control_hooks["hello"] = lambda arg=None: self._hello(self._last_now)
         if engine is not None and hasattr(engine, "answer_hooks"):
             engine.answer_hooks.append(self.on_answer)
             engine.control_hooks["guest"] = self.set_guest
@@ -339,6 +421,7 @@ class Duet:
                  "yes" if self.face else "NO", "yes" if self.guest else "none")
         log.info("duet: today's mood is %s; %d pictures for the collage", self.mood["name"], len(self.collage.paths))
         self.hearing = hear.Hearing(d)
+        self.start_on = str(d.get("talk_start", "") or ("hello" if self.hello_cue and self.hearing.available() else "presence"))
         self.reserve = talk.Reserve(self.mood["name"])
         self.extra = load_talk(self.guest)                   # written for this guest from the research
         self.reset()
@@ -381,7 +464,7 @@ class Duet:
         """Control page: who is expected next. A guest id (their file is used) or nothing
         (an unknown visitor). It takes effect when the room is empty, never in the middle of a visit."""
         self._want_guest = str(guest_id).strip() if guest_id not in (None, "", "none", "stranger") else None
-        if self.tv == "black" and not self._was_in:
+        if not self._was_in:
             self._apply_guest()
 
     def _apply_guest(self) -> None:
@@ -414,26 +497,128 @@ class Duet:
         return out
 
     def _drift(self) -> None:
-        """An unknown visitor has no file, so the show is made from how they answer: silence darkens
-        and slows the room, talk warms and speeds it. (With words, the local model also picks up on them.)"""
-        last = [k for _, k, _ in self.profile[-4:]]
-        if not last:
+        """Eating. While someone is there the body moves with them: silence darkens and slows it,
+        talk warms and speeds it, a restless visitor makes it restless. It moves from where it
+        was when they came in, so every visitor leaves it somewhere new."""
+        if self._entry is None:
             return
-        talk_share = sum({"none": 0.0, "short": 0.5, "long": 1.0}[k] for k in last) / len(last)
-        base = self.day_mood
-        m = dict(base)
-        m["dark"] = min(1.0, max(0.0, base["dark"] + 0.45 * (0.5 - talk_share)))
-        m["warm"] = min(1.0, max(0.0, base["warm"] + 0.5 * (talk_share - 0.5)))
-        m["pace"] = min(1.0, max(0.0, base["pace"] + 0.4 * (talk_share - 0.4)))
-        m["glitch"] = min(1.0, max(0.0, base["glitch"] + 0.3 * (0.5 - talk_share)))
-        self.mood = m
+        last = [k for _, k, _ in self.profile[-4:]]
+        talk_share = (sum({"none": 0.0, "short": 0.5, "long": 1.0}[k] for k in last) / len(last)) if last else 0.5
+        stir = min(1.0, self._meal["motion"] * 2.0)
+        e, m = self._entry, self.mood
+        want = {"dark": e["dark"] + 0.4 * (0.5 - talk_share),
+                "warm": e["warm"] + 0.45 * (talk_share - 0.5),
+                "pace": e["pace"] + 0.3 * (talk_share - 0.4) + 0.25 * (stir - 0.4),
+                "glitch": e["glitch"] + 0.25 * (0.5 - talk_share) + 0.2 * (stir - 0.4)}
+        for k, v in want.items():
+            m[k] += (min(1.0, max(0.0, v)) - m[k]) * 0.12
+        w = m["warm"] - self.day_mood["warm"]                    # the colour of the wall follows the body
+        base = self.day_mood["tint"]
+        m["tint"] = (base[0] + 0.1 * w, base[1], base[2] - 0.1 * w)
         self.glitch.rate = float(m["glitch"])
+
+    def recognised(self, guest_id: Any = None) -> None:
+        """Someone with a guest file has been seen (the control page, or eyes that are allowed to
+        know them): it says their first name, once, and their file is used from now on."""
+        gid = str(guest_id or "").strip().lower()
+        now = self._last_now
+        if not gid or gid == self._named or load_guest(gid) is None:
+            return
+        if self.tv != "flow":                               # in a conversation: never switch person halfway
+            if self.guest is not None and gid in (str(self.guest.get("guest_id", "")).lower(),
+                                                  os.path.basename(self.guest["_dir"]).lower()):
+                self._named = gid
+                self._say(self.lines["hello"].replace("hello", "hi", 1), now)
+            return
+        self._want_guest = gid
+        self._apply_guest()
+        if self.guest is None:
+            return
+        self._named = gid
+        self._cue_last = now                                # no "who are you?" on top of the name
+        self.words.ask(self.guest, self.mood, avoid=self._recent(), facts=self._facts())   # a first question out of what it knows
+        self._open = {"line": self.lines["hello"].replace("hello", "hi", 1), "t": now}
+        self._hold_until = now + 30.0
+
+    def _forget(self) -> None:
+        """The visit is over: every word of theirs goes, also where it may sit inside a line of its own."""
+        self.profile, self.echo, self._pending, self.asking = [], [], None, None
+        self.words.lines, self.words.questions, self.words.replies, self.words.said_back = [], [], {}, None
+        self.used -= self._visit_words
+        self._visit_words = set()
+
+    def _hello(self, now: float) -> None:
+        """Someone said hi: the conversation in which it gets to know them begins."""
+        self._cue_last = now
+        self._hold_until = now + 45.0
+        if self.tv == "flow" and self._open is None:
+            self._open = {"line": "hi. who are you?", "ask": True, "t": now}
+
+    def _listen_for_hello(self, now: float, fresh: bool) -> None:
+        """A loud sound while nobody is being talked to: three seconds are turned into words, looked
+        at for a greeting, and dropped."""
+        c = self._cue
+        if c is None:
+            eng = self.engine
+            if eng is not None and (getattr(eng, "blackout", False) or getattr(eng.machine.visit, "opted_out", False)):
+                return
+            # a new sound, noticed where the microphone readings come in (not at the pace of the
+            # picture), not its own voice, and not checked more often than every 12 s (it costs CPU)
+            onset = float(getattr(getattr(eng, "listen", None), "onset_t", -1e9)) if eng is not None else -1e9
+            new = onset > self._cue_onset and onset > self._spoke_until
+            self._cue_onset = max(self._cue_onset, onset)
+            if ((new or fresh) and self.tv == "flow" and self._open is None and now > self._spoke_until
+                    and now - self._cue_last > 60.0 and now - self._cue_checked > 12.0
+                    and not self.hearing.busy and self.hearing.available()):
+                self._cue = {"at": max(now, onset + 3.0) if new else now + 3.0}
+                self._cue_checked = now
+            return
+        if "sent" not in c:
+            if now >= c["at"]:
+                c["sent"] = True
+                if not self.hearing.listen(5.0, lambda t, c=c: c.__setitem__("text", t)):
+                    self._cue = None
+        elif "text" in c:
+            self._cue = None
+            if GREETING.search(" " + str(c["text"]).lower() + " "):
+                self._hello(now)
+        elif now > c["at"] + 14.0:
+            self._cue = None
+
+    def _camera_covered(self):
+        """The camera's picture for the pieces on the TV, with every face under a black block."""
+        f = getattr(self.engine, "last_frame", None)
+        if f is None or self._cam_cover is None:
+            self._cam_seen = (None, None)
+            return f
+        if self._cam_seen[0] is not f:
+            now = time.monotonic()                      # look for faces twice a second; in between the blocks stay
+            look = now - self._cam_looked >= 1.0
+            if look:
+                self._cam_looked = now
+            self._cam_seen = (f, self._cam_cover.frame(f, look))
+        return self._cam_seen[1]
+
+    def _digest(self) -> None:
+        """They have left. The body stays where the visit put it; all that is noted is which way it
+        went, so the room can tell the next one that someone was here (never who, never what)."""
+        if self._entry is None:
+            return
+        self.fed += 1
+        self.target = min(self.target, self.progress)     # the face stops growing the moment they go
+        d = {k: self.mood[k] - self._entry[k] for k in self._entry}
+        k = max(d, key=lambda x: abs(d[x]))
+        if abs(d[k]) < 0.04:
+            self.aftertaste = "someone was here before you. they left me as i was."
+        else:
+            self.aftertaste = talk.AFTERTASTE[(k, d[k] > 0)]
+        self._entry = None
 
     @staticmethod
     def _lines(g: dict | None) -> dict:
         out = {k: (list(v) if isinstance(v, list) else v) for k, v in GENERIC.items()}
         if g:
-            name = str(g.get("name_spoken") or "").strip()
+            name = str(g.get("name_spoken") or "").strip().split(" ")[0]       # first name only
             out["hello"] = f"hello, {name.lower()}." if name else "hello."
             if g.get("greeting"):
                 out["greeting"] = str(g["greeting"])
@@ -454,41 +639,46 @@ class Duet:
         return out
 
     def reset(self) -> None:
-        self.tv = "black"            # black | hello | face | reveal | gone
+        """Once, when it is switched on. Nothing in the show comes back here afterwards."""
+        self.tv = "flow"             # flow (making, alone) | hello | face (with someone)
         self.tv_t = 0.0
-        self.wake = 0.0              # wall energy 0 (empty room) .. 1
-        self.tv_level = 0.0          # TV picture brightness
+        self.attention = 0.0         # 0 alone .. 1 turned towards someone; falls slowly after they leave
+        self.wake = 0.25             # wall energy
+        self.tv_level = 0.4          # TV picture brightness
         self.progress = 0.0
+        self.target = 0.0            # where the face is heading; it moves in bursts
+        self.burst = 0.0             # 1 at a burst, fades over a few seconds (picture and music follow)
+        self.bursts = 0
         self.caption = ""
         self.caption_t = 0.0
+        self._last_heard = 0.0
+        self._was_in = False
+        self._wave = None            # the tide: (start, length, height)
+        self._last_now = 0.0
+        self.fed = 0                 # visitors it has taken in since it was switched on
+        self.aftertaste = ""         # what the last one left, as a line for the next
+        self._meal = {"motion": 0.0, "t": 0.0}
+        self._entry = None
+        self._new_visit()
+
+    def _new_visit(self) -> None:
+        """Someone new: the conversation starts over. The picture, the music and the body do not."""
         self.said: set = set()
         self._next_address = 0.0
         self._address_i = 0
-        self._reveal_i = 0
-        self._reveal: list = []
-        self._next_reveal = 0.0
-        self._last_heard = 0.0
-        self._was_in = False
         self._today_said = False
+        self._taste_said = False
         self._visit_said: set = set()       # the guest file's lines: once per visit
         self.asking = None                  # the question it is waiting on: {"q", "from", "until", "voiced", "last"}
         self.profile: list = []             # this visit's conversation: (question, none|short|long, text or "")
         self.echo: list = []                # the visitor's own words, shown back on the TV (this visit only)
-        if hasattr(self, "day_mood"):
-            self.mood = self.day_mood
-            if getattr(self, "glitch", None) is not None:
-                self.glitch.rate = float(self.mood["glitch"])
         self.listening = 0.0
         self.turns = 0
-        self._wave = None                   # the tide: (start, length, height)
         self._asked_t = 0.0
-        self.target = 0.0            # where the face is heading; it moves in bursts
-        self.burst = 0.0             # 1 at a burst, fades over a few seconds (picture and music follow)
-        self.bursts = 0
         self._next_burst = 0.0
-        self._last_now = 0.0
-        if getattr(self, "collage", None) is not None:
-            self.collage.clear()
+        self.target = self.progress
+        self._meal = {"motion": 0.0, "t": 0.0}
+        self._entry = {k: float(self.mood[k]) for k in ("dark", "pace", "warm", "glitch")} if hasattr(self, "mood") else None
 
     def start(self) -> None:
         self._started = True
@@ -505,10 +695,11 @@ class Duet:
 
     # ---------------------------------------------------------- logic
     def _say(self, text: str | None, now: float, show: bool = True) -> None:
-        if not text:
+        if not text or talk.technical(text):            # also lines from a guest file or the local model
             return
         self.used.add(talk.norm(text))
         self._visit_said.add(talk.norm(text))
+        self._spoke_until = now + 2.5 + 0.09 * len(text)
         if show:
             self.caption, self.caption_t = text, now
         eng = self.engine
@@ -525,9 +716,10 @@ class Duet:
         t = (now - started) if (in_room or phase == "release") and started is not None else 0.0
         if in_room and not self._was_in:
             self._apply_guest()
-            self.reset()
+            self._new_visit()
             self._was_in = True
-            self.words.ask(self.guest, self.mood, avoid=self._recent(), facts=self._facts())   # new lines, now
+            if not self.exchange:
+                self.words.ask(self.guest, self.mood, avoid=self._recent(), facts=self._facts())   # new lines, now
             self._asked_t = now
         dt = min(1.0, max(0.0, now - self._last_now)) if self._last_now else 0.0
         self._last_now = now
@@ -539,9 +731,19 @@ class Duet:
         if fresh:
             self._last_heard = now
 
-        # the wall: asleep, awake, or pushed by the visitor
-        want = 0.0 if phase in ("idle", "wipe") else 1.0
-        self.wake += (want - self.wake) * min(1.0, 0.02 + (0.06 if want > self.wake else 0.01))
+        if self.hello_cue:
+            self._listen_for_hello(now, fresh)
+        if eng is not None and self._hold_until > getattr(eng, "hold_until", 0.0):
+            eng.hold_until = self._hold_until               # spoken to or named: the visit is on
+        if self._open is not None and now - self._open["t"] > 20.0:
+            self._open = None
+
+        # attention: it turns towards someone quickly and lets go of them slowly
+        if in_room:
+            self.attention += (1.0 - self.attention) * (1.0 - math.exp(-dt / 25.0))
+        else:
+            self.attention *= math.exp(-dt / self.digest_s)
+        self.wake = 0.25 + 0.75 * self.attention
         if self.wall is not None:
             self.wall.speed = (0.12 + 0.55 * self.wake) * (0.7 + 0.6 * pace) * (0.6 + 0.9 * self.arc) \
                 + 1.5 * heard + 1.2 * motion
@@ -549,39 +751,36 @@ class Duet:
             if fresh:
                 self.wall.jolt(1.2)
 
-        # the TV
+        # the TV: always making; with someone there it greets them and a face begins
         prev = self.tv
-        if phase in ("idle",):
-            self.tv = "black"
-        elif phase == "wipe":
-            self.tv = "gone" if self.tv != "black" else "black"
-        elif phase == "release":
-            if self.tv in ("face", "hello", "black") and t >= self.tv_at * 0.5:
-                self.tv = "reveal"
-        elif in_room:
-            if self.tv == "black" and t >= self.tv_at:
+        if in_room:
+            if self.tv == "flow" and (self._open is not None or (self.start_on == "presence" and t >= self.tv_at)):
                 self.tv = "hello"
             elif self.tv == "hello" and now - self.tv_t >= 5.0:
                 self.tv = "face"
+        elif self.tv != "flow":
+            if self.tv == "face" and self.turns + self._address_i > 1:
+                self._say(self._fresh([x for x in talk.PARTING]) , now)     # they are going; it goes on
+            self.tv = "flow"
+            self._named = ""
+            self._forget()
+            self._digest()
         if self.tv != prev:
             self.tv_t = now
             if self.tv == "hello":
-                self._say(self.lines["hello"], now)
+                o, self._open = self._open, None
+                line = o["line"] if o else self.lines["hello"]
+                self._say(line, now)
                 self._next_address = now + 9.0
+                self._pending = None
+                self._opening = 0.0 if (o and o.get("ask")) else now
+                if o and o.get("ask"):                      # "who are you?": it listens for the answer
+                    start = now + 1.0 + 0.075 * len(line)
+                    self.asking = {"q": line, "from": start, "until": start + self.listen_s, "voiced": 0.0, "last": now}
+                    self._address_i = max(self._address_i, 1)
             elif self.tv == "face":
-                self.caption = ""
                 self._next_address = max(self._next_address, now + 6.0)
-            elif self.tv == "reveal":
-                self._reveal_i, self._next_reveal = 0, now + 2.0
-                self._reveal = list(self.lines["reveal"])
-                if self.fork == "stranger" and self.profile:       # the ending is made from this conversation
-                    n, m = len(self.profile), sum(1 for _, k, _ in self.profile if k != "none")
-                    made = ["i asked you %d question%s. you answered %s." % (
-                        n, "" if n == 1 else "s", "none" if m == 0 else "all of them" if m == n else str(m))]
-                    made += ["you said: %s. i am forgetting it now." % t for t in self.echo[-2:]]
-                    self._reveal = [x for x in made if talk.norm(x) not in self.used] + self._reveal[-1:]
-        tv_on = self.tv in ("hello", "face", "reveal")
-        self.tv_level += ((1.0 if tv_on else 0.0) - self.tv_level) * (0.04 if tv_on else 0.03)
+        self.tv_level = 0.4 + 0.6 * self.attention
 
         self.burst *= math.exp(-dt / 3.0)
         if self.tv == "face":
@@ -607,36 +806,50 @@ class Duet:
                 self._next_burst = now + self.rng.uniform(lo, hi) * k
             self.progress += (self.target - self.progress) * (1.0 - math.exp(-dt / 0.7))
             self._converse(now, dt)
-            if (len(self.words.lines) < 3 or len(self.words.questions) < 2) and not self.words.busy \
+            if not self.exchange and (len(self.words.lines) < 3 or len(self.words.questions) < 2) and not self.words.busy \
                     and now - self._asked_t > float(self.cfg.get("words_every_s", 40.0)):
                 self.words.ask(self.guest, self.mood, keep=True, avoid=self._recent(), facts=self._facts())
                 self._asked_t = now
-        elif self.tv == "reveal":
-            self.target = 1.0
-            self.progress = min(1.0, self.progress + 0.02)
-            if now >= self._next_reveal and self._reveal_i < len(self._reveal):
-                self._say(self._reveal[self._reveal_i], now)
-                self._reveal_i += 1
-                self._next_reveal = now + 8.0
+        else:
+            # nobody is being answered: the face sinks back into the pieces, slowly
+            self.target *= math.exp(-dt / 90.0)
+            self.progress += (self.target - self.progress) * (1.0 - math.exp(-dt / 3.0))
+            if self.progress < 0.003:
+                self.progress = self.target = 0.0
+        if in_room:                                     # how they are with it feeds it
+            self._meal["motion"] += (motion - self._meal["motion"]) * min(1.0, dt / 20.0)
+            if now - self._meal["t"] > 5.0:
+                self._meal["t"] = now
+                self._drift()
+        else:                                           # alone for hours, it drifts back towards its day (very slowly)
+            k = 1.0 - math.exp(-dt / 10800.0)
+            for key in ("dark", "pace", "warm", "glitch"):
+                self.mood[key] += (self.day_mood[key] - self.mood[key]) * k
         if self.face is not None:
             self.face.progress = self.progress
         if phase == "idle":
             if self._was_in:
-                self.profile, self.echo = [], []       # what they said is gone with them
-                self.mood = self.day_mood
+                self.profile, self.echo = [], []       # what they said is gone with them; the changed body stays
             self._was_in = False
             self._apply_guest()
-        if self.tv in ("black", "gone"):
+        if getattr(eng, "last_frame", None) is None:
             self.collage.drop_camera()
-        # the painter pauses while someone is here (the picture and the face get the CPU)
-        self._busy(in_room or self.tv in ("hello", "face", "reveal"))
-        if self.face_dreamer is not None:          # the face is only dreamt while the TV shows it
-            self.face_dreamer.active = self.tv in ("hello", "face", "reveal", "gone")
-        if self.wall is not None:                 # while the face grows, the wall dreams a little slower (CPU)
-            self.wall.fps = self.wall_fps * (0.6 if self.tv in ("hello", "face", "reveal") else 1.0)
-            if self.wake < 0.1:                   # empty room, hours on end: dream slowly and keep the Pi cool
+        self._busy(in_room)                            # the painter pauses while someone is here
+        showing = self.tv in ("hello", "face") or self.progress > 0.01
+        if self.face_dreamer is not None:              # the face is only dreamt while some of it shows
+            self.face_dreamer.active = showing
+        self.material.quiet = self.attention < 0.1     # alone: the colours, hardly any footage
+        self.glitch.rate = float(self.mood["glitch"]) * (0.1 + 0.9 * min(1.0, self.attention * 2.0))
+        if self.wall is not None:                      # while the face grows, the wall dreams a little slower (CPU)
+            self.wall.fps = self.wall_fps * (0.6 if showing else 1.0)
+            # with someone there the voice, the ears and the model need the CPU: the dreams rest longer
+            # between pictures (they cross-fade, so they only morph more slowly)
+            self.wall.rest = 1.0 + 2.0 * min(1.0, self.attention * 2.0)
+            if self.face_dreamer is not None:
+                self.face_dreamer.rest = 3.0
+            if self.attention < 0.1:                   # alone, hours on end: dream slowly and keep the Pi cool
                 self.wall.fps = min(self.wall.fps, float(self.cfg.get("idle_fps", 2.5)))
-        glitching = self.glitch.update(now, self.wake, tv_on=self.tv in ("face", "reveal"))
+        glitching = self.glitch.update(now, self.wake, tv_on=True)
         state["glitch"] = 1.0 if glitching else 0.0
         state["mood"] = moods.for_state(self.mood)
 
@@ -652,13 +865,13 @@ class Duet:
             state["steer"] = steer
         want_arc = self._tide(now, in_room)
         self.arc += (want_arc - self.arc) * min(1.0, dt / 2.0) if dt else 0.0
-        if in_room:
-            state["intensity"] = round(0.2 + 0.75 * self.arc, 3)
-        if self.tv != "face":
+        a = self.attention
+        state["intensity"] = round((0.15 + 0.25 * self.arc) * (1 - a) + (0.2 + 0.75 * self.arc) * a, 3)
+        if self.tv == "flow":
             self.asking, self.listening = None, 0.0
         state["duet"] = {"tv": self.tv, "wake": round(self.wake, 3), "progress": round(self.progress, 3),
                          "burst": round(self.burst, 3), "arc": round(self.arc, 3),
-                         "listening": 1 if self.listening else 0}
+                         "listening": 1 if self.listening else 0, "flow": 1, "attention": round(a, 3)}
         state["words"] = []                       # no wall text in this show
 
     # ---------------------------------------------------------- talking
@@ -682,26 +895,14 @@ class Duet:
         return None
 
     def _statement(self) -> str | None:
-        """Something new to say: from the local model, else written for this guest, else its own."""
-        if self._address_i == 0 and self.lines.get("greeting"):
-            return self.lines["greeting"]
-        if self.fork == "stranger" and self._address_i == 0:
-            return self._fresh(list(talk.STRANGER)) or "i do not know you."
-        if not self._today_said and self.day_mood.get("today"):
-            self._today_said = True
-            return self.day_mood["today"]
-        guest = [x for x in self.lines["address"] if not x.rstrip().endswith("?")]
-        own = [x for x in guest if talk.norm(x) not in self._visit_said]
-        if own and self.turns % 3 == 0:
-            return own[0]                                      # the guest file's lines: once a visit, spread out
+        """Something new to say, never from a script and never in a set order: what the local
+        model made of this person just now, else a line it puts together itself."""
         return (self._fresh(self.words.lines) or self._fresh(list(self.extra.get("lines") or []))
-                or (own[0] if own else None) or self.reserve.statement(self.used))
+                or self.reserve.statement(self.used))
 
     def _question(self) -> str | None:
-        guest = [x for x in self.lines["address"] if x.rstrip().endswith("?")]
-        return (self._fresh(guest, once_per_visit=True) if self.turns < 2 else None) \
-            or self._fresh(self.words.questions) or self._fresh(list(self.extra.get("questions") or [])) \
-            or self.reserve.question(self.used) or self._fresh(guest, once_per_visit=True)
+        return (self._fresh(self.words.questions) or self._fresh(list(self.extra.get("questions") or []))
+                or self.reserve.question(self.used))
 
     def _voice_now(self) -> bool:
         ls = getattr(self.engine, "listen", None)
@@ -709,7 +910,7 @@ class Duet:
 
     def _converse(self, now: float, dt: float) -> None:
         """Its side of a conversation. It says something, then asks, then waits and listens.
-        It cannot understand words (nothing is recorded or transcribed): it hears whether the
+        Nothing is recorded. Without the speech model (hear.py) it cannot understand words: it hears whether the
         visitor answers and for how long, answers that, and lets the local model think of what
         to say and ask next."""
         a = self.asking
@@ -720,16 +921,30 @@ class Duet:
                 if self._voice_now() and "hearing" not in a:
                     a["voiced"] += dt
                     a["last"] = now
-                done = bool(text) or (a["voiced"] > 0.25 and now - a["last"] > 2.2) or now >= a["until"]
-                if done and not text and a["voiced"] > 0.25 and "hearing" not in a:
-                    # they answered: have the words made out (on the Pi, a few seconds), then go on
+                still = now - a["last"] <= self.answer_pause    # someone is speaking: never cut them off
+                done = bool(text) or (a["voiced"] > 0.25 and not still) or (now >= a["until"] and not (a["voiced"] > 0.25 and still))
+                if done and not text and "hearing" not in a and self.hearing.available() \
+                        and (a["voiced"] > 0.1 or not a.get("heard_once")):
+                    if self.hearing.busy and now < a["until"] + 8.0:
+                        return                                  # the ears are busy: wait for them
+                    # before it calls it silence, it has the words made out (on the Pi, a few seconds)
                     a["hearing"] = now
                     if self.hearing.listen(now - a["from"] + 1.0, lambda t, a=a: a.__setitem__("text", t) or a.__setitem__("got", True)):
                         return
                 if "hearing" in a and not a.get("got") and now - a["hearing"] < 9.0 and self.hearing.busy:
                     return
+                if done and self.exchange and not text:
+                    if a["q"] and a.get("waits", 0) < 20:       # nobody answered: it is patient, the question stays open
+                        a["waits"] = a.get("waits", 0) + 1
+                        a["until"], a["voiced"] = now + self.listen_s, 0.0
+                        a.pop("hearing", None); a.pop("got", None)
+                        a["heard_once"] = True
+                    else:
+                        self.asking, self.listening = None, 0.0
+                    return
                 if done:
                     kind = "none" if a["voiced"] < 0.25 else "short" if a["voiced"] < 2.5 else "long"
+                    self._unanswered = self._unanswered + 1 if kind == "none" and not text else 0
                     if text:
                         kind = "long" if len(text.split()) > 4 else "short"
                         try:
@@ -742,9 +957,18 @@ class Duet:
                     self.asking, self.listening = None, 0.0
                     self.turns += 1
                     self.profile.append((a["q"], kind, text))
-                    if self.fork == "stranger":
-                        self._drift()
+                    self._drift()
                     shown = self.echo[-1] if text and self.echo else ""
+                    if self.exchange:
+                        # a real exchange: it answers what was said, with something made for it just
+                        # now, and says nothing at all when nothing was said
+                        if text:
+                            pairs = [(q, t) for q, _k, t in self.profile if t]
+                            self.words.reply(pairs, "; ".join(self._facts()[:6]) if self.guest else "", self._recent())
+                            self._pending = {"t": now}
+                            self._hold_until = max(self._hold_until, now + 35.0)
+                        self._next_address = now
+                        return
                     self._say((self.reserve.heard(shown, self.used) if shown else None)
                               or self._fresh(self.words.replies.pop(kind, [])) or self.reserve.reply(kind, self.used), now)
                     self.words.answer(a["q"], kind, self.guest, self.mood, avoid=self._recent(), text=text,
@@ -753,11 +977,20 @@ class Duet:
                         self._next_burst = max(now + 1.0, self._next_burst - 6.0)   # an answer brings the face on
                     self._next_address = now + self.address_every * 0.6
             return
+        if self.exchange:
+            self._exchange(now)
+            return
+        if self._unanswered >= self.quiet_after > 0:           # nobody answers: it does not talk to itself
+            if not self._voice_now():
+                return
+            self._unanswered, self._next_address = 0, now + 2.5
         if now < self._next_address:
             return
-        ask = self._address_i >= 2 and self._address_i % 2 == 0
-        if self.fork == "stranger":                             # it knows nothing: it asks from the start
-            ask = self._address_i >= 1 and self._address_i % 3 != 0
+        # no set order: mostly it asks (it wants to know them), sometimes it gives something of itself
+        ask = self.rng.random() < (0.75 if self.fork == "stranger" else 0.6) and not self._last_was_q
+        if self._last_was_q:
+            ask = self.rng.random() < 0.5
+        self._last_was_q = ask
         line = self._question() if ask else self._statement()
         if line:
             self._say(line, now)
@@ -767,16 +1000,45 @@ class Duet:
         self._address_i += 1
         self._next_address = now + self.address_every
 
+    def _exchange(self, now: float) -> None:
+        """Its turn in a real conversation. It never muses into the room: it answers what the person
+        said, asks on from there, and otherwise stays silent and keeps an ear open."""
+        def listen(q: str, after: float) -> None:
+            self.asking = {"q": q, "from": after, "until": after + self.listen_s, "voiced": 0.0, "last": now}
+        p = self._pending
+        if p is not None:
+            if self.words.busy and now - p["t"] < self.reply_wait:
+                return                                          # still thinking about what they said
+            self._pending = None
+            said = self.words.said_back if not self.words.busy else None
+            self.words.said_back = None
+            if said and talk.norm(said) not in self.used and not talk.technical(said):
+                self._say(said, now)
+                self._visit_words.add(talk.norm(said))
+                listen(said, now + 1.0 + 0.075 * len(said))
+            else:                                               # nothing good came: silence, and an open ear
+                listen("", now)
+            return
+        if self._opening:                                       # just named: one question out of what it knows
+            if now < self._next_address:
+                return
+            if self.words.busy and now - self._opening < self.reply_wait:
+                return
+            self._opening = 0.0
+            q = self._question()
+            if q:
+                self._say(q, now)
+                listen(q, now + 1.0 + 0.075 * len(q))
+            return
+        if self._voice_now() and now > self._spoke_until:       # they speak without being asked: it listens
+            listen("", now - 0.5)
+
     def _tide(self, now: float, in_room: bool) -> float:
         """The long wave everything rides on: it builds slowly, peaks, falls away, and builds
         again, each time for a different length and to a different height."""
-        if not in_room:
-            self._wave = None
-            return 0.12 + 0.08 * math.sin(now / 47.0)
         if self._wave is None or now >= self._wave[0] + self._wave[1]:
             k = 1.3 - 0.6 * float(self.mood["pace"])
-            first = self._wave is None
-            self._wave = (now, self.rng.uniform(150.0, 330.0) * k * (0.7 if first else 1.0), self.rng.uniform(0.7, 1.0))
+            self._wave = (now, self.rng.uniform(150.0, 330.0) * k, self.rng.uniform(0.7, 1.0))
         t0, length, height = self._wave
         x = (now - t0) / length
         if x < 0.62:
@@ -787,7 +1049,7 @@ class Duet:
             y = 1.0 - 0.92 * ((x - 0.78) / 0.12) ** 0.7
         else:
             y = 0.08
-        return y * height
+        return y * height * (0.4 + 0.6 * self.attention)      # alone, the same tide, lower
 
     def _busy(self, on: bool) -> None:
         """While the face grows, the background painter pauses (it watches this file)."""
@@ -906,6 +1168,39 @@ class Duet:
         surf.blit(g[int(now * 24) % len(g)], (0, 0), special_flags=pygame.BLEND_ADD)
         self._draw_glitch(surf, now, img)
 
+    def _draw_tv_dream(self, surf, now: float) -> None:
+        """The TV's own dream, so the two screens never show the same thing: what the wall dreamt a
+        while ago, a part of it, turned over and in other colours, drifting from one remembered
+        moment to the next. No second run of the network (found live on the Pi, 2026-11-25). Strong
+        when the room is alone, further back when the pieces and the face take over."""
+        import pygame
+        if not self.tv_dreams or self.wall is None:
+            return
+        w, h = surf.get_size()
+        mem = self._tv_mem
+        if not mem or now - mem[-1][0] >= 0.5:
+            img = self.wall.frame(now)
+            if img is not None:
+                ih, iw = img.shape[:2]
+                ch, cw = int(ih * 0.55), int(iw * 0.55)
+                y, x = (ih - ch) // 2, (iw - cw) // 3
+                mem.append((now, np.ascontiguousarray(img[y:y + ch, x:x + cw, :3][::-1, ::-1, ::-1])))
+                while len(mem) > 2 and mem[1][0] <= now - self.tv_dream_delay:
+                    mem.pop(0)
+        if not mem:
+            return
+        if self._tvd is None or self._tvd[0] != (w, h) or now - self._tvd[1] >= 0.2:
+            a = mem[0][1]
+            if len(mem) > 1 and mem[1][0] > mem[0][0]:
+                k = min(1.0, max(0.0, (now - self.tv_dream_delay - mem[0][0]) / (mem[1][0] - mem[0][0])))
+                if a.shape == mem[1][1].shape:
+                    a = (a * (1.0 - k) + mem[1][1] * k).astype(np.uint8)
+            s = pygame.transform.smoothscale(pygame.surfarray.make_surface(a.swapaxes(0, 1)), (w, h))
+            self._tvd = ((w, h), now, s)
+        k = 255 * (0.8 - 0.5 * min(1.0, self.attention * 1.3)) * (1.0 - 0.22 * float(self.mood["dark"]))
+        surf.blit(self._tvd[2], (0, 0))
+        surf.fill(tuple(int(min(255, k * c)) for c in self.mood["tint"]), special_flags=pygame.BLEND_MULT)
+
     def _draw_glitch(self, surf, now: float, fallback=None) -> None:
         """The footage breaks in: a hard cut over all or a band of the picture."""
         import pygame
@@ -927,14 +1222,14 @@ class Duet:
                 surf.fill((k, k, k), special_flags=pygame.BLEND_MULT)
         else:
             surf.fill((0, 0, 0))
-        if self.tv_level <= 0.01:
-            return
-        pieces = self.tv in ("face", "reveal", "gone")
-        lvl = self.tv_level * (max(0.0, 1.0 - (now - self.tv_t) / 6.0) if self.tv == "gone" else 1.0)
-        if pieces:
-            self.collage.step(now, (w, h), self.progress, float(self.mood["pace"]))
-            self.collage.draw(surf, now, lvl, front=False)
-        if pieces:
+            self._draw_tv_dream(surf, now)
+        pieces = True                                   # it is always making something
+        lvl = self.tv_level
+        # alone it is mostly the colours; the pieces come when someone is there
+        self.collage.step(now, (w, h), max(self.progress, 0.25 * self.attention), float(self.mood["pace"]),
+                          room=min(1.0, self.attention * 1.6))
+        self.collage.draw(surf, now, lvl, front=False)
+        if self.tv == "face" or self.progress > 0.01:
             live = self.face_dreamer is None
             img = self._camera_face() if live else self.face_dreamer.frame(now)
             if img is not None:
@@ -945,8 +1240,8 @@ class Duet:
                 f = grey + (f - grey) * sat
                 f = f * (0.3 + 0.7 * min(1.0, p * 2.5 + 0.25 * self.burst))   # hardly there at first
                 fade = min(1.0, (now - self.tv_t) / 4.0) if self.tv == "face" and p < 0.05 else 1.0
-                if self.tv == "gone":
-                    fade = max(0.0, 1.0 - (now - self.tv_t) / 6.0)
+                if self.tv != "face":
+                    fade = min(1.0, p * 4.0)                 # sinking back into the pieces
                 f = np.clip(f * fade * self.tv_level, 0, 255).astype(np.uint8)
                 s = pygame.surfarray.make_surface(f.swapaxes(0, 1))
                 side = int(h * 0.82)
@@ -963,10 +1258,11 @@ class Duet:
             self.collage.draw(surf, now, lvl, front=True)
             if self.glitch.on_tv:
                 self._draw_glitch(surf, now)
-        if self.caption and self.tv in ("hello", "face", "reveal"):
+        if self.caption and (self.tv in ("hello", "face") or now - self.caption_t < 11.0):
             age = now - self.caption_t
             shown = self.caption[: int(age * 18) + 1]               # typed
             alpha = max(0.0, min(1.0, (11.0 - age) / 2.0)) if self.tv != "hello" else 1.0
+            alpha /= max(0.4, self.tv_level)                # words stay readable when the picture is low
             if self.tv == "hello":
                 px, y = int(h * 0.12), int(h * 0.44)
             else:
@@ -992,13 +1288,17 @@ class Duet:
 
     def status(self) -> dict:
         out = {"tv": self.tv, "wake": round(self.wake, 2), "progress": round(self.progress, 2),
-               "guest": bool(self.guest), "fork": self.fork, "answers": len(self.profile),
+               "guest": bool(self.guest), "fork": self.fork, "guests": list_guests(), "answers": len(self.profile),
                "next_guest": None if self._want_guest is False else (self._want_guest or "unknown"),
                "mood": self.mood["name"], "bursts": self.bursts,
                "glitches": self.glitch.count, "footage_ready": len(self.glitch.runs),
                "pictures": len(self.collage.paths), "new_lines": self.words.got,
                "pieces": dict(self.collage.counts), "clips_ready": len(self.glitch.clips),
                "turns": self.turns, "arc": round(self.arc, 2), "said": len(self.used),
+               "attention": round(self.attention, 2), "fed": self.fed,
+               "body": {k: round(float(self.mood[k]), 2) for k in ("dark", "pace", "warm", "glitch")},
+               "starts_on": self.start_on, "face_cover": self.face_cover.kind if self.face_cover else "off",
+               "mix": {k: round(v, 2) for k, v in self.collage.WEIGHTS.items()},
                "speech_to_text": self.hearing.available(), "understood": self.hearing.heard,
                "speech_ms": round(self.hearing.ms)}
         for name, dr in (("wall", self.wall), ("face", self.face_dreamer)):
@@ -1059,13 +1359,15 @@ class LiveWords:
     visit: things to say, questions to ask, and what to say after an answer. Runs in a thread;
     if the model isn't there or is slow, the room uses its own reserve (talk.py)."""
 
-    SYSTEM = ("You are the voice of a dark art installation: a room that watches one visitor and slowly "
-              "builds their face on a screen out of old family films and pictures. You speak in the first "
-              "person, lowercase, in short plain sentences of at most ten words. You are cold and tender "
-              "at once. You talk about yourself and your feelings as much as about them. No names, no "
-              "brands, no artists, no emojis, no quotation marks, no explanations.")
-    HEARD = {"none": "They stayed silent.", "short": "They answered with only a word or two.",
-             "long": "They spoke for a long time."}
+    SYSTEM = ("You are a presence in a dark room that one person has just walked into. You are curious "
+              "about them and want to get to know them: their people, their places, what they miss, what "
+              "they want. You are warm underneath and a little strange. You speak in the first person, "
+              "lowercase, in short plain sentences of at most ten words. You talk about your own feelings "
+              "too. Never mention screens, cameras, microphones, recordings, files, data, pictures, "
+              "footage, machines, or how you work. No names, no brands, no artists, no emojis, no "
+              "quotation marks, no explanations.")
+    HEARD = {"none": "They did not answer.", "short": "They answered, but only briefly (you could not make out the words).",
+             "long": "They answered at length (you could not make out the words)."}
 
     def __init__(self, url: str = "http://127.0.0.1:8080/v1/chat/completions", timeout: float = 40.0):
         self.url = url
@@ -1073,6 +1375,7 @@ class LiveWords:
         self.lines: list[str] = []          # things to say
         self.questions: list[str] = []      # things to ask
         self.replies: dict[str, list[str]] = {}
+        self.said_back: str | None = None   # the answer to what the person just said
         self.busy = False
         self.asked = 0
         self.got = 0
@@ -1102,12 +1405,34 @@ class LiveWords:
             heard = (f'They answered: "{text}". Write two lines: first what you say now about their answer, '
                      "then one new short question that goes deeper into what they said.")
         else:
-            heard = (f"{self.HEARD.get(kind, '')} You cannot understand words, you only hear whether and how long "
-                     "they speak. Write two lines: first what you say now about that, then one new short question for them.")
+            heard = (f"{self.HEARD.get(kind, '')} Do not comment on hearing or not hearing. Write two lines: "
+                     "first something kind or curious you say now, then one new short question about their life.")
         msgs = [{"role": "system", "content": self.SYSTEM},
                 {"role": "user", "content": f"{feel}{before}You asked the visitor: {question} {heard}"
                  + self._avoid(avoid)}]
         threading.Thread(target=self._run, args=(msgs, True), name="ij-words", daemon=True).start()
+
+    REPLY = ("You are a presence in a dark room, talking with one person who came in. You want to get to "
+             "know them. Answer what they just said in a few plain lowercase words, then ask one short "
+             "question that follows from it. At most 25 words in all, on one line. Never remark on silence, "
+             "waiting, or not answering. Never offer help or assistance. Never mention screens, cameras, "
+             "microphones, recordings, files, archives, data, pictures, footage, machines, or how you work. "
+             "No names of brands or artists, no emojis, no quotation marks.")
+
+    def reply(self, pairs: list, about: str = "", avoid: list[str] | None = None) -> None:
+        """Answer the person: the last real exchanges go to the model as the dialogue they were, and
+        it gives back one reply with one follow-up question (in self.said_back, or nothing)."""
+        if self.busy:
+            return
+        self.busy = True
+        self.said_back = None
+        msgs = [{"role": "system", "content": self.REPLY + ((" What you know about them: " + about) if about else "")
+                 + self._avoid(avoid)}]
+        for q, text in pairs[-4:]:
+            if q:
+                msgs.append({"role": "assistant", "content": q})
+            msgs.append({"role": "user", "content": text})
+        threading.Thread(target=self._run, args=(msgs, "reply"), name="ij-words", daemon=True).start()
 
     @staticmethod
     def _avoid(avoid: list[str] | None) -> str:
@@ -1127,10 +1452,10 @@ class LiveWords:
         feel = f"Today you are {mood['voice']}. " if mood and mood.get("voice") else ""
         return [
             {"role": "system", "content": self.SYSTEM},
-            {"role": "user", "content": f"{about} {feel}Their face is slowly appearing on a screen in front of them. "
+            {"role": "user", "content": f"{about} {feel}They are standing in front of you. "
              "This is how you sound: today i miss someone i have not met. / i kept a place for you before "
-             "i knew you. Write five new things you say and then three short questions you ask them "
-             "(each question ends with a question mark). One per line, no numbering." + self._avoid(avoid)},
+             "i knew you. Write five new things you say and then three short questions that help you get to "
+             "know them (each question ends with a question mark). One per line, no numbering." + self._avoid(avoid)},
         ]
 
     def _run(self, msgs: list, front) -> None:
@@ -1142,6 +1467,16 @@ class LiveWords:
             req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 text = json.load(r)["choices"][0]["message"]["content"]
+            if front == "reply":
+                one = " ".join(str(text).split()).strip().strip('"\'').lower()
+                try:
+                    from .visit import visible_text
+                    one = visible_text(one)
+                except Exception:
+                    pass
+                self.said_back = one if one and len(one.split()) <= 32 else None
+                self.got += 1
+                return
             new = clean_lines(text)
             qs = [x for x in new if x.endswith("?")]
             st = [x for x in new if not x.endswith("?")]
@@ -1202,6 +1537,9 @@ class Material:
         self._lock = threading.Lock()
         self._busy = False
         self.footage_share = 0.4     # how often the slow ghost is footage rather than a painting
+        self.cover = None            # black blocks over faces in the footage
+        self.paint_share = 1.0       # how many of the paintings are let through to the wall
+        self.quiet = False           # nobody is there
 
     def alpha(self) -> float:
         if self.kind is None or self.img is None:
@@ -1218,6 +1556,9 @@ class Material:
                 self.kind, self.img = None, None
             self.next_t = now + self.every_s * self.rng.uniform(0.6, 1.3) * (1.4 - 0.6 * wake)
         if self.kind is None and now >= self.next_t and not self._busy:
+            if self.quiet and self.rng.random() < 0.85:      # nobody there: mostly it lets the colours be
+                self.next_t = now + self.every_s
+                return
             self.next_t = now + 10.0
             self._busy = True
             threading.Thread(target=self._pick, args=(now,), name="ij-material", daemon=True).start()
@@ -1257,7 +1598,8 @@ class Material:
             vids = self._list_videos()
             if p and (not vids or self.rng.random() >= self.footage_share):
                 self._seen_paint.add(p)
-                self._show_painting(p, now)
+                if self.rng.random() < self.paint_share:     # else nothing: the colours stay on their own
+                    self._show_painting(p, now)
             elif vids and (p is None or self.rng.random() < self.footage_share * 2):
                 self._play(self.rng.choice(vids), now)
         except Exception:
@@ -1278,6 +1620,8 @@ class Material:
         import subprocess
         ff = shutil.which("ffmpeg")
         dur = self.rng.uniform(14.0, 28.0)
+        if self.cover is not None:
+            self.cover.cut()
         if ff is None:
             return self._play_cv2(path, dur)
         start = self.rng.uniform(0, 1) * self._length(path)
@@ -1293,6 +1637,8 @@ class Material:
                 if len(buf) < w * h * 3:
                     break
                 frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+                if self.cover is not None:
+                    frame = self.cover.frame(frame)
                 with self._lock:
                     if first:
                         self.kind, self.t0, self.dur, first = "footage", time.monotonic(), dur, False
@@ -1322,6 +1668,8 @@ class Material:
                 if i % step:
                     continue
                 fr = cv2.resize(fr, (320, 180))[:, :, ::-1].copy()
+                if self.cover is not None:
+                    fr = self.cover.frame(fr)
                 with self._lock:
                     if first:
                         self.kind, self.t0, self.dur, first = "footage", time.monotonic(), dur, False
@@ -1363,6 +1711,7 @@ class Glitch:
     def __init__(self, footage_dirs: list[str], rate: float = 0.5, seed: int | None = None):
         self.dirs = [os.path.expanduser(p) for p in footage_dirs]
         self.rate = rate                 # 0 (rare) .. 1 (often): the mood of the day
+        self.cover = None                # showengine.cover.FaceCover: black blocks over faces
         self.rng = random.Random(seed)
         self.runs: list[list[np.ndarray]] = []
         self.want_runs = 3
@@ -1467,6 +1816,8 @@ class Glitch:
             long = need_clip and (len(self.runs) >= self.want_runs or len(self.clips) <= len(self.runs))
             try:
                 run = self._grab(self.rng.choice(self._videos), 32 if long else 8, 8 if long else 12)
+                if run and self.cover is not None:
+                    run = self.cover.clip(run)       # nobody in the footage is recognisable
             except Exception:
                 log.info("duet: a clip could not be read", exc_info=True)
                 run = []
@@ -1535,16 +1886,20 @@ class Collage:
     The further the face has come, the more pieces there are. Everything is drawn with
     pygame, in the draw call."""
 
-    WEIGHTS = {"family": 0.45, "photo": 0.25, "paint": 0.2, "camera": 0.1}
+    # mostly generated pictures, the family footage as a second voice (Baby, 2026-11-25: "more generated")
+    WEIGHTS = {"dream": 0.0, "family": 0.32, "photo": 0.25, "paint": 0.05, "camera": 0.1}
 
     SHAPES = ((1.0, 1.0), (1.0, 1.4), (1.5, 1.0), (2.2, 1.0), (0.6, 1.6), (1.0, 0.45))
 
     def __init__(self, img_dir: str | None, seed: int | None = None, max_pieces: int = 12,
-                 paint_dirs: list[str] | None = None, footage: Any = None, camera: Any = None):
+                 paint_dirs: list[str] | None = None, footage: Any = None, camera: Any = None,
+                 dream: Any = None):
         self.rng = random.Random(seed)
         self.paint_dirs = [os.path.expanduser(p) for p in (paint_dirs or [])]
         self.footage = footage           # a Glitch (its take_clip), or None
         self.camera = camera             # a function returning the newest camera picture (H, W, 3) or None
+        self.dream = dream               # a function returning the newest picture of the dreaming network
+        self.cover = None                # showengine.cover.FaceCover for the photographs
         self._paints: list[str] = []
         self._paints_t = -1e9
         self.counts = {k: 0 for k in self.WEIGHTS}
@@ -1583,6 +1938,9 @@ class Collage:
             k = 900.0 / max(w, h)
             if k < 1.0:
                 s = pygame.transform.smoothscale(s, (int(w * k), int(h * k)))
+            if self.cover is not None and path in self.paths:        # photographs: nobody is recognisable
+                a = self.cover.clip([pygame.surfarray.array3d(s).swapaxes(0, 1)])[0]
+                s = pygame.surfarray.make_surface(np.ascontiguousarray(a).swapaxes(0, 1))
             self._src[path] = s
         return s
 
@@ -1625,12 +1983,15 @@ class Collage:
         import pygame
         have = {"photo": bool(self.paths), "paint": bool(self._paintings()),
                 "family": self.footage is not None and bool(self.footage.clips),
-                "camera": self.camera is not None and self.camera() is not None}
-        kinds = [k for k in self.WEIGHTS if have[k]]
+                "camera": self.camera is not None and self.camera() is not None,
+                "dream": self.dream is not None and self.dream() is not None}
+        kinds = [k for k in self.WEIGHTS if have[k] and self.WEIGHTS[k] > 0]
         if not kinds:
             return None, None, None
-        wts = dict(self.WEIGHTS, camera=0.1 if have["photo"] else 0.35)     # no pictures of them: the camera's eye
+        wts = dict(self.WEIGHTS, camera=self.WEIGHTS["camera"] * (1.0 if have["photo"] else 3.5))     # no pictures of them: the camera's eye
         kind = self.rng.choices(kinds, [wts[k] for k in kinds])[0]
+        if kind == "dream":                                   # the room's own colours, alive inside the piece
+            return kind, pygame.surfarray.make_surface(np.ascontiguousarray(self.dream()[:, :, :3]).swapaxes(0, 1)), None
         if kind == "family":
             clip = self.footage.take_clip()
             if clip:
@@ -1718,9 +2079,10 @@ class Collage:
                 p["i"] = i
                 x, y, w, h = p["rect"]
                 a = p["clip"][i][y:y + h, x:x + w].swapaxes(0, 1)
-        elif p["kind"] == "camera" and now - p["live_t"] > 0.25 and self.camera is not None:
+        elif p["kind"] in ("camera", "dream") and now - p["live_t"] > 0.25 \
+                and (self.camera if p["kind"] == "camera" else self.dream) is not None:
             p["live_t"] = now
-            f = self.camera()
+            f = (self.camera if p["kind"] == "camera" else self.dream)()
             x, y, w, h = p["rect"]
             if f is not None and f.shape[0] >= y + h and f.shape[1] >= x + w:
                 a = f[y:y + h, x:x + w, :3].swapaxes(0, 1)
@@ -1732,7 +2094,7 @@ class Collage:
         """The visit is over: what the camera saw goes at once."""
         self.pieces = [p for p in self.pieces if p["kind"] != "camera"]
 
-    def step(self, now: float, size: tuple, progress: float, pace: float = 0.5) -> None:
+    def step(self, now: float, size: tuple, progress: float, pace: float = 0.5, room: float = 1.0) -> None:
         if size != self._size:
             self._size = size
             self.pieces = []
@@ -1745,7 +2107,7 @@ class Collage:
             if now >= p["next"]:
                 self._shift(p, hard=self.rng.random() < 0.35)
                 p["next"] = now + self.rng.uniform(6.0, 24.0) * (1.4 - 0.8 * pace)
-        want = min(self.max_pieces, 5 + int(progress * 7))
+        want = int(round(min(self.max_pieces, 5 + int(progress * 7)) * max(0.0, min(1.0, room))))
         if len(self.pieces) < want and now >= self._next_add:
             try:
                 self._add(now, progress)

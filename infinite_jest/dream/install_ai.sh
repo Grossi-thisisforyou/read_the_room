@@ -147,6 +147,8 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 $GEN --anytime --theme mix --steps 1 --width 384 --height 384 --threads 2 --nice 15 --max-per-hook 80 --abort-after 900 --sd-bin /usr/local/bin/ij-sd --model $SDM $TAESD
 Nice=15
 CPUWeight=20
+# half speed: one core's worth for two threads, so it keeps painting without heating the Pi
+CPUQuota=${IJ_PAINT_CPU:-100}%
 IOSchedulingClass=idle
 Restart=on-failure
 RestartSec=60
@@ -158,5 +160,29 @@ EOF
   say "paintings: on (SD-Turbo, one picture at a time, new ones drift through the wall)"
 else
   say "paintings: off (no painting model yet)"
+fi
+# 6. guest files: delete the ones past their date, once a night (never during opening hours)
+if [[ -d $H/read_the_room/infinite_jest/vetter ]]; then
+  cat > /etc/systemd/system/ij-purge.service <<EOF
+[Unit]
+Description=Infinite Jest: delete guest files that are past their date
+[Service]
+Type=oneshot
+User=$WHO
+WorkingDirectory=$H/read_the_room
+ExecStart=/usr/bin/python3 -m infinite_jest.vetter --purge
+EOF
+  cat > /etc/systemd/system/ij-purge.timer <<EOF
+[Unit]
+Description=Infinite Jest: nightly clean-up of guest files
+[Timer]
+OnCalendar=*-*-* 04:30:00
+OnBootSec=3min
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload; systemctl enable --now ij-purge.timer >/dev/null 2>&1
+  say "guest files: cleaned up every night"
 fi
 exit 0
