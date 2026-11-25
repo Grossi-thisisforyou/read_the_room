@@ -12,6 +12,10 @@ def main(argv=None):
     ap.add_argument("--booked", help="booking date (required to research anyone)")
     ap.add_argument("--hint", action="append", default=[], help="something the guest told us: school, city, job")
     ap.add_argument("--url", action="append", default=[], help="a page the guest gave us as their own")
+    ap.add_argument("--export", action="append", default=[],
+                    help="the guest's own Instagram or Facebook download (zip or folder), handed over by them")
+    ap.add_argument("--years", type=int, default=1, help="how far back to read (terms: 1). 0 = no limit, "
+                    "only for someone who agreed to that")
     ap.add_argument("--group", choices=sorted(vet.rules.PRIORS))
     ap.add_argument("--no-model", action="store_true", help="word lists only, do not ask the local model")
     ap.add_argument("--dir", help="where guest files live")
@@ -33,7 +37,7 @@ def main(argv=None):
     model = None if a.no_model else llm.LocalModel()
     try:
         data, _ = vet.vet(a.name, web.Web(), hints=a.hint, urls=a.url, group=a.group, booked=a.booked,
-                          model=model, root=a.dir)
+                          model=model, root=a.dir, export=a.export, years=a.years)
     except ValueError as e:
         print("refused:", e, file=sys.stderr)
         return 2

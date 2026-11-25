@@ -39,6 +39,23 @@ Do not say "nothing leaves the room": a search engine sees the name.
 
 The Pi needs internet while it vets, and none while the show runs. Vet in advance, then unplug.
 
+## Instagram and Facebook: the owner hands over their own download
+
+The tool never logs in to a platform and never holds a password. A person who wants their
+Instagram or Facebook counted asks the platform for their own data (Accounts Center, "Download
+your information", format JSON), and gives the zip to the artist on a stick:
+
+```bash
+python3 -m infinite_jest.vetter "Full Name" --booked 2026-12-01 --export /media/stick/instagram.zip
+```
+
+It reads their own posts and captions, and counts likes and follows. It never opens messages,
+follower lists, contacts, ads or location files, and it does not keep the names of the
+accounts they follow. This is the data Cambridge Analytica's method ran on, given by its owner.
+
+`--years 1` is the default because the terms promise twelve months. `--years 0` reads
+everything and is only for a person who agreed to that (so far: the artist).
+
 ## What it will not do
 
 - Research anyone without a booking date (`--booked`), or from a first name alone.

@@ -5,6 +5,7 @@ import re
 import urllib.parse
 from collections import Counter
 
+from . import export as _export
 from . import rules, store
 
 MAX_PAGES = 12
@@ -41,7 +42,7 @@ def guess_group(hints, text):
 
 
 def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today=None,
-        delete_after="2026-12-23", root=None, write=True):
+        delete_after="2026-12-23", root=None, write=True, years=1, export=None):
     """Build and store one guest file. `booked` is the booking date and must be given:
     the tool refuses to research someone who has not booked."""
     if not booked:
@@ -87,7 +88,6 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
     all_text = ""
     for p in pages:
         all_text += p["text"][:6000] + "\n"
-        years = [int(y) for y in rules.YEAR.findall(p["text"])]
         follow = 0
         for s in sentences(p["text"]):
             norm = re.sub(r"\W+", " ", s.lower()).strip()
@@ -105,6 +105,9 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
             kind, w_src = rules.speaker(s, own_site=p["own"])
             y = [int(v) for v in rules.YEAR.findall(s)]
             year = max(y) if y else None
+            if years and year and year < today.year - years:
+                dropped["older than the terms allow"] += 1     # terms: twelve months back
+                continue
             w = round(w_src * rules.age_weight(year, today.year), 2)
             kept.append(s)
             found_cues = (model.cues(s) if model else None)
@@ -122,11 +125,47 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
             elif kind == "observer" and year and len(s) < 240:
                 facts.append({"text": s, "year": year, "source": p["url"]})
 
+    # 2b. the person's own platform download, if they handed one over
+    social = None
+    for path in ([export] if isinstance(export, str) else list(export or [])):
+        got = _export.read(path)
+        social = social or {"counts": Counter(), "themes": Counter()}
+        social["counts"].update(got["counts"])
+        social["themes"].update(got["themes"])
+        n_before = len(cues)
+        for text, year in got["posts"]:
+            for s in sentences(text) or [text[:400]]:
+                if rules.excluded_topic(s):
+                    dropped[rules.excluded_topic(s)] += 1
+                    continue
+                if years and year and year < today.year - years:
+                    dropped["older than the terms allow"] += 1
+                    continue
+                kept.append(s)
+                w = round(rules.age_weight(year, today.year), 2)
+                found_cues = (model.cues(s) if model else None)
+                if found_cues is None:
+                    found_cues = rules.lexicon_cues(s)
+                for trait, direction in found_cues:
+                    per_host[(trait, direction, f"own posts {year}")] += 1
+                    if per_host[(trait, direction, f"own posts {year}")] > 3:
+                        continue
+                    cues.append({"trait": trait, "dir": direction, "weight": w, "kind": "self", "year": year,
+                                 "source": "own download", "text": s[:200]})
+                if len(s) < 240:
+                    quotes.append({"text": s, "year": year, "source": "own download"})
+    if social:
+        social = {"counts": dict(social["counts"]), "themes": dict(social["themes"])}
+
     # 3. score with the tested rules
     group = group or guess_group(hints, all_text)
     ocean = rules.score(cues, group)
     order, room_counts = rules.rooms(kept)
-    thin = len(pages) < 2 or len(kept) < 8
+    if social:      # what they follow and like is taste: let it vote on the first room
+        for k, v in social["themes"].items():
+            room_counts[k] += v
+        order = sorted(room_counts, key=lambda k: -room_counts[k])
+    thin = len(kept) < 8 or (len(pages) < 2 and not social)
     data = {
         "name": name, "name_spoken": first, "method": "v2",
         "consent": {"research": True, "source": f"booking {booked}"},
@@ -139,6 +178,7 @@ def vet(name, web, hints=(), urls=(), group=None, booked=None, model=None, today
         "hook_second": order[1] if room_counts[order[1]] else None,
         "quotes": quotes[:12], "facts": sorted(facts, key=lambda f: -f["year"])[:15],
         "sources": [p["url"] for p in pages],
+        "social": social,
         "skipped_other_person": skipped,
         "dropped_by_topic": dict(dropped),
         "cues": cues[:80],
@@ -166,6 +206,11 @@ def markdown(d):
     L += ["## First room", "", f"{d['hook'] or 'none chosen'}" + (f", then {d['hook_second']}" if d["hook_second"] else ""), ""]
     L += ["## In their own words", ""] + [f"- \"{q['text']}\" ({q['year'] or 'undated'}, {q['source']})" for q in d["quotes"]] + [""]
     L += ["## Facts", ""] + [f"- {f['year']}: {f['text']} ({f['source']})" for f in d["facts"]] + [""]
+    if d.get("social"):
+        c = d["social"]["counts"]
+        L += ["## From their own download", "",
+              f"{c.get('posts', 0)} posts, {c.get('comments', 0)} comments, {c.get('likes', 0)} likes, "
+              f"{c.get('follows', 0)} follows. Names of accounts are not kept.", ""]
     L += ["## Pages read", ""] + [f"- {u}" for u in d["sources"]] + [""]
     if d["skipped_other_person"]:
         L += ["## Pages left out because they might be about someone else", ""] + [f"- {u}" for u in d["skipped_other_person"]] + [""]

@@ -14,11 +14,11 @@ OWN = """<html><head><title>Mara Lindqvist</title></head><body><nav>menu</nav>
 <p>My mother was a nurse and my father voted conservative.</p>
 <script>var x = "Mara Lindqvist secret";</script></body></html>"""
 PRESS = """<html><head><title>Mara Lindqvist, the fighter</title></head><body>
-<p>Mara Lindqvist performed in Malmo in 2024 and collaborated with a dance company on stage.</p>
+<p>Mara Lindqvist performed in Malmo in 2026 and collaborated with a dance company on stage.</p>
 <p>Mara Lindqvist plays a murderer in the new series, a cold and withdrawn character.</p>
 <p>"I kept going despite the rejection, and I laugh about it now," says Lindqvist in 2025.</p>
 <p>Lindqvist was treated for depression, the paper claims.</p>
-<p>Lindqvist completed her training in 2023, won a scholarship and organised a festival.</p></body></html>"""
+<p>Lindqvist completed her training in 2025, won a scholarship and organised a festival.</p></body></html>"""
 OTHER = """<html><head><title>Mara Lindqvist, dentist</title></head><body>
 <p>Mara Lindqvist runs a dental practice in Ohio and insulted a client in 2024.</p></body></html>"""
 
@@ -131,6 +131,33 @@ class Pipeline(unittest.TestCase):
         for q in w.queries:
             self.assertTrue(q.startswith('"Mara Lindqvist"'))
             self.assertNotIn("@", q)
+
+
+class Export(unittest.TestCase):
+    def make(self):
+        import zipfile
+        path = os.path.join(tempfile.mkdtemp(), "ig.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("your_instagram_activity/content/posts_1.json", json.dumps([
+                {"media": [{"title": "I rehearsed every day and performed on stage for a new audience tonight", "creation_timestamp": 1790000000}]},
+                {"media": [{"title": "My sister and I went to church together on a sunny day", "creation_timestamp": 1790000000}]},
+                {"media": [{"title": "I performed this old piece on stage long ago in another city", "creation_timestamp": 1400000000}]}]))
+            z.writestr("connections/followers_and_following/following.json", json.dumps(
+                {"relationships_following": [{"string_list_data": [{"value": "dance_archive", "timestamp": 1}]},
+                                             {"string_list_data": [{"value": "bodyworks", "timestamp": 1}]}]}))
+            z.writestr("your_instagram_activity/messages/inbox/a/message_1.json", json.dumps(
+                {"messages": [{"content": "private talk about Mara Lindqvist", "text": "this private message must never be read"}]}))
+        return path
+
+    def test_own_download_is_read_and_filtered(self):
+        data, md, _, _ = run(export=self.make(), today=datetime.date(2027, 1, 5))
+        blob = json.dumps(data) + md
+        self.assertIn("rehearsed every day", blob)
+        self.assertNotIn("private message", blob)       # messages are never opened
+        self.assertNotIn("sister", blob)                # family and religion dropped
+        self.assertNotIn("long ago", blob)              # older than the terms allow
+        self.assertNotIn("dance_archive", blob)         # names of followed accounts are not kept
+        self.assertEqual(data["social"]["counts"]["follows"], 2)
 
 
 class Store(unittest.TestCase):
