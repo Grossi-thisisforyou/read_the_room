@@ -1,0 +1,28 @@
+# Starts the show when the Pi powers on. install.sh fills in @USER@ and @DIR@.
+[Unit]
+Description=Infinite Jest show engine
+After=local-fs.target sound.target
+Wants=network-online.target
+# an unattended show never gives up: keep restarting (every RestartSec) however often it crashes
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+User=@USER@
+Group=@USER@
+SupplementaryGroups=video render input audio
+WorkingDirectory=@DIR@
+Environment=PYTHONUNBUFFERED=1
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_AUDIODRIVER=alsa
+Environment=IJ_CONFIG=@HOME@/.config/infinite-jest/engine.toml
+ExecStart=/usr/bin/python3 -m showengine
+Restart=always
+RestartSec=3
+# the frame loop pings systemd every 2 s (showengine/sdnotify.py); if it freezes for
+# 60 s (a hung plugin, a stuck driver) systemd kills it and the restart above brings it back
+WatchdogSec=60
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target
